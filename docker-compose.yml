@@ -1,0 +1,45 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: ${DB_NAME:-kobofx}
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_SUPERUSER_PASSWORD:-postgres_dev_password}
+      FX_OWNER_PASSWORD: ${DB_MIGRATION_PASSWORD:-fx_owner_dev_password}
+      FX_APP_PASSWORD: ${DB_APP_PASSWORD:-fx_app_dev_password}
+      TZ: UTC
+      PGTZ: UTC
+    ports:
+      - '${DB_PORT:-5432}:5432'
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./docker/postgres/roles.sql:/opt/kobofx/roles.sql:ro
+      - ./docker/postgres/init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U postgres -d ${DB_NAME:-kobofx}']
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  redis:
+    image: redis:7-alpine
+    command: ['redis-server', '--appendonly', 'yes']
+    ports:
+      - '${REDIS_PORT:-6379}:6379'
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  mailhog:
+    image: mailhog/mailhog:v1.0.1
+    ports:
+      - '${SMTP_PORT:-1025}:1025' # SMTP
+      - '${MAILHOG_UI_PORT:-8025}:8025' # Web UI
+
+volumes:
+  pgdata:
+  redisdata:

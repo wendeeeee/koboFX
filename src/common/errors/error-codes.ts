@@ -1,0 +1,39 @@
+/**
+ * Stable error codes (design §12.1). Clients branch on these, never on prose, so a
+ * code is never renamed or reused once shipped. Add new codes; don't edit old ones.
+ */
+export enum ErrorCode {
+  // 400 — the request itself is wrong
+  VALIDATION_FAILED = 'VALIDATION_FAILED',
+  INVALID_AMOUNT = 'INVALID_AMOUNT',
+  UNSUPPORTED_CURRENCY = 'UNSUPPORTED_CURRENCY',
+  SAME_CURRENCY = 'SAME_CURRENCY',
+
+  // 401 / 403 / 404
+  UNAUTHENTICATED = 'UNAUTHENTICATED',
+  FORBIDDEN = 'FORBIDDEN',
+  NOT_FOUND = 'NOT_FOUND',
+
+  // 409 — conflicts with current state
+  INSUFFICIENT_FUNDS = 'INSUFFICIENT_FUNDS',
+  FUNDS_RESERVED = 'FUNDS_RESERVED',
+  QUOTE_EXPIRED = 'QUOTE_EXPIRED',
+  QUOTE_ALREADY_USED = 'QUOTE_ALREADY_USED',
+  IDEMPOTENCY_KEY_REUSE = 'IDEMPOTENCY_KEY_REUSE',
+  REQUEST_IN_PROGRESS = 'REQUEST_IN_PROGRESS',
+
+  // 413 / 422 / 429
+  PAYLOAD_TOO_LARGE = 'PAYLOAD_TOO_LARGE',
+  AMOUNT_TOO_SMALL = 'AMOUNT_TOO_SMALL',
+  RATE_LIMITED = 'RATE_LIMITED',
+
+  // 503 — transient; retry with the same idempotency key
+  RESOURCE_BUSY = 'RESOURCE_BUSY',
+  FX_RATE_STALE = 'FX_RATE_STALE',
+  FX_RATE_UNAVAILABLE = 'FX_RATE_UNAVAILABLE',
+
+  // 500 — our bug. Fail loudly.
+  INVARIANT_VIOLATION = 'INVARIANT_VIOLATION',
+  INTERNAL_ERROR = 'INTERNAL_ERROR',
+  HTTP_ERROR = 'HTTP_ERROR',
+}
