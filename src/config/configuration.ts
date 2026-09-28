@@ -22,6 +22,15 @@ export interface DatabaseConfig {
   readonly statementTimeoutMs: number;
 }
 
+export interface LedgerConfig {
+  /**
+   * Rows per internal (system) account per currency (design §6.6). Raising it is
+   * config plus re-running provisioning; lowering it is refused at provisioning,
+   * because balances in the higher buckets would become unreachable.
+   */
+  readonly internalAccountBuckets: number;
+}
+
 export interface AppConfig {
   readonly env: NodeEnv;
   readonly port: number;
@@ -29,6 +38,7 @@ export interface AppConfig {
   readonly db: DatabaseConfig;
   readonly redisUrl: string;
   readonly rounding: RoundingConfig;
+  readonly ledger: LedgerConfig;
 }
 
 const strategies = Object.values(RoundingStrategy);
@@ -54,6 +64,9 @@ const envSchema = Joi.object({
   REDIS_URL: Joi.string()
     .uri({ scheme: ['redis', 'rediss'] })
     .required(),
+
+  // accounts.bucket is SMALLINT.
+  LEDGER_INTERNAL_BUCKETS: Joi.number().integer().min(1).max(1024).default(64),
 
   // No defaults: rounding is a business decision, and a missing one must not be
   // silently filled in (design §4.4).
@@ -111,6 +124,9 @@ export function loadConfig(raw: NodeJS.ProcessEnv | Record<string, string | unde
       [RoundingPurpose.USER_CREDIT]: env.ROUNDING_USER_CREDIT,
       [RoundingPurpose.REVENUE]: env.ROUNDING_REVENUE,
       [RoundingPurpose.FEE]: env.ROUNDING_FEE,
+    },
+    ledger: {
+      internalAccountBuckets: env.LEDGER_INTERNAL_BUCKETS,
     },
   };
 }

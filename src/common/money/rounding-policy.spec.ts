@@ -15,7 +15,10 @@ const exactDecimal: fc.Arbitrary<Dec> = fc
   .tuple(fc.bigInt({ min: INT64_MIN, max: INT64_MAX }), fc.integer({ min: 0, max: 12 }))
   .map(([n, scale]) => dec(n).div(new MoneyDecimal(10).pow(scale)));
 
-const nonNegative = exactDecimal.map((d) => d.abs());
+/** |n| for n in [−INT64_MAX, INT64_MAX]: |INT64_MIN| = 2^63 would not fit BIGINT. */
+const nonNegative: fc.Arbitrary<Dec> = fc
+  .tuple(fc.bigInt({ min: 0n, max: INT64_MAX }), fc.integer({ min: 0, max: 12 }))
+  .map(([n, scale]) => dec(n).div(new MoneyDecimal(10).pow(scale)));
 
 const CONFIG: RoundingConfig = {
   [RoundingPurpose.USER_CREDIT]: RoundingStrategy.ROUND_DOWN,

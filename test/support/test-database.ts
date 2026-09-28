@@ -17,6 +17,8 @@ export interface TestDatabase {
   ownerClient(): Promise<Client>;
   /** A raw client as the runtime role — what the application actually connects as. */
   appClient(): Promise<Client>;
+  /** The container's superuser — for tamper tests that must get past triggers and grants. */
+  superuserClient(): Promise<Client>;
   stop(): Promise<void>;
 }
 
@@ -78,6 +80,11 @@ export async function startTestDatabase(overrides: Record<string, string> = {}):
     env,
     ownerClient: () => connect('fx_owner', OWNER_PASSWORD),
     appClient: () => connect('fx_app', APP_PASSWORD),
+    superuserClient: async () => {
+      const client = new Client({ connectionString: container.getConnectionUri() });
+      await client.connect();
+      return client;
+    },
     stop: async () => {
       await container.stop();
     },

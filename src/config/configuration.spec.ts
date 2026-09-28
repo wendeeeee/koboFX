@@ -40,6 +40,13 @@ describe('loadConfig', () => {
     });
   });
 
+  it('defaults the ledger to 64 internal account buckets (design §6.6) and bounds it to SMALLINT use', () => {
+    expect(loadConfig(VALID).ledger.internalAccountBuckets).toBe(64);
+    expect(loadConfig({ ...VALID, LEDGER_INTERNAL_BUCKETS: '8' }).ledger.internalAccountBuckets).toBe(8);
+    expect(problemsOf({ ...VALID, LEDGER_INTERNAL_BUCKETS: '0' }).join()).toContain('LEDGER_INTERNAL_BUCKETS');
+    expect(problemsOf({ ...VALID, LEDGER_INTERNAL_BUCKETS: '1025' }).join()).toContain('LEDGER_INTERNAL_BUCKETS');
+  });
+
   it('fails fast and reports EVERY problem at once', () => {
     const problems = problemsOf({ NODE_ENV: 'test' });
     for (const key of ['DB_HOST', 'DB_NAME', 'DB_APP_USER', 'REDIS_URL', 'ROUNDING_USER_CREDIT']) {
