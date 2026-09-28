@@ -1,5 +1,6 @@
 import fc from 'fast-check';
-import { AuthorizationOutcome, authorizeReduction } from './authorization';
+import { ErrorCode } from '../../../common/errors';
+import { AuthorizationOutcome, assertReductionAuthorized, authorizeReduction } from './authorization';
 
 const funds = (balanceMinor: bigint, reservedMinor = 0n, overdraftLimitMinor = 0n) => ({
   balanceMinor,
@@ -49,6 +50,34 @@ describe('authorization gate (design §6.2)', () => {
         else if (totalAfter >= -limit) expect(outcome).toBe(AuthorizationOutcome.FUNDS_RESERVED);
         else expect(outcome).toBe(AuthorizationOutcome.INSUFFICIENT_FUNDS);
       }),
+    );
+  });
+});
+
+describe('assertReductionAuthorized — the gate as a guard', () => {
+  it('passes an authorized reduction', () => {
+    expect(() => assertReductionAuthorized('acct', funds(1_000n, 300n), 700n)).not.toThrow();
+  });
+
+  it('raises FUNDS_RESERVED with the figures the client needs', () => {
+    expect(() => assertReductionAuthorized('acct', funds(1_000n, 300n), 800n)).toThrow(
+      expect.objectContaining({
+        code: ErrorCode.FUNDS_RESERVED,
+        details: {
+          accountId: 'acct',
+          requestedMinor: '800',
+          balanceMinor: '1000',
+          reservedMinor: '300',
+          availableMinor: '700',
+          overdraftLimitMinor: '0',
+        },
+      }),
+    );
+  });
+
+  it('raises INSUFFICIENT_FUNDS when even the total balance cannot cover it', () => {
+    expect(() => assertReductionAuthorized('acct', funds(1_000n, 300n), 1_001n)).toThrow(
+      expect.objectContaining({ code: ErrorCode.INSUFFICIENT_FUNDS }),
     );
   });
 });

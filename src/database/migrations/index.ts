@@ -5,6 +5,7 @@ import { CreateAccounts1790553600002 } from './1790553600002-CreateAccounts';
 import { CreateTransactions1790553600003 } from './1790553600003-CreateTransactions';
 import { CreateLedgerEntries1790553600004 } from './1790553600004-CreateLedgerEntries';
 import { CreatePeriodLocks1790553600005 } from './1790553600005-CreatePeriodLocks';
+import { CreateReservations1790640000000 } from './1790640000000-CreateReservations';
 
 /** Explicit, ordered list — no globbing, so the CLI and the test harness run the same set. */
 export const MIGRATIONS = [
@@ -15,4 +16,5 @@ export const MIGRATIONS = [
   CreateTransactions1790553600003,
   CreateLedgerEntries1790553600004,
   CreatePeriodLocks1790553600005,
+  CreateReservations1790640000000,
 ];

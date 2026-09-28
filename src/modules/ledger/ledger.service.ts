@@ -11,8 +11,6 @@ import {
   AccountCurrencyMismatchError,
   AccountNotFoundError,
   AlreadyCorrectedError,
-  FundsReservedError,
-  InsufficientFundsError,
   InvalidPostingError,
   PeriodLockedError,
   ReversalMismatchError,
@@ -29,7 +27,8 @@ import {
   TransactionStatus,
   TransactionType,
 } from './ledger.types';
-import { AccountFunds, AuthorizationOutcome, authorizeReduction } from './posting/authorization';
+import { LockedAccount, lockBalanceAuthorizingAccounts } from './account-locks';
+import { assertReductionAuthorized } from './posting/authorization';
 import { bucketForTransaction, systemAccountCode } from './posting/bucket';
 import { validatePostingRequest } from './posting/posting-validation';
 import { oppositeDirection, signedBalanceChange } from './posting/sign';
@@ -76,8 +75,10 @@ export interface ReversalOptions {
  *  4. Lock, in this global order — so no two postings can wait on each other in a
  *     cycle:
  *       a. the original transaction, for a correction or reversal;
- *       b. balance-authorizing (user) accounts: `SELECT … ORDER BY id FOR UPDATE`;
- *       c. internal accounts, by blind `UPDATE … RETURNING`, also in id order.
+ *       b. balance-authorizing (user) accounts: `SELECT … ORDER BY id FOR UPDATE`
+ *          (`lockBalanceAuthorizingAccounts`, which guards the order across calls);
+ *       c. reservation rows — taken by `ReservationService`, never here;
+ *       d. internal accounts, by blind `UPDATE … RETURNING`, also in id order.
  *  5. For a user-initiated posting, authorize every net reduction of a user account
  *     against `available = balance − reserved` plus the overdraft limit.
  *     System-driven postings skip the gate: they may drive an account negative, and
@@ -113,7 +114,10 @@ export class LedgerService {
         await this.lockCorrectableOriginal(manager, draft, entries);
       }
 
-      const lockedFunds = await this.lockBalanceAuthorizingAccounts(manager, entries);
+      const lockedFunds = await lockBalanceAuthorizingAccounts(
+        manager,
+        entries.filter((entry) => entry.account.authorizesBalance).map((entry) => entry.account.id),
+      );
       if (draft.authorization === PostingAuthorization.USER_INITIATED) {
         this.authorize(entries, lockedFunds);
       }
@@ -135,6 +139,18 @@ export class LedgerService {
         entries: postedEntries,
       };
     });
+  }
+
+  /**
+   * Lock user (balance-authorizing) accounts `FOR UPDATE` in id order inside the
+   * ambient transaction, and return their funds. For a unit of work that spans several
+   * calls — e.g. reserve → settle of a conversion touching two user accounts — lock the
+   * whole set here FIRST: later calls re-lock held rows for free, while newly locking a
+   * lower id after a higher one raises (see `lockBalanceAuthorizingAccounts`). Read and
+   * lock only; the write path is still `post()`.
+   */
+  async lockUserAccounts(accountIds: readonly string[]): Promise<Map<string, LockedAccount>> {
+    return lockBalanceAuthorizingAccounts(this.unitOfWork.requireTransaction(), accountIds);
   }
 
   /**
@@ -299,40 +315,12 @@ export class LedgerService {
     }
   }
 
-  private async lockBalanceAuthorizingAccounts(
-    manager: EntityManager,
-    entries: readonly ResolvedEntry[],
-  ): Promise<Map<string, AccountFunds>> {
-    const ids = [...new Set(entries.filter((e) => e.account.authorizesBalance).map((e) => e.account.id))];
-    const funds = new Map<string, AccountFunds>();
-    if (ids.length === 0) return funds;
-    const rows = (await manager.query(
-      `SELECT id,
-              balance_minor::text         AS balance_minor,
-              reserved_minor::text        AS reserved_minor,
-              overdraft_limit_minor::text AS overdraft_limit_minor
-         FROM accounts
-        WHERE id = ANY($1::uuid[])
-        ORDER BY id
-          FOR UPDATE`,
-      [ids],
-    )) as { id: string; balance_minor: string; reserved_minor: string; overdraft_limit_minor: string }[];
-    for (const row of rows) {
-      funds.set(row.id, {
-        balanceMinor: BigInt(row.balance_minor),
-        reservedMinor: BigInt(row.reserved_minor),
-        overdraftLimitMinor: BigInt(row.overdraft_limit_minor),
-      });
-    }
-    return funds;
-  }
-
   /**
    * The runtime `balance >= 0` invariant (design §6.2). Applied to each user
    * account's NET change in this posting, so a posting that debits and credits the
    * same account is judged on what it actually does to the balance.
    */
-  private authorize(entries: readonly ResolvedEntry[], lockedFunds: Map<string, AccountFunds>): void {
+  private authorize(entries: readonly ResolvedEntry[], lockedFunds: Map<string, LockedAccount>): void {
     const netChange = new Map<string, bigint>();
     for (const { account, draft } of entries) {
       if (!account.authorizesBalance) continue;
@@ -347,20 +335,7 @@ export class LedgerService {
           accountId,
         });
       }
-      const outcome = authorizeReduction(funds, -change);
-      if (outcome === AuthorizationOutcome.AUTHORIZED) continue;
-      const details = {
-        accountId,
-        requestedMinor: (-change).toString(),
-        balanceMinor: funds.balanceMinor.toString(),
-        reservedMinor: funds.reservedMinor.toString(),
-        availableMinor: (funds.balanceMinor - funds.reservedMinor).toString(),
-        overdraftLimitMinor: funds.overdraftLimitMinor.toString(),
-      };
-      if (outcome === AuthorizationOutcome.FUNDS_RESERVED) {
-        throw new FundsReservedError('Part of the balance is reserved by another operation.', details);
-      }
-      throw new InsufficientFundsError('The balance cannot cover this debit.', details);
+      assertReductionAuthorized(accountId, funds, -change);
     }
   }
 

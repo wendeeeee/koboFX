@@ -7,6 +7,7 @@ import { AppConfig } from './config/configuration';
 import { DatabaseModule } from './database/database.module';
 import { CurrenciesModule } from './modules/currencies/currencies.module';
 import { LedgerModule } from './modules/ledger/ledger.module';
+import { ReservationsModule } from './modules/reservations/reservations.module';
 
 /** Log hygiene (design §9.1): secrets and OTPs never reach the log. */
 const REDACT_PATHS = [
@@ -47,6 +48,7 @@ export class AppModule {
         MoneyModule,
         CurrenciesModule,
         LedgerModule,
+        ReservationsModule,
       ],
     };
   }
