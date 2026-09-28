@@ -62,6 +62,42 @@ export class ResourceBusyError extends DomainError {
   override readonly retryAfterSeconds = 1;
 }
 
+/** No valid credentials were presented. Deliberately says nothing about which part failed. */
+export class UnauthenticatedError extends DomainError {
+  readonly code = ErrorCode.UNAUTHENTICATED;
+  readonly httpStatus = 401;
+}
+
+/** Authenticated, but not allowed to do this. */
+export class ForbiddenError extends DomainError {
+  readonly code = ErrorCode.FORBIDDEN;
+  readonly httpStatus = 403;
+}
+
+/** Too many requests (design §9.1). Transient: retry after `retryAfterSeconds`. */
+export class RateLimitedError extends DomainError {
+  readonly code = ErrorCode.RATE_LIMITED;
+  readonly httpStatus = 429;
+  override readonly permanent = false;
+  override readonly retryAfterSeconds: number;
+
+  constructor(retryAfterSeconds: number) {
+    super('Too many requests. Retry after the time given in the Retry-After header.', { retryAfterSeconds });
+    this.retryAfterSeconds = retryAfterSeconds;
+  }
+}
+
+/**
+ * A dependency we cannot work without is unreachable (e.g. Redis for one-time
+ * passwords). Fail closed (design §7.1, §16): refuse, never bypass. Transient.
+ */
+export class DependencyUnavailableError extends DomainError {
+  readonly code = ErrorCode.DEPENDENCY_UNAVAILABLE;
+  readonly httpStatus = 503;
+  override readonly permanent = false;
+  override readonly retryAfterSeconds = 5;
+}
+
 /**
  * A broken assumption in our own code — never the client's fault. Raised loudly
  * instead of clamping, skipping, or guessing ("fail loudly on broken assumptions").

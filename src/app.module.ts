@@ -1,5 +1,9 @@
 import { DynamicModule, Module, RequestMethod } from '@nestjs/common';
+import { APP_GUARD } from '@nestjs/core';
 import { LoggerModule } from 'nestjs-pino';
+import type { DestinationStream } from 'pino';
+import { ClockModule } from './common/clock';
+import { JwtAuthGuard, RateLimitGuard, RolesGuard, VerifiedUserGuard } from './common/guards';
 import { MoneyModule } from './common/money/money.module';
 import { RequestWithCorrelation } from './common/context';
 import { APP_CONFIG, ConfigModule } from './config/config.module';
@@ -7,7 +11,11 @@ import { AppConfig } from './config/configuration';
 import { DatabaseModule } from './database/database.module';
 import { CurrenciesModule } from './modules/currencies/currencies.module';
 import { LedgerModule } from './modules/ledger/ledger.module';
+import { AuthModule } from './modules/auth/auth.module';
+import { HealthModule } from './modules/health/health.module';
+import { NotificationsModule } from './modules/notifications/notifications.module';
 import { ReservationsModule } from './modules/reservations/reservations.module';
+import { RedisModule } from './redis/redis.module';
 
 /** Log hygiene (design §9.1): secrets and OTPs never reach the log. */
 const REDACT_PATHS = [
@@ -16,6 +24,8 @@ const REDACT_PATHS = [
   'req.headers["x-webhook-signature"]',
   '*.password',
   '*.otp',
+  '*.oneTimePassword',
+  '*.passwordHash',
   '*.token',
   '*.accessToken',
   '*.refreshToken',
@@ -23,32 +33,58 @@ const REDACT_PATHS = [
   '*.cvv',
 ];
 
+export interface AppModuleOptions {
+  /** Where logs go (default stdout). Tests capture them to prove log hygiene. */
+  readonly logStream?: DestinationStream;
+}
+
+/** Log hygiene (design §9.1). Shared with the worker. */
+export function loggerModule(options: AppModuleOptions = {}): DynamicModule {
+  return LoggerModule.forRootAsync({
+    inject: [APP_CONFIG],
+    useFactory: (config: AppConfig) => {
+      const pinoHttpOptions = {
+        level: config.logLevel,
+        // The correlation middleware runs first and has already chosen the id.
+        genReqId: (req: unknown) => (req as RequestWithCorrelation).correlationId ?? 'unknown',
+        customProps: (req: unknown) => ({ correlationId: (req as RequestWithCorrelation).correlationId }),
+        redact: { paths: REDACT_PATHS, censor: '[REDACTED]' },
+      };
+      return {
+        // Express 5 / path-to-regexp v8 wildcard syntax.
+        forRoutes: [{ path: '{*path}', method: RequestMethod.ALL }],
+        pinoHttp: options.logStream ? [pinoHttpOptions, options.logStream] : pinoHttpOptions,
+      };
+    },
+  });
+}
+
 @Module({})
 export class AppModule {
-  static forRoot(env: Record<string, string | undefined> = process.env): DynamicModule {
+  static forRoot(env: Record<string, string | undefined> = process.env, options: AppModuleOptions = {}): DynamicModule {
     return {
       module: AppModule,
       imports: [
         ConfigModule.forRoot(env),
-        LoggerModule.forRootAsync({
-          inject: [APP_CONFIG],
-          useFactory: (config: AppConfig) => ({
-            // Express 5 / path-to-regexp v8 wildcard syntax.
-            forRoutes: [{ path: '{*path}', method: RequestMethod.ALL }],
-            pinoHttp: {
-              level: config.logLevel,
-              // The correlation middleware runs first and has already chosen the id.
-              genReqId: (req) => (req as RequestWithCorrelation).correlationId ?? 'unknown',
-              customProps: (req) => ({ correlationId: (req as RequestWithCorrelation).correlationId }),
-              redact: { paths: REDACT_PATHS, censor: '[REDACTED]' },
-            },
-          }),
-        }),
+        loggerModule(options),
         DatabaseModule,
         MoneyModule,
         CurrenciesModule,
+        ClockModule,
+        RedisModule,
         LedgerModule,
         ReservationsModule,
+        AuthModule,
+        NotificationsModule,
+        HealthModule,
+      ],
+      // Order matters: throttle first (before any token work), then authenticate,
+      // then authorise by role, then require a verified, non-suspended user.
+      providers: [
+        { provide: APP_GUARD, useClass: RateLimitGuard },
+        { provide: APP_GUARD, useClass: JwtAuthGuard },
+        { provide: APP_GUARD, useClass: RolesGuard },
+        { provide: APP_GUARD, useClass: VerifiedUserGuard },
       ],
     };
   }

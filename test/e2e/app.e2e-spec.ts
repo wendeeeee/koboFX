@@ -2,10 +2,12 @@ import { Body, Controller, Get, Post } from '@nestjs/common';
 import { NestExpressApplication } from '@nestjs/platform-express';
 import { Test } from '@nestjs/testing';
 import { IsNotEmpty, IsString, Matches } from 'class-validator';
+import { RedisContainer, StartedRedisContainer } from '@testcontainers/redis';
 import request from 'supertest';
 import { AppModule } from '../../src/app.module';
 import { configureApp } from '../../src/app.setup';
 import { RequestContext } from '../../src/common/context';
+import { Public } from '../../src/common/decorators';
 import { InvariantViolationError, ResourceBusyError } from '../../src/common/errors';
 import { ConfigValidationError } from '../../src/config/configuration';
 import { CurrencyRegistry } from '../../src/modules/currencies/currency-registry';
@@ -22,6 +24,7 @@ class ProbeDto {
 }
 
 /** Test-only routes that drive the real pipeline through each error path. */
+@Public()
 @Controller('probe')
 class ProbeController {
   constructor(private readonly currencies: CurrencyRegistry) {}
@@ -52,10 +55,12 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{1
 
 describe('HTTP pipeline (e2e)', () => {
   let db: TestDatabase;
+  let redis: StartedRedisContainer;
   let app: NestExpressApplication;
 
   beforeAll(async () => {
-    db = await startTestDatabase();
+    redis = await new RedisContainer('redis:7-alpine').start();
+    db = await startTestDatabase({ REDIS_URL: redis.getConnectionUrl() });
     const moduleRef = await Test.createTestingModule({
       imports: [AppModule.forRoot(db.env)],
       controllers: [ProbeController],
@@ -68,6 +73,7 @@ describe('HTTP pipeline (e2e)', () => {
   afterAll(async () => {
     await app?.close();
     await db?.stop();
+    await redis?.stop();
   });
 
   describe('correlation id', () => {

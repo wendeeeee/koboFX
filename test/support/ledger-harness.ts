@@ -1,5 +1,13 @@
+import { NestExpressApplication } from '@nestjs/platform-express';
 import { Test, TestingModule } from '@nestjs/testing';
+import { RedisContainer, StartedRedisContainer } from '@testcontainers/redis';
+import type { DestinationStream } from 'pino';
 import { DataSource } from 'typeorm';
+import { AppModule } from '../../src/app.module';
+import { configureApp } from '../../src/app.setup';
+import { Clock } from '../../src/common/clock';
+import { EmailSender } from '../../src/modules/notifications/email/email-sender';
+import { OutboxDispatcher } from '../../src/modules/outbox/outbox-dispatcher';
 import { Money } from '../../src/common/money';
 import { ConfigModule } from '../../src/config/config.module';
 import { DatabaseModule } from '../../src/database/database.module';
@@ -17,7 +25,11 @@ import {
 import { ReservationChecksService } from '../../src/modules/reservations/reservation-checks.service';
 import { ReservationService } from '../../src/modules/reservations/reservation.service';
 import { ReservationsModule } from '../../src/modules/reservations/reservations.module';
+import { CapturingEmailSender, TestClock } from './auth-test-doubles';
 import { TestDatabase, startTestDatabase } from './test-database';
+
+/** A structurally valid argon2id PHC string for users created outside the auth flow. */
+export const PLACEHOLDER_PASSWORD_HASH = '$argon2id$v=19$m=19456,t=2,p=1$aGFybmVzcw$aGFybmVzcw';
 
 export interface UserAccount {
   readonly userId: string;
@@ -33,6 +45,30 @@ export interface LedgerSnapshot {
   readonly accountsDigest: string;
   readonly transactionsDigest: string;
   readonly reservationsDigest: string;
+  readonly userCount: number;
+  readonly walletCount: number;
+  readonly outboxEventCount: number;
+  readonly auditLogCount: number;
+}
+
+/**
+ * The full application — every module, the real HTTP pipeline, a real Redis — with
+ * email captured and the clock controllable. Present when the harness was started
+ * with `{ auth: true }`.
+ */
+export interface AuthHarness {
+  readonly app: NestExpressApplication;
+  readonly redis: StartedRedisContainer;
+  readonly emails: CapturingEmailSender;
+  readonly clock: TestClock;
+  readonly outbox: OutboxDispatcher;
+  /** Deliver every due outbox event (the worker's job), until none are left. */
+  deliverOutbox(): Promise<void>;
+}
+
+export interface HarnessOptions {
+  readonly auth?: boolean;
+  readonly logStream?: DestinationStream;
 }
 
 export interface LedgerHarness {
@@ -45,6 +81,8 @@ export interface LedgerHarness {
   readonly checks: LedgerChecksService;
   readonly reservations: ReservationService;
   readonly reservationChecks: ReservationChecksService;
+  /** Only with `{ auth: true }`. */
+  readonly auth: AuthHarness | undefined;
   createWallet(): Promise<{ userId: string; walletId: string }>;
   openUserAccount(currency: string, wallet?: { userId: string; walletId: string }): Promise<UserAccount>;
   /** System-driven funding: DEBIT BANK:{currency} (asset up), CREDIT the user (we owe more). */
@@ -60,12 +98,50 @@ export interface LedgerHarness {
   close(): Promise<void>;
 }
 
-export async function startLedgerHarness(overrides: Record<string, string> = {}): Promise<LedgerHarness> {
-  const db = await startTestDatabase(overrides);
-  const moduleRef = await Test.createTestingModule({
-    imports: [ConfigModule.forRoot(db.env), DatabaseModule, LedgerModule, ReservationsModule],
-  }).compile();
-  await moduleRef.init();
+export async function startLedgerHarness(
+  overrides: Record<string, string> = {},
+  options: HarnessOptions = {},
+): Promise<LedgerHarness> {
+  const redis = options.auth ? await new RedisContainer('redis:7-alpine').start() : undefined;
+  const db = await startTestDatabase({
+    ...(redis ? { REDIS_URL: redis.getConnectionUrl() } : {}),
+    ...overrides,
+  });
+  let moduleRef: TestingModule;
+  let auth: AuthHarness | undefined;
+  if (redis) {
+    const emails = new CapturingEmailSender();
+    const clock = new TestClock();
+    moduleRef = await Test.createTestingModule({
+      imports: [AppModule.forRoot(db.env, { logStream: options.logStream })],
+    })
+      .overrideProvider(EmailSender)
+      .useValue(emails)
+      .overrideProvider(Clock)
+      .useValue(clock)
+      .compile();
+    const app = moduleRef.createNestApplication<NestExpressApplication>({ bodyParser: false });
+    configureApp(app);
+    await app.init();
+    const outbox = moduleRef.get(OutboxDispatcher);
+    auth = {
+      app,
+      redis,
+      emails,
+      clock,
+      outbox,
+      async deliverOutbox() {
+        while ((await outbox.dispatchDue(100)).claimed > 0) {
+          // keep draining
+        }
+      },
+    };
+  } else {
+    moduleRef = await Test.createTestingModule({
+      imports: [ConfigModule.forRoot(db.env), DatabaseModule, LedgerModule, ReservationsModule],
+    }).compile();
+    await moduleRef.init();
+  }
 
   const dataSource = moduleRef.get(DataSource);
   const ledger = moduleRef.get(LedgerService);
@@ -74,7 +150,11 @@ export async function startLedgerHarness(overrides: Record<string, string> = {})
   const reservationChecks = moduleRef.get(ReservationChecksService);
 
   const createWallet = async () => {
-    const [user] = (await dataSource.query(`INSERT INTO users DEFAULT VALUES RETURNING id`)) as { id: string }[];
+    const [user] = (await dataSource.query(
+      `INSERT INTO users (email, password_hash)
+       VALUES ('ledger-' || gen_random_uuid() || '@example.com', $1) RETURNING id`,
+      [PLACEHOLDER_PASSWORD_HASH],
+    )) as { id: string }[];
     const [wallet] = (await dataSource.query(`INSERT INTO wallets (user_id) VALUES ($1) RETURNING id`, [
       user.id,
     ])) as { id: string }[];
@@ -91,6 +171,7 @@ export async function startLedgerHarness(overrides: Record<string, string> = {})
     checks,
     reservations: moduleRef.get(ReservationService),
     reservationChecks,
+    auth,
     createWallet,
     async openUserAccount(currency, wallet) {
       const owner = wallet ?? (await createWallet());
@@ -137,13 +218,21 @@ export async function startLedgerHarness(overrides: Record<string, string> = {})
                (SELECT md5(coalesce(string_agg(
                   id::text || ':' || status || ':' || coalesce(settled_minor::text, '-') || ':' ||
                   coalesce(settlement_transaction_id::text, '-') || ':' || coalesce(resolved_at::text, '-'),
-                  ',' ORDER BY id), '')) FROM reservations) AS reservations_digest
+                  ',' ORDER BY id), '')) FROM reservations) AS reservations_digest,
+               (SELECT count(*) FROM users)::int         AS user_count,
+               (SELECT count(*) FROM wallets)::int       AS wallet_count,
+               (SELECT count(*) FROM outbox_events)::int AS outbox_event_count,
+               (SELECT count(*) FROM audit_logs)::int    AS audit_log_count
       `)) as {
         transaction_count: number;
         entry_count: number;
         accounts_digest: string;
         transactions_digest: string;
         reservations_digest: string;
+        user_count: number;
+        wallet_count: number;
+        outbox_event_count: number;
+        audit_log_count: number;
       }[];
       return {
         transactionCount: row.transaction_count,
@@ -151,6 +240,10 @@ export async function startLedgerHarness(overrides: Record<string, string> = {})
         accountsDigest: row.accounts_digest,
         transactionsDigest: row.transactions_digest,
         reservationsDigest: row.reservations_digest,
+        userCount: row.user_count,
+        walletCount: row.wallet_count,
+        outboxEventCount: row.outbox_event_count,
+        auditLogCount: row.audit_log_count,
       };
     },
     async expectCleanBooks() {
@@ -174,8 +267,10 @@ export async function startLedgerHarness(overrides: Record<string, string> = {})
       return report;
     },
     async close() {
-      await moduleRef.close();
+      if (auth) await auth.app.close();
+      else await moduleRef.close();
       await db.stop();
+      await redis?.stop().catch(() => undefined);
     },
   };
   return harness;

@@ -5,6 +5,7 @@ import { Client } from 'pg';
 import { DataSource } from 'typeorm';
 import { loadConfig } from '../../src/config/configuration';
 import { buildDataSourceOptions } from '../../src/database/data-source.options';
+import { authenticationTestEnvironment } from './authentication-secrets';
 
 const OWNER_PASSWORD = 'owner_test_pw';
 const APP_PASSWORD = 'app_test_pw';
@@ -56,6 +57,7 @@ export async function startTestDatabase(overrides: Record<string, string> = {}):
     ROUNDING_USER_CREDIT: 'ROUND_DOWN',
     ROUNDING_REVENUE: 'ROUND_HALF_EVEN',
     ROUNDING_FEE: 'ROUND_HALF_EVEN',
+    ...authenticationTestEnvironment(),
     ...overrides,
   };
 

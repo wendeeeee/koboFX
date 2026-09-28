@@ -65,9 +65,12 @@ export function buildErrorResponse(
   const headers: Record<string, string> = {};
 
   if (error instanceof DomainError) {
-    const isServerError = error.httpStatus >= 500 && error.code !== ErrorCode.RESOURCE_BUSY;
+    // A transient failure (busy, a dependency down) is not a bug: it is safe to
+    // describe, and the client should retry. Everything else >= 500 is ours.
+    const isTransient = !error.permanent;
+    const isServerError = error.httpStatus >= 500 && !isTransient;
     if (error.retryAfterSeconds !== undefined) headers['Retry-After'] = String(error.retryAfterSeconds);
-    const exposeDetail = error.httpStatus < 500 || error.code === ErrorCode.RESOURCE_BUSY;
+    const exposeDetail = error.httpStatus < 500 || isTransient;
     return {
       status: error.httpStatus,
       headers,

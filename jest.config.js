@@ -26,6 +26,6 @@ module.exports = {
       testMatch: ['<rootDir>/test/e2e/**/*.e2e-spec.ts'],
     },
   ],
-  collectCoverageFrom: ['src/**/*.ts', '!src/**/*.spec.ts', '!src/main.ts', '!src/database/migrations/**'],
+  collectCoverageFrom: ['src/**/*.ts', '!src/**/*.spec.ts', '!src/main.ts', '!src/worker.ts', '!src/database/migrations/**'],
   coverageDirectory: 'coverage',
 };
