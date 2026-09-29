@@ -5,12 +5,18 @@ import { ConfigModule } from './config/config.module';
 import { DatabaseModule } from './database/database.module';
 import { NotificationsModule } from './modules/notifications/notifications.module';
 import { OutboxModule } from './modules/outbox/outbox.module';
+import { AuditModule } from './modules/audit/audit.module';
+import { CurrenciesModule } from './modules/currencies/currencies.module';
+import { FlowsModule } from './modules/flows/flows.module';
+import { LedgerModule } from './modules/ledger/ledger.module';
+import { ReservationsModule } from './modules/reservations/reservations.module';
+import { WebhooksModule } from './modules/payments/webhooks/webhooks.module';
 import { RedisModule } from './redis/redis.module';
 
 /**
- * The worker process (design §3, §14): no HTTP. Phase 4 runs the outbox dispatcher;
- * later phases add the FX poller, the flow resumer, the reservation sweeper and
- * reconciliation here.
+ * The worker process (design §3, §14): no HTTP. It runs the outbox dispatcher, the flow
+ * resumer, the webhook processor and the reservation sweeper; later phases add the FX
+ * poller and reconciliation here.
  */
 @Module({})
 export class WorkerModule {
@@ -23,8 +29,14 @@ export class WorkerModule {
         DatabaseModule,
         ClockModule,
         RedisModule,
+        CurrenciesModule,
+        LedgerModule,
+        AuditModule,
+        ReservationsModule,
         OutboxModule,
         NotificationsModule,
+        FlowsModule,
+        WebhooksModule,
       ],
     };
   }

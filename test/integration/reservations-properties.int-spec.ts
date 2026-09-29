@@ -1,4 +1,3 @@
-import { randomUUID } from 'node:crypto';
 import fc from 'fast-check';
 import { Client } from 'pg';
 import { DomainError, ErrorCode } from '../../src/common/errors';
@@ -75,10 +74,18 @@ interface ModelReservation {
 
 describe('Reservation properties (fast-check against real Postgres 16)', () => {
   let harness: LedgerHarness;
+  let flowIds: string[] = [];
+  /** A real flow id (reservations.flow_id is a foreign key since Phase 5). */
+  const nextFlowId = (): string => {
+    const id = flowIds.pop();
+    if (!id) throw new Error('flow id pool exhausted');
+    return id;
+  };
   let owner: Client;
 
   beforeAll(async () => {
     harness = await startLedgerHarness({ LEDGER_INTERNAL_BUCKETS: '4' });
+    flowIds = await harness.newFlowIds(20000);
     owner = await harness.db.ownerClient();
   });
 
@@ -178,7 +185,7 @@ describe('Reservation properties (fast-check against real Postgres 16)', () => {
                 const refusal = expectedGate(model, amountMinor);
                 const request = {
                   accountId: model.user.accountId,
-                  flowId: randomUUID(),
+                  flowId: nextFlowId(),
                   amount: Money.of(amountMinor, 'NGN'),
                   expiresAt: new Date(clockMs + operation.ttlMinutes * MINUTE),
                 };

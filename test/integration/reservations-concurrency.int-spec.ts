@@ -1,4 +1,3 @@
-import { randomUUID } from 'node:crypto';
 import { Client } from 'pg';
 import { DomainError, ErrorCode } from '../../src/common/errors';
 import { Money } from '../../src/common/money';
@@ -50,10 +49,18 @@ const conversion = (source: UserAccount, target: UserAccount, sourceMinor: bigin
 
 describe('Reservation concurrency (real pool, testcontainers)', () => {
   let harness: LedgerHarness;
+  let flowIds: string[] = [];
+  /** A real flow id (reservations.flow_id is a foreign key since Phase 5). */
+  const nextFlowId = (): string => {
+    const id = flowIds.pop();
+    if (!id) throw new Error('flow id pool exhausted');
+    return id;
+  };
   let owner: Client;
 
   beforeAll(async () => {
     harness = await startLedgerHarness({ DB_POOL_MAX: String(POOL_SIZE) });
+    flowIds = await harness.newFlowIds(2000);
     owner = await harness.db.ownerClient();
   });
 
@@ -78,7 +85,7 @@ describe('Reservation concurrency (real pool, testcontainers)', () => {
   }
 
   const reserve = (account: UserAccount, amountMinor: bigint, expiresAt = inOneHour()) =>
-    harness.reservations.reserve({ accountId: account.accountId, flowId: randomUUID(), amount: Money.of(amountMinor, account.currency), expiresAt });
+    harness.reservations.reserve({ accountId: account.accountId, flowId: nextFlowId(), amount: Money.of(amountMinor, account.currency), expiresAt });
 
   const reservationRows = async (accountId: string) =>
     (await owner.query(`SELECT id, status FROM reservations WHERE account_id = $1`, [accountId])).rows as { id: string; status: string }[];

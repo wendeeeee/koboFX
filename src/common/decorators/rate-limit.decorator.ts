@@ -24,6 +24,11 @@ export type RateLimitFailureMode = 'fail-closed' | 'fail-open';
 export interface RateLimitPolicy {
   readonly rules: readonly RateLimitRule[];
   readonly whenUnavailable: RateLimitFailureMode;
+  /**
+   * The route's rules REPLACE the global per-IP rule instead of adding to it. Only for a
+   * machine caller whose legitimate volume exceeds a person's (the PSP's webhooks).
+   */
+  readonly replacesGlobalRule?: boolean;
 }
 
 /** Route-specific limits, applied on top of the global per-IP limit. */

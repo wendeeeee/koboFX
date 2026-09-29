@@ -49,7 +49,8 @@ export class RateLimitGuard implements CanActivate {
     if (this.reflector.getAllAndOverride<boolean>(SKIP_RATE_LIMIT_KEY, targets)) return true;
     const policy = this.reflector.getAllAndOverride<RateLimitPolicy | undefined>(RATE_LIMIT_KEY, targets);
     const request = context.switchToHttp().getRequest<Request>();
-    const counters = rateLimitCounters([GLOBAL_RATE_LIMIT_RULE, ...(policy?.rules ?? [])], request);
+    const rules = policy?.replacesGlobalRule ? policy.rules : [GLOBAL_RATE_LIMIT_RULE, ...(policy?.rules ?? [])];
+    const counters = rateLimitCounters(rules, request);
 
     let decision;
     try {

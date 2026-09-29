@@ -73,6 +73,45 @@ export interface OutboxConfig {
   readonly batchSize: number;
 }
 
+export interface PaymentProviderConfig {
+  /** Name recorded on every row this adapter writes (`provider_calls`, `funding_payments`). */
+  readonly name: string;
+  readonly baseUrl: string;
+  /** Our API key at the PSP. Sent as a bearer token; never stored or logged. */
+  readonly secretKey: string;
+  /** HMAC keys for webhook signatures: the current one first, the previous during a rotation. */
+  readonly webhookSecrets: readonly Buffer[];
+  readonly webhookToleranceSeconds: number;
+  /** Per attempt (design §7.2: 2s). */
+  readonly requestTimeoutMilliseconds: number;
+  /** Retries on idempotent reads only (design §7.2: 3). */
+  readonly readRetries: number;
+}
+
+export interface FundingLimit {
+  readonly minimumMinor: bigint;
+  readonly maximumMinor: bigint;
+}
+
+export interface FundingConfig {
+  /** Currencies a user may fund; each must be active and have limits. */
+  readonly currencies: readonly string[];
+  readonly limits: ReadonlyMap<string, FundingLimit>;
+}
+
+export interface FlowConfig {
+  readonly pollIntervalMilliseconds: number;
+  readonly batchSize: number;
+  /** How long a claimed flow or webhook event is ours; longer than any step can take. */
+  readonly leaseSeconds: number;
+  readonly maximumBackoffSeconds: number;
+  /** `flows_stalled`: incomplete flows whose state has not changed for this long (design §10: 30 min). */
+  readonly stalledAfterMinutes: number;
+  /** Webhook processing attempts before an unconfirmed hint is closed (the resumer still owns the flow). */
+  readonly webhookMaxAttempts: number;
+  readonly reservationSweepIntervalMilliseconds: number;
+}
+
 export interface AppConfig {
   readonly env: NodeEnv;
   readonly port: number;
@@ -84,6 +123,9 @@ export interface AppConfig {
   readonly authentication: AuthenticationConfig;
   readonly mail: MailConfig;
   readonly outbox: OutboxConfig;
+  readonly paymentProvider: PaymentProviderConfig;
+  readonly funding: FundingConfig;
+  readonly flows: FlowConfig;
   /** Reverse proxies in front of the API; `req.ip` is taken from X-Forwarded-For only this deep. */
   readonly trustProxyHops: number;
 }
@@ -160,6 +202,34 @@ const envSchema = Joi.object({
   OUTBOX_BATCH_SIZE: Joi.number().integer().min(1).max(500).default(20),
 
   TRUST_PROXY_HOPS: Joi.number().integer().min(0).max(10).default(0),
+
+  // The payment service provider (design §7.2, §7.3). Secrets have no defaults.
+  PSP_NAME: Joi.string()
+    .pattern(/^[a-z0-9-]{1,32}$/)
+    .default('simulated-psp'),
+  PSP_BASE_URL: Joi.string()
+    .uri({ scheme: ['http', 'https'] })
+    .required(),
+  PSP_SECRET_KEY: Joi.string().min(32).required(),
+  // Comma-separated base64 HMAC keys: current first, then the previous during a rotation.
+  PSP_WEBHOOK_SECRETS: Joi.string().required(),
+  PSP_WEBHOOK_TOLERANCE_SECONDS: Joi.number().integer().min(30).max(900).default(300),
+  PSP_REQUEST_TIMEOUT_MILLISECONDS: Joi.number().integer().min(100).max(30_000).default(2000),
+  PSP_READ_RETRIES: Joi.number().integer().min(0).max(5).default(3),
+
+  PSP_FUNDING_CURRENCIES: Joi.string()
+    .pattern(/^[A-Z]{3}(,[A-Z]{3})*$/)
+    .default('NGN'),
+  // JSON {currency: {minimum, maximum}}, strings of minor units. Default: NGN ₦100 – ₦1,000,000.
+  FUNDING_LIMITS: Joi.string().default('{"NGN":{"minimum":"10000","maximum":"100000000"}}'),
+
+  FLOW_POLL_INTERVAL_MILLISECONDS: Joi.number().integer().min(50).default(1000),
+  FLOW_BATCH_SIZE: Joi.number().integer().min(1).max(500).default(20),
+  FLOW_LEASE_SECONDS: Joi.number().integer().min(10).max(3600).default(60),
+  FLOW_MAXIMUM_BACKOFF_SECONDS: Joi.number().integer().min(5).max(86_400).default(900),
+  FLOW_STALLED_AFTER_MINUTES: Joi.number().integer().min(1).default(30),
+  WEBHOOK_MAX_ATTEMPTS: Joi.number().integer().min(1).max(100).default(10),
+  RESERVATION_SWEEP_INTERVAL_MILLISECONDS: Joi.number().integer().min(100).default(30_000),
 })
   .and('SMTP_USER', 'SMTP_PASSWORD')
   // The runtime and migration roles must differ, or the ledger's revoked grants are void.
@@ -191,7 +261,9 @@ export function loadConfig(raw: NodeJS.ProcessEnv | Record<string, string | unde
   if (env.NODE_ENV === 'production' && env.DEMO_CREDIT_NGN_MINOR !== undefined && env.DEMO_CREDIT_NGN_MINOR !== '0') {
     problems.push('DEMO_CREDIT_NGN_MINOR must be 0 in production (design §15 item 6: non-production only)');
   }
-  if (problems.length > 0 || !keys || !pepper) {
+  const webhookSecrets = parseWebhookSecrets(raw.PSP_WEBHOOK_SECRETS, problems);
+  const funding = parseFunding(env.PSP_FUNDING_CURRENCIES, env.FUNDING_LIMITS, problems);
+  if (problems.length > 0 || !keys || !pepper || !webhookSecrets || !funding) {
     throw new ConfigValidationError(problems);
   }
   return {
@@ -244,8 +316,85 @@ export function loadConfig(raw: NodeJS.ProcessEnv | Record<string, string | unde
       pollIntervalMilliseconds: env.OUTBOX_POLL_INTERVAL_MS,
       batchSize: env.OUTBOX_BATCH_SIZE,
     },
+    paymentProvider: {
+      name: env.PSP_NAME,
+      baseUrl: env.PSP_BASE_URL,
+      secretKey: env.PSP_SECRET_KEY,
+      webhookSecrets,
+      webhookToleranceSeconds: env.PSP_WEBHOOK_TOLERANCE_SECONDS,
+      requestTimeoutMilliseconds: env.PSP_REQUEST_TIMEOUT_MILLISECONDS,
+      readRetries: env.PSP_READ_RETRIES,
+    },
+    funding,
+    flows: {
+      pollIntervalMilliseconds: env.FLOW_POLL_INTERVAL_MILLISECONDS,
+      batchSize: env.FLOW_BATCH_SIZE,
+      leaseSeconds: env.FLOW_LEASE_SECONDS,
+      maximumBackoffSeconds: env.FLOW_MAXIMUM_BACKOFF_SECONDS,
+      stalledAfterMinutes: env.FLOW_STALLED_AFTER_MINUTES,
+      webhookMaxAttempts: env.WEBHOOK_MAX_ATTEMPTS,
+      reservationSweepIntervalMilliseconds: env.RESERVATION_SWEEP_INTERVAL_MILLISECONDS,
+    },
     trustProxyHops: env.TRUST_PROXY_HOPS,
   };
+}
+
+const MINIMUM_WEBHOOK_SECRET_BYTES = 32;
+const MINOR_UNITS_PATTERN = /^[1-9]\d{0,17}$/;
+
+/** One or two base64 HMAC keys of at least 32 bytes each (two only during a rotation). */
+function parseWebhookSecrets(value: string | undefined, problems: string[]): Buffer[] | undefined {
+  if (!value) return undefined;
+  const parts = value.split(',');
+  if (parts.length > 2) {
+    problems.push('PSP_WEBHOOK_SECRETS holds at most two secrets (current, previous)');
+    return undefined;
+  }
+  const secrets: Buffer[] = [];
+  for (const [index, part] of parts.entries()) {
+    const decoded = /^[A-Za-z0-9+/]+={0,2}$/.test(part) ? Buffer.from(part, 'base64') : Buffer.alloc(0);
+    if (decoded.length < MINIMUM_WEBHOOK_SECRET_BYTES) {
+      problems.push(`PSP_WEBHOOK_SECRETS[${index}] must be base64 decoding to at least ${MINIMUM_WEBHOOK_SECRET_BYTES} bytes`);
+      return undefined;
+    }
+    secrets.push(decoded);
+  }
+  return secrets;
+}
+
+/** Funding currencies and their bounds: strings of minor units, every currency covered, min ≤ max. */
+function parseFunding(currencyList: string | undefined, limitsJson: string | undefined, problems: string[]): FundingConfig | undefined {
+  if (!currencyList || !limitsJson) return undefined;
+  const currencies = [...new Set(currencyList.split(','))];
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(limitsJson);
+  } catch {
+    problems.push('FUNDING_LIMITS must be JSON');
+    return undefined;
+  }
+  if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+    problems.push('FUNDING_LIMITS must map currency to {minimum, maximum}');
+    return undefined;
+  }
+  const limits = new Map<string, FundingLimit>();
+  for (const currency of currencies) {
+    const entry = (parsed as Record<string, unknown>)[currency] as { minimum?: unknown; maximum?: unknown } | undefined;
+    const { minimum, maximum } = entry ?? {};
+    if (
+      typeof minimum !== 'string' || typeof maximum !== 'string' ||
+      !MINOR_UNITS_PATTERN.test(minimum) || !MINOR_UNITS_PATTERN.test(maximum)
+    ) {
+      problems.push(`FUNDING_LIMITS.${currency} needs minimum and maximum as positive strings of minor units`);
+      continue;
+    }
+    if (BigInt(minimum) > BigInt(maximum)) {
+      problems.push(`FUNDING_LIMITS.${currency}: minimum exceeds maximum`);
+      continue;
+    }
+    limits.set(currency, { minimumMinor: BigInt(minimum), maximumMinor: BigInt(maximum) });
+  }
+  return limits.size === currencies.length ? { currencies, limits } : undefined;
 }
 
 const MINIMUM_RSA_MODULUS_BITS = 2048;

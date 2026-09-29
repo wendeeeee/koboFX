@@ -11,6 +11,11 @@ import { CreateAuditLogs1790726400001 } from './1790726400001-CreateAuditLogs';
 import { CreateOutboxEvents1790726400002 } from './1790726400002-CreateOutboxEvents';
 import { CreateOneTimePasswordChallenges1790726400003 } from './1790726400003-CreateOneTimePasswordChallenges';
 import { CreateRefreshTokens1790726400004 } from './1790726400004-CreateRefreshTokens';
+import { CreateFlowInstances1790812800000 } from './1790812800000-CreateFlowInstances';
+import { CreateFundingPayments1790812800001 } from './1790812800001-CreateFundingPayments';
+import { CreateIdempotencyKeys1790812800002 } from './1790812800002-CreateIdempotencyKeys';
+import { CreateWebhookEvents1790812800003 } from './1790812800003-CreateWebhookEvents';
+import { CreateProviderCalls1790812800004 } from './1790812800004-CreateProviderCalls';
 
 /** Explicit, ordered list — no globbing, so the CLI and the test harness run the same set. */
 export const MIGRATIONS = [
@@ -27,4 +32,9 @@ export const MIGRATIONS = [
   CreateOutboxEvents1790726400002,
   CreateOneTimePasswordChallenges1790726400003,
   CreateRefreshTokens1790726400004,
+  CreateFlowInstances1790812800000,
+  CreateFundingPayments1790812800001,
+  CreateIdempotencyKeys1790812800002,
+  CreateWebhookEvents1790812800003,
+  CreateProviderCalls1790812800004,
 ];

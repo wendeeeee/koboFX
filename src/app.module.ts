@@ -1,9 +1,12 @@
 import { DynamicModule, Module, RequestMethod } from '@nestjs/common';
-import { APP_GUARD } from '@nestjs/core';
+import { APP_GUARD, APP_INTERCEPTOR } from '@nestjs/core';
 import { LoggerModule } from 'nestjs-pino';
 import type { DestinationStream } from 'pino';
 import { ClockModule } from './common/clock';
 import { JwtAuthGuard, RateLimitGuard, RolesGuard, VerifiedUserGuard } from './common/guards';
+import { IdempotencyInterceptor } from './common/interceptors/idempotency/idempotency.interceptor';
+import { IdempotencyKeyStore } from './common/interceptors/idempotency/idempotency-key.store';
+import { IdempotencyMetrics } from './common/interceptors/idempotency/idempotency-metrics';
 import { MoneyModule } from './common/money/money.module';
 import { RequestWithCorrelation } from './common/context';
 import { APP_CONFIG, ConfigModule } from './config/config.module';
@@ -15,6 +18,10 @@ import { AuthModule } from './modules/auth/auth.module';
 import { HealthModule } from './modules/health/health.module';
 import { NotificationsModule } from './modules/notifications/notifications.module';
 import { ReservationsModule } from './modules/reservations/reservations.module';
+import { FlowsModule } from './modules/flows/flows.module';
+import { PaymentsModule } from './modules/payments/payments.module';
+import { WebhooksModule } from './modules/payments/webhooks/webhooks.module';
+import { WalletsModule } from './modules/wallets/wallets.module';
 import { RedisModule } from './redis/redis.module';
 
 /** Log hygiene (design §9.1): secrets and OTPs never reach the log. */
@@ -22,6 +29,10 @@ const REDACT_PATHS = [
   'req.headers.authorization',
   'req.headers.cookie',
   'req.headers["x-webhook-signature"]',
+  'req.headers["x-psp-signature"]',
+  '*.paymentMethodToken',
+  '*.payment_method_token',
+  '*.secretKey',
   '*.password',
   '*.otp',
   '*.oneTimePassword',
@@ -76,6 +87,10 @@ export class AppModule {
         ReservationsModule,
         AuthModule,
         NotificationsModule,
+        PaymentsModule,
+        FlowsModule,
+        WalletsModule,
+        WebhooksModule,
         HealthModule,
       ],
       // Order matters: throttle first (before any token work), then authenticate,
@@ -85,6 +100,10 @@ export class AppModule {
         { provide: APP_GUARD, useClass: JwtAuthGuard },
         { provide: APP_GUARD, useClass: RolesGuard },
         { provide: APP_GUARD, useClass: VerifiedUserGuard },
+        // After the guards: the barrier is scoped by the authenticated user (design §6.5).
+        { provide: APP_INTERCEPTOR, useClass: IdempotencyInterceptor },
+        IdempotencyKeyStore,
+        IdempotencyMetrics,
       ],
     };
   }

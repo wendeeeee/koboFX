@@ -147,3 +147,46 @@ describe('loadConfig', () => {
     });
   });
 });
+
+describe('loadConfig: payment provider, funding and flows (Phase 5)', () => {
+  it('builds the PSP, funding and flow settings with their defaults', () => {
+    const config = loadConfig(VALID);
+    expect(config.paymentProvider).toMatchObject({
+      name: 'simulated-psp',
+      webhookToleranceSeconds: 300,
+      requestTimeoutMilliseconds: 2000,
+      readRetries: 3,
+    });
+    expect(config.paymentProvider.webhookSecrets).toHaveLength(1);
+    expect(config.paymentProvider.webhookSecrets[0].length).toBe(32);
+    expect(config.funding.currencies).toEqual(['NGN']);
+    expect(config.funding.limits.get('NGN')).toEqual({ minimumMinor: 10_000n, maximumMinor: 100_000_000n });
+    expect(config.flows).toMatchObject({ leaseSeconds: 60, stalledAfterMinutes: 30, maximumBackoffSeconds: 900, webhookMaxAttempts: 10 });
+  });
+
+  it('has no defaults for PSP secrets', () => {
+    const problems = problemsOf({ ...VALID, PSP_BASE_URL: undefined, PSP_SECRET_KEY: undefined, PSP_WEBHOOK_SECRETS: undefined });
+    expect(problems.join('\n')).toMatch(/PSP_BASE_URL/);
+    expect(problems.join('\n')).toMatch(/PSP_SECRET_KEY/);
+    expect(problems.join('\n')).toMatch(/PSP_WEBHOOK_SECRETS/);
+  });
+
+  it('refuses short or too many webhook secrets, and a short API key', () => {
+    const short = Buffer.alloc(16, 1).toString('base64');
+    const good = Buffer.alloc(32, 2).toString('base64');
+    expect(problemsOf({ ...VALID, PSP_WEBHOOK_SECRETS: short }).join()).toMatch(/at least 32 bytes/);
+    expect(problemsOf({ ...VALID, PSP_WEBHOOK_SECRETS: 'not base64 !!' }).join()).toMatch(/at least 32 bytes/);
+    expect(problemsOf({ ...VALID, PSP_WEBHOOK_SECRETS: [good, good, good].join(',') }).join()).toMatch(/at most two/);
+    expect(loadConfig({ ...VALID, PSP_WEBHOOK_SECRETS: `${good},${good}` }).paymentProvider.webhookSecrets).toHaveLength(2);
+    expect(problemsOf({ ...VALID, PSP_SECRET_KEY: 'short' }).join()).toMatch(/PSP_SECRET_KEY/);
+  });
+
+  it('requires limits for every funding currency, as strings of minor units, minimum ≤ maximum', () => {
+    expect(problemsOf({ ...VALID, PSP_FUNDING_CURRENCIES: 'NGN,USD' }).join()).toMatch(/FUNDING_LIMITS.USD/);
+    expect(problemsOf({ ...VALID, FUNDING_LIMITS: '{"NGN":{"minimum":100,"maximum":"200"}}' }).join()).toMatch(/strings of minor units/);
+    expect(problemsOf({ ...VALID, FUNDING_LIMITS: '{"NGN":{"minimum":"300","maximum":"200"}}' }).join()).toMatch(/minimum exceeds maximum/);
+    expect(problemsOf({ ...VALID, FUNDING_LIMITS: 'nope' }).join()).toMatch(/must be JSON/);
+    expect(problemsOf({ ...VALID, FUNDING_LIMITS: '[]' }).join()).toMatch(/must map currency/);
+    expect(problemsOf({ ...VALID, PSP_FUNDING_CURRENCIES: 'ngn' }).join()).toMatch(/PSP_FUNDING_CURRENCIES/);
+  });
+});

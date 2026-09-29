@@ -221,6 +221,8 @@ describe('authentication (e2e: real pipeline, Postgres, Redis, MailHog)', () => 
       'post /api/v1/auth/register',
       'post /api/v1/auth/resend-otp',
       'post /api/v1/auth/verify',
+      // The only non-auth public route: authenticated by its HMAC signature instead (design §7.3).
+      'post /api/v1/webhooks/psp',
     ]);
     const protectedRoutes = routes.filter((route) => !route.isPublic);
     expect(protectedRoutes.length).toBeGreaterThan(0);

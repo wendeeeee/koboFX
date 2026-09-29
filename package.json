@@ -22,7 +22,8 @@
     "test:int": "jest --selectProjects integration --runInBand",
     "test:e2e": "jest --selectProjects e2e --runInBand",
     "test:all": "jest --runInBand",
-    "test:cov": "jest --runInBand --coverage"
+    "test:cov": "jest --runInBand --coverage",
+    "start:mock-psp:dev": "ts-node src/mock-psp/main.ts"
   },
   "dependencies": {
     "@nestjs/common": "^11.2.6",
@@ -45,7 +46,8 @@
     "pino-http": "^11.0.0",
     "reflect-metadata": "^0.2.2",
     "rxjs": "^7.8.2",
-    "typeorm": "^0.3.31"
+    "typeorm": "^0.3.31",
+    "zod": "^3.25.76"
   },
   "devDependencies": {
     "@nestjs/testing": "^11.2.6",

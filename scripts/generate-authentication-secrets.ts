@@ -1,6 +1,8 @@
 /**
  * Prints fresh authentication secrets as .env lines (design §9.1, decision #11):
- * an RS256 key pair with a key id, and the one-time password pepper.
+ * an RS256 key pair with a key id, and the one-time password pepper — plus the
+ * simulated PSP's API key and webhook secret (design §7.2, §7.3), shared by the API,
+ * the worker and `npm run start:mock-psp:dev`.
  *
  *   npm run --silent secrets:generate >> .env
  *
@@ -21,6 +23,8 @@ process.stdout.write(
     `JWT_PRIVATE_KEY=${base64(privatePem)}`,
     `JWT_PUBLIC_KEYS=${base64(JSON.stringify({ [keyId]: publicPem }))}`,
     `ONE_TIME_PASSWORD_PEPPER=${randomBytes(32).toString('base64')}`,
+    `PSP_SECRET_KEY=sk_dev_${randomBytes(24).toString('hex')}`,
+    `PSP_WEBHOOK_SECRETS=${randomBytes(32).toString('base64')}`,
     '',
   ].join('\n'),
 );

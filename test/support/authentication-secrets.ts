@@ -33,9 +33,16 @@ export function encodePublicKeys(pairs: readonly TestKeyPair[]): string {
 }
 
 const pepper = randomBytes(32).toString('base64');
+const pspSecretKey = `sk_test_${randomBytes(24).toString('hex')}`;
+const pspWebhookSecret = randomBytes(32).toString('base64');
+
+/** The PSP credentials of this test process (the mock PSP is started with the same). */
+export function paymentProviderTestSecrets(): { secretKey: string; webhookSecret: Buffer } {
+  return { secretKey: pspSecretKey, webhookSecret: Buffer.from(pspWebhookSecret, 'base64') };
+}
 
 /**
- * Environment for the authentication, mail and outbox settings — valid, never
+ * Environment for the authentication, mail, outbox and payment-provider settings — valid, never
  * insecure defaults: secrets are generated per test process.
  */
 export function authenticationTestEnvironment(): Record<string, string> {
@@ -48,5 +55,9 @@ export function authenticationTestEnvironment(): Record<string, string> {
     SMTP_HOST: 'localhost',
     SMTP_PORT: '1025',
     MAIL_FROM: 'KoboFX <no-reply@kobofx.test>',
+    // Points nowhere by default; harnesses that run the mock PSP override it.
+    PSP_BASE_URL: 'http://127.0.0.1:9',
+    PSP_SECRET_KEY: pspSecretKey,
+    PSP_WEBHOOK_SECRETS: pspWebhookSecret,
   };
 }

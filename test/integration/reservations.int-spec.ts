@@ -58,10 +58,18 @@ const conversion = (source: UserAccount, target: UserAccount, sourceMinor: bigin
 
 describe('ReservationService (real Postgres 16)', () => {
   let harness: LedgerHarness;
+  let flowIds: string[] = [];
+  /** A real flow id (reservations.flow_id is a foreign key since Phase 5). */
+  const nextFlowId = (): string => {
+    const id = flowIds.pop();
+    if (!id) throw new Error('flow id pool exhausted');
+    return id;
+  };
   let owner: Client;
 
   beforeAll(async () => {
     harness = await startLedgerHarness();
+    flowIds = await harness.newFlowIds(500);
     owner = await harness.db.ownerClient();
   });
 
@@ -76,7 +84,7 @@ describe('ReservationService (real Postgres 16)', () => {
     return account;
   }
 
-  const reserve = (account: UserAccount, amountMinor: bigint, flowId: string = randomUUID(), expiresAt = inOneHour()) =>
+  const reserve = (account: UserAccount, amountMinor: bigint, flowId: string = nextFlowId(), expiresAt = inOneHour()) =>
     harness.reservations.reserve({ accountId: account.accountId, flowId, amount: Money.of(amountMinor, account.currency), expiresAt });
 
   describe('reserve', () => {
@@ -131,7 +139,7 @@ describe('ReservationService (real Postgres 16)', () => {
 
     it('is idempotent per (flow, account): a retry returns the same hold, even after it was released', async () => {
       const account = await funded('NGN', 100_000n);
-      const flowId = randomUUID();
+      const flowId = nextFlowId();
       const first = await reserve(account, 30_000n, flowId);
       const before = await harness.snapshot();
 
@@ -149,7 +157,7 @@ describe('ReservationService (real Postgres 16)', () => {
       const wallet = await harness.createWallet();
       const naira = await funded('NGN', 100_000n, wallet);
       const dollars = await funded('USD', 10_000n, wallet);
-      const flowId = randomUUID();
+      const flowId = nextFlowId();
       await reserve(naira, 30_000n, flowId);
       await expect(reserve(naira, 30_001n, flowId)).rejects.toThrow(code(ErrorCode.RESERVATION_CONFLICT));
       await reserve(dollars, 5_000n, flowId);
@@ -160,7 +168,7 @@ describe('ReservationService (real Postgres 16)', () => {
       const account = await funded('NGN', 100_000n);
       const [bank] = await harness.chartOfAccounts.findSystemAccountBuckets('BANK', 'NGN');
       const before = await harness.snapshot();
-      const request = { accountId: account.accountId, flowId: randomUUID(), amount: Money.of(1n, 'NGN'), expiresAt: inOneHour() };
+      const request = { accountId: account.accountId, flowId: nextFlowId(), amount: Money.of(1n, 'NGN'), expiresAt: inOneHour() };
 
       await expect(harness.reservations.reserve({ ...request, accountId: bank.id })).rejects.toThrow(code(ErrorCode.INVALID_RESERVATION));
       await expect(harness.reservations.reserve({ ...request, accountId: randomUUID() })).rejects.toThrow(code(ErrorCode.ACCOUNT_NOT_FOUND));
@@ -334,9 +342,9 @@ describe('ReservationService (real Postgres 16)', () => {
       await harness.reservations.expireDue(new Date('2999-01-01T00:00:00Z'), 10_000);
       const account = await funded('NGN', 100_000n);
       const base = Date.now() + 10 * 60 * 1000;
-      const due = [await reserve(account, 1_000n, randomUUID(), new Date(base + 1)), await reserve(account, 2_000n, randomUUID(), new Date(base + 2))];
-      const notYet = await reserve(account, 4_000n, randomUUID(), new Date(base + 60_000));
-      const settledEarly = await reserve(account, 8_000n, randomUUID(), new Date(base + 3));
+      const due = [await reserve(account, 1_000n, nextFlowId(), new Date(base + 1)), await reserve(account, 2_000n, nextFlowId(), new Date(base + 2))];
+      const notYet = await reserve(account, 4_000n, nextFlowId(), new Date(base + 60_000));
+      const settledEarly = await reserve(account, 8_000n, nextFlowId(), new Date(base + 3));
       await harness.reservations.settle(settledEarly.id, spend(account, 8_000n));
 
       const counted = metrics.reservationsExpiredTotal;

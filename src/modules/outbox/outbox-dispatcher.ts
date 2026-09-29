@@ -1,5 +1,6 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import { InvariantViolationError } from '../../common/errors';
+import { exponentialBackoffSeconds } from '../../common/polling/backoff';
 import { APP_CONFIG } from '../../config/config.module';
 import { AppConfig, OutboxConfig } from '../../config/configuration';
 import { UnitOfWork } from '../../database/transaction/unit-of-work';
@@ -19,7 +20,7 @@ export interface DispatchReport {
 
 /** Exponential backoff after the n-th failed attempt: 5s, 10s, 20s … capped at one hour. */
 export function backoffSeconds(attempts: number): number {
-  return Math.min(5 * 2 ** Math.max(0, attempts - 1), MAXIMUM_BACKOFF_SECONDS);
+  return exponentialBackoffSeconds(attempts, 5, MAXIMUM_BACKOFF_SECONDS);
 }
 
 /**

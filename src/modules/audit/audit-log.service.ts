@@ -9,11 +9,14 @@ export enum AuditAction {
   PENDING_REGISTRATION_PASSWORD_REPLACED = 'PENDING_REGISTRATION_PASSWORD_REPLACED',
   USER_VERIFIED = 'USER_VERIFIED',
   REFRESH_TOKEN_FAMILY_REVOKED = 'REFRESH_TOKEN_FAMILY_REVOKED',
+  FUNDING_INITIATED = 'FUNDING_INITIATED',
+  FUNDING_STATE_CHANGED = 'FUNDING_STATE_CHANGED',
 }
 
 export enum AuditSubjectType {
   USER = 'USER',
   REFRESH_TOKEN_FAMILY = 'REFRESH_TOKEN_FAMILY',
+  FLOW = 'FLOW',
 }
 
 export type AuditActor =
@@ -32,6 +35,12 @@ export interface AuditState {
   readonly verified?: boolean;
   readonly revoked?: boolean;
   readonly revocationReason?: RefreshTokenRevocationReason;
+  /** A flow's state machine state (design §7.5). */
+  readonly flowState?: string;
+  /** Why a flow failed: a PSP decline code or our own reason — never card or personal data. */
+  readonly failureCode?: string;
+  /** The ledger transaction a step posted (an opaque id). */
+  readonly transactionId?: string;
 }
 
 export interface AuditEntry {

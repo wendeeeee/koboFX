@@ -1,10 +1,20 @@
+import { randomUUID } from 'node:crypto';
 import { NestExpressApplication } from '@nestjs/platform-express';
+import request from 'supertest';
 import { Test, TestingModule } from '@nestjs/testing';
 import { RedisContainer, StartedRedisContainer } from '@testcontainers/redis';
 import type { DestinationStream } from 'pino';
 import { DataSource } from 'typeorm';
 import { AppModule } from '../../src/app.module';
-import { configureApp } from '../../src/app.setup';
+import { API_PREFIX, PSP_WEBHOOK_PATH, configureApp } from '../../src/app.setup';
+import { CaptureCompletion, MockPsp } from '../../src/mock-psp/mock-psp';
+import { AccountCreationService } from '../../src/modules/auth/account-creation.service';
+import { VerificationService } from '../../src/modules/auth/verification.service';
+import { FlowCheckpoints } from '../../src/modules/flows/flow-checkpoints';
+import { FlowResumer } from '../../src/modules/flows/flow-resumer';
+import { FlowRunner } from '../../src/modules/flows/flow-runner';
+import { WebhookProcessor } from '../../src/modules/payments/webhooks/webhook-processor';
+import { RedisService } from '../../src/redis/redis.service';
 import { Clock } from '../../src/common/clock';
 import { EmailSender } from '../../src/modules/notifications/email/email-sender';
 import { OutboxDispatcher } from '../../src/modules/outbox/outbox-dispatcher';
@@ -26,6 +36,8 @@ import { ReservationChecksService } from '../../src/modules/reservations/reserva
 import { ReservationService } from '../../src/modules/reservations/reservation.service';
 import { ReservationsModule } from '../../src/modules/reservations/reservations.module';
 import { CapturingEmailSender, TestClock } from './auth-test-doubles';
+import { paymentProviderTestSecrets } from './authentication-secrets';
+import { ScriptedFlowCheckpoints } from './flow-test-doubles';
 import { TestDatabase, startTestDatabase } from './test-database';
 
 /** A structurally valid argon2id PHC string for users created outside the auth flow. */
@@ -45,6 +57,8 @@ export interface LedgerSnapshot {
   readonly accountsDigest: string;
   readonly transactionsDigest: string;
   readonly reservationsDigest: string;
+  readonly flowCount: number;
+  readonly idempotencyKeyCount: number;
   readonly userCount: number;
   readonly walletCount: number;
   readonly outboxEventCount: number;
@@ -69,6 +83,42 @@ export interface AuthHarness {
 export interface HarnessOptions {
   readonly auth?: boolean;
   readonly logStream?: DestinationStream;
+  /**
+   * Run the simulated PSP on an ephemeral port and point the app at it (implies
+   * `auth`). Webhooks are delivered on command through the real HTTP pipeline.
+   */
+  readonly payments?: { readonly captureCompletion?: CaptureCompletion; readonly hangMilliseconds?: number } | true;
+}
+
+/** A verified user with a live access token. */
+export interface SignedUpUser {
+  readonly userId: string;
+  readonly email: string;
+  readonly accessToken: string;
+}
+
+/** Present when the harness was started with `{ payments }`. */
+export interface PaymentsHarness {
+  readonly psp: MockPsp;
+  readonly runner: FlowRunner;
+  readonly resumer: FlowResumer;
+  readonly processor: WebhookProcessor;
+  readonly checkpoints: ScriptedFlowCheckpoints;
+  /** Register, receive the code, verify: a real ACTIVE user with tokens. */
+  signUp(): Promise<SignedUpUser>;
+  /** `POST /wallet/fund` through the real pipeline. */
+  fund(user: SignedUpUser, body: Record<string, unknown>, idempotencyKey?: string): request.Test;
+  /** Clear every `rate-limit:*` counter (tests that repeat a subject inside a window). */
+  clearRateLimits(): Promise<void>;
+  /** Make every waiting flow and webhook event due now ("time passes"; leases are untouched). */
+  makeAllDue(): Promise<void>;
+  /** Let every held lease lapse (a dead worker's lease, after its timeout). */
+  lapseLeases(): Promise<void>;
+  /**
+   * Play the worker until quiet: deliver pending webhooks, process events, resume due
+   * flows, make everything due again — up to `rounds` times.
+   */
+  drive(options?: { rounds?: number; deliverWebhooks?: boolean }): Promise<void>;
 }
 
 export interface LedgerHarness {
@@ -83,7 +133,15 @@ export interface LedgerHarness {
   readonly reservationChecks: ReservationChecksService;
   /** Only with `{ auth: true }`. */
   readonly auth: AuthHarness | undefined;
+  /** Only with `{ payments }`. */
+  readonly payments: PaymentsHarness | undefined;
   createWallet(): Promise<{ userId: string; walletId: string }>;
+  /**
+   * Real `flow_instances` ids (`reservations.flow_id` has a foreign key since Phase 5):
+   * completed, FAILED flows the resumer never picks up. Create a pool up front so
+   * concurrency tests do no extra work inside their contention window.
+   */
+  newFlowIds(count: number): Promise<string[]>;
   openUserAccount(currency: string, wallet?: { userId: string; walletId: string }): Promise<UserAccount>;
   /** System-driven funding: DEBIT BANK:{currency} (asset up), CREDIT the user (we owe more). */
   fund(account: UserAccount, amountMinor: bigint): Promise<PostedTransaction>;
@@ -102,13 +160,36 @@ export async function startLedgerHarness(
   overrides: Record<string, string> = {},
   options: HarnessOptions = {},
 ): Promise<LedgerHarness> {
-  const redis = options.auth ? await new RedisContainer('redis:7-alpine').start() : undefined;
+  const withPayments = options.payments !== undefined;
+  const redis = options.auth || withPayments ? await new RedisContainer('redis:7-alpine').start() : undefined;
+  const pspSecrets = paymentProviderTestSecrets();
+  const pspOptions = options.payments === true ? {} : (options.payments ?? {});
+  const psp = withPayments
+    ? new MockPsp({
+        secretKey: pspSecrets.secretKey,
+        webhookSecret: pspSecrets.webhookSecret,
+        captureCompletion: pspOptions.captureCompletion ?? 'immediate',
+        hangMilliseconds: pspOptions.hangMilliseconds ?? 600,
+      })
+    : undefined;
+  const pspUrl = psp ? await psp.start() : undefined;
   const db = await startTestDatabase({
     ...(redis ? { REDIS_URL: redis.getConnectionUrl() } : {}),
+    ...(pspUrl
+      ? {
+          PSP_BASE_URL: pspUrl,
+          // Fast failure in tests; the policy (retries on reads only) is unchanged.
+          PSP_REQUEST_TIMEOUT_MILLISECONDS: '300',
+          FUNDING_LIMITS: '{"NGN":{"minimum":"100","maximum":"100000000000"},"USD":{"minimum":"100","maximum":"10000000"}}',
+          PSP_FUNDING_CURRENCIES: 'NGN,USD',
+        }
+      : {}),
     ...overrides,
   });
   let moduleRef: TestingModule;
   let auth: AuthHarness | undefined;
+  let payments: PaymentsHarness | undefined;
+  const checkpoints = new ScriptedFlowCheckpoints();
   if (redis) {
     const emails = new CapturingEmailSender();
     const clock = new TestClock();
@@ -119,6 +200,8 @@ export async function startLedgerHarness(
       .useValue(emails)
       .overrideProvider(Clock)
       .useValue(clock)
+      .overrideProvider(FlowCheckpoints)
+      .useValue(checkpoints)
       .compile();
     const app = moduleRef.createNestApplication<NestExpressApplication>({ bodyParser: false });
     configureApp(app);
@@ -136,6 +219,77 @@ export async function startLedgerHarness(
         }
       },
     };
+    if (psp) {
+      const http = () => request(app.getHttpServer());
+      // Sent as a string: superagent would JSON-serialise a Buffer and change the bytes
+      // (the signature is over the raw bytes, so that is refused — correctly).
+      psp.setDeliverer(async (body, headers) => (await http().post(PSP_WEBHOOK_PATH).set(headers).send(body.toString('utf8'))).status);
+      const runner = moduleRef.get(FlowRunner);
+      const resumer = moduleRef.get(FlowResumer);
+      const processor = moduleRef.get(WebhookProcessor);
+      const appDataSource = moduleRef.get(DataSource);
+      const authHarness = auth;
+      const makeAllDue = async () => {
+        await appDataSource.query(
+          `UPDATE flow_instances SET next_attempt_at = now() WHERE completed_at IS NULL AND next_attempt_at > now()`,
+        );
+        await appDataSource.query(
+          `UPDATE webhook_events SET next_attempt_at = now() WHERE processed_at IS NULL AND next_attempt_at > now()`,
+        );
+      };
+      // Sign-ups share the outbox drain; run them one at a time so parallel callers can't race.
+      let signUpQueue: Promise<unknown> = Promise.resolve();
+      const signUpOne = async (): Promise<SignedUpUser> => {
+        const email = `funding-${randomUUID().slice(0, 12)}@example.com`;
+        const password = 'correct horse battery staple';
+        await moduleRef.get(AccountCreationService).register(email, password);
+        await authHarness.deliverOutbox();
+        const session = await moduleRef
+          .get(VerificationService)
+          .verifyEmail(email, password, authHarness.emails.latestCodeFor(email));
+        return { userId: session.user.id, email, accessToken: session.tokens.access.token };
+      };
+      payments = {
+        psp,
+        runner,
+        resumer,
+        processor,
+        checkpoints,
+        signUp() {
+          const next = signUpQueue.then(signUpOne, signUpOne);
+          signUpQueue = next.catch(() => undefined);
+          return next;
+        },
+        fund(user, body, idempotencyKey = randomUUID()) {
+          return http()
+            .post(`/${API_PREFIX}/wallet/fund`)
+            .set('Authorization', `Bearer ${user.accessToken}`)
+            .set('Idempotency-Key', idempotencyKey)
+            .send(body);
+        },
+        makeAllDue,
+        async clearRateLimits() {
+          await moduleRef
+            .get(RedisService)
+            .evaluate(`for _, key in ipairs(redis.call('KEYS', 'rate-limit:*')) do redis.call('DEL', key) end return 0`, [], []);
+        },
+        async lapseLeases() {
+          await appDataSource.query(
+            `UPDATE flow_instances SET leased_until = now() - interval '1 second' WHERE lease_token IS NOT NULL`,
+          );
+        },
+        async drive({ rounds = 12, deliverWebhooks = true } = {}) {
+          for (let round = 0; round < rounds; round += 1) {
+            let activity = 0;
+            if (deliverWebhooks) activity += (await psp.deliverAll()).length;
+            activity += (await processor.processDue(100)).claimed;
+            activity += await resumer.resumeDue(100);
+            await makeAllDue();
+            if (activity === 0) return;
+          }
+        },
+      };
+    }
   } else {
     moduleRef = await Test.createTestingModule({
       imports: [ConfigModule.forRoot(db.env), DatabaseModule, LedgerModule, ReservationsModule],
@@ -172,7 +326,18 @@ export async function startLedgerHarness(
     reservations: moduleRef.get(ReservationService),
     reservationChecks,
     auth,
+    payments,
     createWallet,
+    async newFlowIds(count) {
+      const { userId } = await createWallet();
+      const rows = (await dataSource.query(
+        `INSERT INTO flow_instances (flow_type, state, user_id, completed_at)
+         SELECT 'FUNDING', 'FAILED', $1, now() FROM generate_series(1, $2)
+         RETURNING id`,
+        [userId, count],
+      )) as { id: string }[];
+      return rows.map((row) => row.id);
+    },
     async openUserAccount(currency, wallet) {
       const owner = wallet ?? (await createWallet());
       const account = await chartOfAccounts.openUserAccount(owner.walletId, currency);
@@ -219,6 +384,8 @@ export async function startLedgerHarness(
                   id::text || ':' || status || ':' || coalesce(settled_minor::text, '-') || ':' ||
                   coalesce(settlement_transaction_id::text, '-') || ':' || coalesce(resolved_at::text, '-'),
                   ',' ORDER BY id), '')) FROM reservations) AS reservations_digest,
+               (SELECT count(*) FROM flow_instances)::int AS flow_count,
+               (SELECT count(*) FROM idempotency_keys)::int AS idempotency_key_count,
                (SELECT count(*) FROM users)::int         AS user_count,
                (SELECT count(*) FROM wallets)::int       AS wallet_count,
                (SELECT count(*) FROM outbox_events)::int AS outbox_event_count,
@@ -229,6 +396,8 @@ export async function startLedgerHarness(
         accounts_digest: string;
         transactions_digest: string;
         reservations_digest: string;
+        flow_count: number;
+        idempotency_key_count: number;
         user_count: number;
         wallet_count: number;
         outbox_event_count: number;
@@ -240,6 +409,8 @@ export async function startLedgerHarness(
         accountsDigest: row.accounts_digest,
         transactionsDigest: row.transactions_digest,
         reservationsDigest: row.reservations_digest,
+        flowCount: row.flow_count,
+        idempotencyKeyCount: row.idempotency_key_count,
         userCount: row.user_count,
         walletCount: row.wallet_count,
         outboxEventCount: row.outbox_event_count,
@@ -269,6 +440,7 @@ export async function startLedgerHarness(
     async close() {
       if (auth) await auth.app.close();
       else await moduleRef.close();
+      await psp?.stop();
       await db.stop();
       await redis?.stop().catch(() => undefined);
     },
