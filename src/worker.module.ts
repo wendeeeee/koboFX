@@ -8,6 +8,8 @@ import { OutboxModule } from './modules/outbox/outbox.module';
 import { AuditModule } from './modules/audit/audit.module';
 import { CurrenciesModule } from './modules/currencies/currencies.module';
 import { FlowsModule } from './modules/flows/flows.module';
+import { FxModule } from './modules/fx/fx.module';
+import { MoneyModule } from './common/money/money.module';
 import { LedgerModule } from './modules/ledger/ledger.module';
 import { ReservationsModule } from './modules/reservations/reservations.module';
 import { WebhooksModule } from './modules/payments/webhooks/webhooks.module';
@@ -15,8 +17,8 @@ import { RedisModule } from './redis/redis.module';
 
 /**
  * The worker process (design §3, §14): no HTTP. It runs the outbox dispatcher, the flow
- * resumer, the webhook processor and the reservation sweeper; later phases add the FX
- * poller and reconciliation here.
+ * resumer, the webhook processor, the reservation sweeper and the FX poller; later phases
+ * add reconciliation here.
  */
 @Module({})
 export class WorkerModule {
@@ -37,6 +39,8 @@ export class WorkerModule {
         NotificationsModule,
         FlowsModule,
         WebhooksModule,
+        MoneyModule,
+        FxModule,
       ],
     };
   }

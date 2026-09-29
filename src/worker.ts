@@ -4,6 +4,7 @@ import { NestFactory } from '@nestjs/core';
 import { Logger } from 'nestjs-pino';
 import { ConfigValidationError } from './config/configuration';
 import { FlowResumer } from './modules/flows/flow-resumer';
+import { FxPoller } from './modules/fx/fx-poller';
 import { OutboxPoller } from './modules/outbox/outbox-poller';
 import { WebhookProcessor } from './modules/payments/webhooks/webhook-processor';
 import { ReservationSweeper } from './modules/reservations/reservation-sweeper';
@@ -12,7 +13,7 @@ import { WorkerModule } from './worker.module';
 async function bootstrap(): Promise<void> {
   const worker = await NestFactory.createApplicationContext(WorkerModule.forRoot(), { bufferLogs: true });
   worker.useLogger(worker.get(Logger));
-  const loops = [worker.get(OutboxPoller), worker.get(FlowResumer), worker.get(WebhookProcessor), worker.get(ReservationSweeper)];
+  const loops = [worker.get(OutboxPoller), worker.get(FlowResumer), worker.get(WebhookProcessor), worker.get(ReservationSweeper), worker.get(FxPoller)];
   for (const loop of loops) loop.start();
 
   const shutdown = async () => {

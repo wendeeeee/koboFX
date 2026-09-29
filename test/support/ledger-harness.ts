@@ -8,6 +8,14 @@ import { DataSource } from 'typeorm';
 import { AppModule } from '../../src/app.module';
 import { API_PREFIX, PSP_WEBHOOK_PATH, configureApp } from '../../src/app.setup';
 import { CaptureCompletion, MockPsp } from '../../src/mock-psp/mock-psp';
+import { MockExchangeRateApi, RECORDED_RATES } from '../../src/mock-exchange-rate-api/mock-exchange-rate-api';
+import { FetchCoordination } from '../../src/modules/fx/fetch-coordination';
+import { FxMetrics } from '../../src/modules/fx/fx-metrics';
+import { FxPoller } from '../../src/modules/fx/fx-poller';
+import { FxRateFetcher } from '../../src/modules/fx/fx-rate-fetcher';
+import { FxRateService } from '../../src/modules/fx/fx-rate.service';
+import { QuoteService } from '../../src/modules/fx/quote.service';
+import { SNAPSHOT_CACHE_KEY } from '../../src/modules/fx/rate-cache';
 import { AccountCreationService } from '../../src/modules/auth/account-creation.service';
 import { VerificationService } from '../../src/modules/auth/verification.service';
 import { FlowCheckpoints } from '../../src/modules/flows/flow-checkpoints';
@@ -88,6 +96,38 @@ export interface HarnessOptions {
    * `auth`). Webhooks are delivered on command through the real HTTP pipeline.
    */
   readonly payments?: { readonly captureCompletion?: CaptureCompletion; readonly hangMilliseconds?: number } | true;
+  /**
+   * Run the simulated ExchangeRate-API on an ephemeral port and point the app at it (implies
+   * `payments`, for its sign-up helpers). Keyed Business plan by default — the API key
+   * travels in the URL path, so key hygiene is exercised by every FX test; `open: true`
+   * uses the key-less open-access endpoint (OPEN plan) instead.
+   */
+  readonly fx?: { readonly open?: boolean } | true;
+}
+
+/** Present when the harness was started with `{ fx }`. */
+export interface FxHarness {
+  readonly api: MockExchangeRateApi;
+  /** The simulated provider's API key (keyed mode): must never appear in a row or a log. */
+  readonly apiKey: string;
+  readonly fetcher: FxRateFetcher;
+  readonly poller: FxPoller;
+  readonly rates: FxRateService;
+  readonly quotes: QuoteService;
+  readonly coordination: FetchCoordination;
+  readonly metrics: FxMetrics;
+  /** Publish rates "now" on the TEST clock (by default published 60s ago, next update in 300s). */
+  publishFresh(rates?: Record<string, string>, options?: { publishedSecondsAgo?: number; nextUpdateInSeconds?: number }): void;
+  /** Publish, then fetch once: an accepted snapshot in Postgres and Redis. */
+  warm(rates?: Record<string, string>): Promise<void>;
+  /** Delete every `fx:*` Redis key (budget, breaker, lock, gate, cache) and the per-process copy. */
+  resetRedisState(): Promise<void>;
+  /** Drop the cached snapshot only (a Redis flush of the cache), and the per-process copy. */
+  flushSnapshotCache(): Promise<void>;
+  /** Count `provider_calls` rows of the FX provider. */
+  providerCallCount(): Promise<number>;
+  /** `POST /fx/quotes` through the real pipeline. */
+  quote(user: SignedUpUser, body: Record<string, unknown>, idempotencyKey?: string): request.Test;
 }
 
 /** A verified user with a live access token. */
@@ -133,8 +173,10 @@ export interface LedgerHarness {
   readonly reservationChecks: ReservationChecksService;
   /** Only with `{ auth: true }`. */
   readonly auth: AuthHarness | undefined;
-  /** Only with `{ payments }`. */
+  /** Only with `{ payments }` or `{ fx }`. */
   readonly payments: PaymentsHarness | undefined;
+  /** Only with `{ fx }`. */
+  readonly fx: FxHarness | undefined;
   createWallet(): Promise<{ userId: string; walletId: string }>;
   /**
    * Real `flow_instances` ids (`reservations.flow_id` has a foreign key since Phase 5):
@@ -160,7 +202,12 @@ export async function startLedgerHarness(
   overrides: Record<string, string> = {},
   options: HarnessOptions = {},
 ): Promise<LedgerHarness> {
-  const withPayments = options.payments !== undefined;
+  const withFx = options.fx !== undefined;
+  const withPayments = options.payments !== undefined || withFx;
+  const fxOpen = typeof options.fx === 'object' && options.fx.open === true;
+  const fxApiKey = `mockfxkey${randomUUID().replace(/-/g, '').slice(0, 20)}`;
+  const fxApi = withFx ? new MockExchangeRateApi({ apiKey: fxApiKey }) : undefined;
+  const fxUrl = fxApi ? await fxApi.start() : undefined;
   const redis = options.auth || withPayments ? await new RedisContainer('redis:7-alpine').start() : undefined;
   const pspSecrets = paymentProviderTestSecrets();
   const pspOptions = options.payments === true ? {} : (options.payments ?? {});
@@ -184,9 +231,21 @@ export async function startLedgerHarness(
           PSP_FUNDING_CURRENCIES: 'NGN,USD',
         }
       : {}),
+    ...(fxUrl
+      ? {
+          ...(fxOpen
+            ? { FX_RATE_BASE_URL: `${fxUrl}/v6/latest`, FX_PROVIDER_PLAN: 'OPEN' }
+            : { FX_RATE_BASE_URL: `${fxUrl}/v6/{apiKey}/latest`, FX_PROVIDER_PLAN: 'BUSINESS', EXCHANGE_RATE_API_KEY: fxApiKey }),
+          // Fast failure in tests; the policy (retries on reads only) is unchanged.
+          FX_REQUEST_TIMEOUT_MILLISECONDS: '400',
+          // Always re-read Redis: tests move the clock and flush the cache between steps.
+          FX_LOCAL_CACHE_MILLISECONDS: '0',
+        }
+      : {}),
     ...overrides,
   });
   let moduleRef: TestingModule;
+  let fx: FxHarness | undefined;
   let auth: AuthHarness | undefined;
   let payments: PaymentsHarness | undefined;
   const checkpoints = new ScriptedFlowCheckpoints();
@@ -290,6 +349,57 @@ export async function startLedgerHarness(
         },
       };
     }
+    if (fxApi) {
+      const redisService = moduleRef.get(RedisService);
+      const rates = moduleRef.get(FxRateService);
+      const fetcher = moduleRef.get(FxRateFetcher);
+      const clock = auth.clock;
+      const appDataSource = moduleRef.get(DataSource);
+      const app = auth.app;
+      const http = () => request(app.getHttpServer());
+      const publishFresh: FxHarness['publishFresh'] = (published = RECORDED_RATES, { publishedSecondsAgo = 60, nextUpdateInSeconds = 300 } = {}) => {
+        const now = clock.now().getTime();
+        fxApi.publish({ rates: published, publishedAt: new Date(now - publishedSecondsAgo * 1000), nextUpdateAt: new Date(now + nextUpdateInSeconds * 1000) });
+      };
+      fx = {
+        api: fxApi,
+        apiKey: fxApiKey,
+        fetcher,
+        poller: moduleRef.get(FxPoller),
+        rates,
+        quotes: moduleRef.get(QuoteService),
+        coordination: moduleRef.get(FetchCoordination),
+        metrics: moduleRef.get(FxMetrics),
+        publishFresh,
+        async warm(published) {
+          publishFresh(published);
+          const outcome = await fetcher.fetch('POLL');
+          if (outcome.kind !== 'ACCEPTED') throw new Error(`warm(): expected ACCEPTED, got ${JSON.stringify(outcome)}`);
+          rates.forgetLocalCopy();
+        },
+        async resetRedisState() {
+          await redisService.evaluate(`for _, key in ipairs(redis.call('KEYS', 'fx:*')) do redis.call('DEL', key) end return 0`, [], []);
+          rates.forgetLocalCopy();
+        },
+        async flushSnapshotCache() {
+          await redisService.evaluate(`return redis.call('DEL', KEYS[1])`, [SNAPSHOT_CACHE_KEY], []);
+          rates.forgetLocalCopy();
+        },
+        async providerCallCount() {
+          const [row] = (await appDataSource.query(
+            `SELECT count(*)::int AS count FROM provider_calls WHERE provider = 'exchange-rate-api'`,
+          )) as { count: number }[];
+          return row.count;
+        },
+        quote(user, body, idempotencyKey = randomUUID()) {
+          return http()
+            .post(`/${API_PREFIX}/fx/quotes`)
+            .set('Authorization', `Bearer ${user.accessToken}`)
+            .set('Idempotency-Key', idempotencyKey)
+            .send(body);
+        },
+      };
+    }
   } else {
     moduleRef = await Test.createTestingModule({
       imports: [ConfigModule.forRoot(db.env), DatabaseModule, LedgerModule, ReservationsModule],
@@ -327,6 +437,7 @@ export async function startLedgerHarness(
     reservationChecks,
     auth,
     payments,
+    fx,
     createWallet,
     async newFlowIds(count) {
       const { userId } = await createWallet();
@@ -441,6 +552,7 @@ export async function startLedgerHarness(
       if (auth) await auth.app.close();
       else await moduleRef.close();
       await psp?.stop();
+      await fxApi?.stop();
       await db.stop();
       await redis?.stop().catch(() => undefined);
     },

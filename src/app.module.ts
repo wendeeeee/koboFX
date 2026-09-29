@@ -19,6 +19,7 @@ import { HealthModule } from './modules/health/health.module';
 import { NotificationsModule } from './modules/notifications/notifications.module';
 import { ReservationsModule } from './modules/reservations/reservations.module';
 import { FlowsModule } from './modules/flows/flows.module';
+import { FxModule } from './modules/fx/fx.module';
 import { PaymentsModule } from './modules/payments/payments.module';
 import { WebhooksModule } from './modules/payments/webhooks/webhooks.module';
 import { WalletsModule } from './modules/wallets/wallets.module';
@@ -91,6 +92,7 @@ export class AppModule {
         FlowsModule,
         WalletsModule,
         WebhooksModule,
+        FxModule,
         HealthModule,
       ],
       // Order matters: throttle first (before any token work), then authenticate,

@@ -23,7 +23,8 @@
     "test:e2e": "jest --selectProjects e2e --runInBand",
     "test:all": "jest --runInBand",
     "test:cov": "jest --runInBand --coverage",
-    "start:mock-psp:dev": "ts-node src/mock-psp/main.ts"
+    "start:mock-psp:dev": "ts-node src/mock-psp/main.ts",
+    "start:mock-fx:dev": "ts-node src/mock-exchange-rate-api/main.ts"
   },
   "dependencies": {
     "@nestjs/common": "^11.2.6",

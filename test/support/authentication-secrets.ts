@@ -59,5 +59,8 @@ export function authenticationTestEnvironment(): Record<string, string> {
     PSP_BASE_URL: 'http://127.0.0.1:9',
     PSP_SECRET_KEY: pspSecretKey,
     PSP_WEBHOOK_SECRETS: pspWebhookSecret,
+    // Points nowhere by default: no test ever reaches the real FX provider. Harnesses that
+    // run the simulated one override it.
+    FX_RATE_BASE_URL: 'http://127.0.0.1:9/v6/latest',
   };
 }

@@ -116,7 +116,9 @@ describe('loadConfig', () => {
       expect(problemsOf({ ...VALID, NODE_ENV: 'production', DEMO_CREDIT_NGN_MINOR: '100' }).join()).toContain(
         'DEMO_CREDIT_NGN_MINOR must be 0 in production',
       );
-      expect(() => loadConfig({ ...VALID, NODE_ENV: 'production', DEMO_CREDIT_NGN_MINOR: '0' })).not.toThrow();
+      // A production config also needs a production-grade FX plan (Phase 6 §5.2: daily rates are refused).
+      const productionFx = { FX_RATE_BASE_URL: 'https://v6.exchangerate-api.com/v6/{apiKey}/latest', FX_PROVIDER_PLAN: 'BUSINESS', EXCHANGE_RATE_API_KEY: 'abcdef0123456789abcdef01' };
+      expect(() => loadConfig({ ...VALID, ...productionFx, NODE_ENV: 'production', DEMO_CREDIT_NGN_MINOR: '0' })).not.toThrow();
       expect(problemsOf({ ...VALID, DEMO_CREDIT_NGN_MINOR: '100.5' }).join()).toContain('DEMO_CREDIT_NGN_MINOR');
     });
 
@@ -190,5 +192,73 @@ describe('loadConfig: payment provider, funding and flows (Phase 5)', () => {
     expect(problemsOf({ ...VALID, FUNDING_LIMITS: 'nope' }).join()).toMatch(/must be JSON/);
     expect(problemsOf({ ...VALID, FUNDING_LIMITS: '[]' }).join()).toMatch(/must map currency/);
     expect(problemsOf({ ...VALID, PSP_FUNDING_CURRENCIES: 'ngn' }).join()).toMatch(/PSP_FUNDING_CURRENCIES/);
+  });
+});
+
+describe('loadConfig: FX rates (Phase 6)', () => {
+  const KEYED = 'https://v6.exchangerate-api.com/v6/{apiKey}/latest';
+  const KEY = 'abcdef0123456789abcdef01';
+
+  it('defaults to the key-less open-access endpoint on the OPEN plan, with its derived windows and budgets', () => {
+    const fx = loadConfig({ ...VALID, FX_RATE_BASE_URL: undefined }).fx;
+    expect(fx).toMatchObject({
+      providerName: 'exchange-rate-api',
+      baseUrl: 'https://open.er-api.com/v6/latest',
+      apiKey: undefined,
+      plan: 'OPEN',
+      cadenceSeconds: 86_400,
+      monthlyRequestBudget: 720,
+      dailyRequestBudget: 24,
+      executableMaximumAgeSeconds: 90_000,
+      displayMaximumAgeSeconds: 172_800,
+      maximumJumpRatio: '0.20',
+      quoteTimeToLiveSeconds: 30,
+      requestTimeoutMilliseconds: 2000,
+      readRetries: 3,
+    });
+    expect([...fx.rateBounds.keys()].sort()).toEqual(['EUR', 'GBP', 'NGN', 'USD']);
+    expect(fx.rateBounds.get('NGN')).toEqual({ minimum: '100', maximum: '100000' });
+  });
+
+  it('a keyed plan needs the {apiKey} placeholder AND a key — and neither without the other', () => {
+    const business = loadConfig({ ...VALID, FX_RATE_BASE_URL: KEYED, FX_PROVIDER_PLAN: 'BUSINESS', EXCHANGE_RATE_API_KEY: KEY }).fx;
+    expect(business).toMatchObject({ plan: 'BUSINESS', executableMaximumAgeSeconds: 420, displayMaximumAgeSeconds: 900, monthlyRequestBudget: 100_000 });
+    expect(problemsOf({ ...VALID, FX_RATE_BASE_URL: KEYED, FX_PROVIDER_PLAN: 'BUSINESS' }).join()).toMatch(/EXCHANGE_RATE_API_KEY is required/);
+    expect(problemsOf({ ...VALID, EXCHANGE_RATE_API_KEY: KEY }).join()).toMatch(/no \{apiKey\} placeholder/);
+    expect(problemsOf({ ...VALID, FX_PROVIDER_PLAN: 'PRO' }).join()).toMatch(/keyed plan/);
+    expect(problemsOf({ ...VALID, FX_RATE_BASE_URL: KEYED, EXCHANGE_RATE_API_KEY: KEY }).join()).toMatch(/OPEN is the key-less endpoint/);
+    expect(problemsOf({ ...VALID, FX_RATE_BASE_URL: KEYED, FX_PROVIDER_PLAN: 'PRO', EXCHANGE_RATE_API_KEY: 'bad key!' }).join()).toMatch(/EXCHANGE_RATE_API_KEY/);
+  });
+
+  it('production refuses daily-cadence plans (Phase 6 §5.2) and plain HTTP', () => {
+    const production = { ...VALID, NODE_ENV: 'production' };
+    expect(problemsOf(production).join()).toMatch(/FX_PROVIDER_PLAN=OPEN publishes once a day/);
+    expect(problemsOf({ ...production, FX_RATE_BASE_URL: KEYED, FX_PROVIDER_PLAN: 'FREE', EXCHANGE_RATE_API_KEY: KEY }).join()).toMatch(/FREE publishes once a day/);
+    expect(
+      problemsOf({ ...production, FX_RATE_BASE_URL: 'http://rates.internal/v6/{apiKey}/latest', FX_PROVIDER_PLAN: 'BUSINESS', EXCHANGE_RATE_API_KEY: KEY }).join(),
+    ).toMatch(/must be https/);
+    expect(loadConfig({ ...production, FX_RATE_BASE_URL: KEYED, FX_PROVIDER_PLAN: 'BUSINESS', EXCHANGE_RATE_API_KEY: KEY }).fx.plan).toBe('BUSINESS');
+  });
+
+  it('overrides replace the plan defaults; the display window may not be shorter than the executable one', () => {
+    const fx = loadConfig({ ...VALID, FX_EXECUTABLE_MAXIMUM_RATE_AGE_SECONDS: '120', FX_DISPLAY_MAXIMUM_RATE_AGE_SECONDS: '900', FX_DAILY_REQUEST_BUDGET: '5' }).fx;
+    expect(fx).toMatchObject({ executableMaximumAgeSeconds: 120, displayMaximumAgeSeconds: 900, dailyRequestBudget: 5, monthlyRequestBudget: 720 });
+    expect(problemsOf({ ...VALID, FX_EXECUTABLE_MAXIMUM_RATE_AGE_SECONDS: '901', FX_DISPLAY_MAXIMUM_RATE_AGE_SECONDS: '900' }).join()).toMatch(/at least the executable/);
+  });
+
+  it('jump ratios and rate bounds are decimal strings, validated', () => {
+    const fx = loadConfig({
+      ...VALID,
+      FX_JUMP_RATIO_OVERRIDES: '{"NGN":"0.35"}',
+      FX_RATE_BOUNDS: '{"USD":{"minimum":"1","maximum":"1"},"NGN":{"minimum":"500","maximum":"5000"}}',
+    }).fx;
+    expect(fx.jumpRatioOverrides.get('NGN')).toBe('0.35');
+    expect(fx.rateBounds.get('NGN')).toEqual({ minimum: '500', maximum: '5000' });
+    expect(problemsOf({ ...VALID, FX_MAXIMUM_JUMP_RATIO: '1.5' }).join()).toMatch(/FX_MAXIMUM_JUMP_RATIO/);
+    expect(problemsOf({ ...VALID, FX_JUMP_RATIO_OVERRIDES: '{"NGN":0.35}' }).join()).toMatch(/FX_JUMP_RATIO_OVERRIDES.NGN/);
+    expect(problemsOf({ ...VALID, FX_JUMP_RATIO_OVERRIDES: '[1]' }).join()).toMatch(/must be a JSON object/);
+    expect(problemsOf({ ...VALID, FX_RATE_BOUNDS: '{"NGN":{"minimum":100,"maximum":"5000"}}' }).join()).toMatch(/FX_RATE_BOUNDS.NGN/);
+    expect(problemsOf({ ...VALID, FX_RATE_BOUNDS: '{"NGN":{"minimum":"0","maximum":"5000"}}' }).join()).toMatch(/FX_RATE_BOUNDS.NGN/);
+    expect(problemsOf({ ...VALID, FX_RATE_BOUNDS: 'nope' }).join()).toMatch(/FX_RATE_BOUNDS must be a JSON object/);
   });
 });

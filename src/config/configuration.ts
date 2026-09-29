@@ -1,6 +1,7 @@
 import { KeyObject, createPrivateKey, createPublicKey } from 'node:crypto';
 import Joi from 'joi';
 import { RoundingConfig, RoundingPurpose, RoundingStrategy } from '../common/money/rounding-policy';
+import { PROVIDER_PLAN_PROFILES, ProviderPlan } from '../modules/fx/provider-plan';
 
 export type NodeEnv = 'development' | 'test' | 'production';
 
@@ -112,6 +113,47 @@ export interface FlowConfig {
   readonly reservationSweepIntervalMilliseconds: number;
 }
 
+/** A decimal string; converted to `Decimal` where used (never a float). */
+export type DecimalString = string;
+
+export interface FxRateBounds {
+  readonly minimum: DecimalString;
+  readonly maximum: DecimalString;
+}
+
+export interface FxConfig {
+  /** Name recorded on every `provider_calls` and `exchange_rate_snapshots` row. */
+  readonly providerName: string;
+  /**
+   * `FX_RATE_BASE_URL`, up to and including `/latest` (the adapter appends `/USD`). May hold
+   * an `{apiKey}` placeholder (the keyed v6 endpoint puts the key in the path); the
+   * open-access endpoint needs none.
+   */
+  readonly baseUrl: string;
+  /** Only with an `{apiKey}` URL. Never recorded, logged or put in an error message. */
+  readonly apiKey: string | undefined;
+  readonly plan: ProviderPlan;
+  readonly cadenceSeconds: number;
+  readonly monthlyRequestBudget: number;
+  readonly dailyRequestBudget: number;
+  readonly executableMaximumAgeSeconds: number;
+  readonly displayMaximumAgeSeconds: number;
+  readonly publicationGraceSeconds: number;
+  readonly latePublicationRetrySeconds: number;
+  readonly maximumJumpRatio: DecimalString;
+  readonly jumpRatioOverrides: ReadonlyMap<string, DecimalString>;
+  /** Loose plausibility bounds per currency (USD-based mid); required for every active currency. */
+  readonly rateBounds: ReadonlyMap<string, FxRateBounds>;
+  readonly quoteTimeToLiveSeconds: number;
+  /** Per attempt (design §7.2: 2s); also the synchronous catch-up budget. */
+  readonly requestTimeoutMilliseconds: number;
+  readonly readRetries: number;
+  /** How often the worker's poller wakes to ask "is a fetch due?" (the schedule decides). */
+  readonly pollIntervalMilliseconds: number;
+  /** How long a process may serve a snapshot from memory before re-reading Redis. */
+  readonly localCacheMilliseconds: number;
+}
+
 export interface AppConfig {
   readonly env: NodeEnv;
   readonly port: number;
@@ -126,6 +168,7 @@ export interface AppConfig {
   readonly paymentProvider: PaymentProviderConfig;
   readonly funding: FundingConfig;
   readonly flows: FlowConfig;
+  readonly fx: FxConfig;
   /** Reverse proxies in front of the API; `req.ip` is taken from X-Forwarded-For only this deep. */
   readonly trustProxyHops: number;
 }
@@ -233,6 +276,36 @@ const envSchema = Joi.object({
   FLOW_STALLED_AFTER_MINUTES: Joi.number().integer().min(1).default(30),
   WEBHOOK_MAX_ATTEMPTS: Joi.number().integer().min(1).max(100).default(10),
   RESERVATION_SWEEP_INTERVAL_MILLISECONDS: Joi.number().integer().min(100).default(30_000),
+
+  // FX rates (design §7.2, §7.4; Phase 6). One provider, ExchangeRate-API, behind a port.
+  // Validated as a URL in parseFx, after the {apiKey} placeholder (braces are not URI characters).
+  FX_RATE_BASE_URL: Joi.string().max(2048).default('https://open.er-api.com/v6/latest'),
+  EXCHANGE_RATE_API_KEY: Joi.string().pattern(/^[A-Za-z0-9]{8,64}$/),
+  FX_PROVIDER_NAME: Joi.string()
+    .pattern(/^[a-z0-9-]{1,32}$/)
+    .default('exchange-rate-api'),
+  FX_PROVIDER_PLAN: Joi.string()
+    .valid(...Object.values(ProviderPlan))
+    .default(ProviderPlan.OPEN),
+  FX_MONTHLY_REQUEST_BUDGET: Joi.number().integer().min(1),
+  FX_DAILY_REQUEST_BUDGET: Joi.number().integer().min(1),
+  FX_EXECUTABLE_MAXIMUM_RATE_AGE_SECONDS: Joi.number().integer().min(1),
+  FX_DISPLAY_MAXIMUM_RATE_AGE_SECONDS: Joi.number().integer().min(1),
+  FX_PUBLICATION_GRACE_SECONDS: Joi.number().integer().min(0),
+  FX_MAXIMUM_JUMP_RATIO: Joi.string()
+    .pattern(/^0\.\d{1,6}$/)
+    .default('0.20'),
+  // JSON {currency: "0.35"} — per-currency jump thresholds replacing the global one.
+  FX_JUMP_RATIO_OVERRIDES: Joi.string().default('{}'),
+  // JSON {currency: {minimum, maximum}} of USD-based mids, decimal strings.
+  FX_RATE_BOUNDS: Joi.string().default(
+    '{"USD":{"minimum":"1","maximum":"1"},"NGN":{"minimum":"100","maximum":"100000"},"EUR":{"minimum":"0.1","maximum":"10"},"GBP":{"minimum":"0.1","maximum":"10"}}',
+  ),
+  FX_QUOTE_TIME_TO_LIVE_SECONDS: Joi.number().integer().min(5).max(300).default(30),
+  FX_REQUEST_TIMEOUT_MILLISECONDS: Joi.number().integer().min(100).max(30_000).default(2000),
+  FX_READ_RETRIES: Joi.number().integer().min(0).max(5).default(3),
+  FX_POLL_INTERVAL_MILLISECONDS: Joi.number().integer().min(50).default(15_000),
+  FX_LOCAL_CACHE_MILLISECONDS: Joi.number().integer().min(0).max(10_000).default(1000),
 })
   .and('SMTP_USER', 'SMTP_PASSWORD')
   // The runtime and migration roles must differ, or the ledger's revoked grants are void.
@@ -266,7 +339,8 @@ export function loadConfig(raw: NodeJS.ProcessEnv | Record<string, string | unde
   }
   const webhookSecrets = parseWebhookSecrets(raw.PSP_WEBHOOK_SECRETS, problems);
   const funding = parseFunding(env.PSP_FUNDING_CURRENCIES, env.FUNDING_LIMITS, problems);
-  if (problems.length > 0 || !keys || !pepper || !webhookSecrets || !funding) {
+  const fx = error ? undefined : parseFx(env, problems);
+  if (problems.length > 0 || !keys || !pepper || !webhookSecrets || !funding || !fx) {
     throw new ConfigValidationError(problems);
   }
   return {
@@ -339,7 +413,107 @@ export function loadConfig(raw: NodeJS.ProcessEnv | Record<string, string | unde
       webhookMaxAttempts: env.WEBHOOK_MAX_ATTEMPTS,
       reservationSweepIntervalMilliseconds: env.RESERVATION_SWEEP_INTERVAL_MILLISECONDS,
     },
+    fx,
     trustProxyHops: env.TRUST_PROXY_HOPS,
+  };
+}
+
+const API_KEY_PLACEHOLDER = '{apiKey}';
+const DECIMAL_PATTERN = /^(0|[1-9]\d*)(\.\d+)?$/;
+const JUMP_RATIO_PATTERN = /^0\.\d{1,6}$/;
+
+function parseJsonObject(name: string, value: string, problems: string[]): Record<string, unknown> | undefined {
+  try {
+    const parsed: unknown = JSON.parse(value);
+    if (typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed)) return parsed as Record<string, unknown>;
+  } catch {
+    // reported below
+  }
+  problems.push(`${name} must be a JSON object`);
+  return undefined;
+}
+
+/**
+ * FX provider settings (Phase 6). The plan fixes the defaults (cadence, budgets, freshness
+ * windows); each can be overridden. Refused: a key without an `{apiKey}` URL or the reverse,
+ * a display window shorter than the executable one, bounds that are not decimal strings,
+ * and — in production — a plan whose rates are too old to trade on (Phase 6 §5.2) or a
+ * plain-HTTP provider.
+ */
+function parseFx(env: Record<string, never>, problems: string[]): FxConfig | undefined {
+  const before = problems.length;
+  const plan = env.FX_PROVIDER_PLAN as ProviderPlan;
+  const profile = PROVIDER_PLAN_PROFILES[plan];
+  const baseUrl = String(env.FX_RATE_BASE_URL).replace(/\/+$/, '');
+  const apiKey = env.EXCHANGE_RATE_API_KEY as string | undefined;
+  const needsKey = baseUrl.includes(API_KEY_PLACEHOLDER);
+  try {
+    const url = new URL(baseUrl.split(API_KEY_PLACEHOLDER).join('key'));
+    if (url.protocol !== 'http:' && url.protocol !== 'https:') throw new Error('scheme');
+  } catch {
+    problems.push('FX_RATE_BASE_URL must be an http(s) URL (optionally with an {apiKey} path placeholder)');
+  }
+  if (needsKey && !apiKey) problems.push(`EXCHANGE_RATE_API_KEY is required: FX_RATE_BASE_URL contains ${API_KEY_PLACEHOLDER}`);
+  if (!needsKey && apiKey) problems.push(`EXCHANGE_RATE_API_KEY is set but FX_RATE_BASE_URL has no ${API_KEY_PLACEHOLDER} placeholder to carry it`);
+  if (plan === ProviderPlan.OPEN && needsKey) problems.push('FX_PROVIDER_PLAN=OPEN is the key-less endpoint; a keyed URL needs FREE, PRO or BUSINESS');
+  if (plan !== ProviderPlan.OPEN && !needsKey) problems.push(`FX_PROVIDER_PLAN=${plan} is a keyed plan; FX_RATE_BASE_URL needs ${API_KEY_PLACEHOLDER}`);
+  if (env.NODE_ENV === 'production') {
+    if (!profile.allowedInProduction) {
+      problems.push(`FX_PROVIDER_PLAN=${plan} publishes once a day: too old to trade on, refused in production (Phase 6 §5.2)`);
+    }
+    if (!baseUrl.startsWith('https://')) problems.push('FX_RATE_BASE_URL must be https in production');
+  }
+
+  const executableMaximumAgeSeconds = (env.FX_EXECUTABLE_MAXIMUM_RATE_AGE_SECONDS as number | undefined) ?? profile.executableMaximumAgeSeconds;
+  const displayMaximumAgeSeconds = (env.FX_DISPLAY_MAXIMUM_RATE_AGE_SECONDS as number | undefined) ?? profile.displayMaximumAgeSeconds;
+  if (displayMaximumAgeSeconds < executableMaximumAgeSeconds) {
+    problems.push('FX_DISPLAY_MAXIMUM_RATE_AGE_SECONDS must be at least the executable maximum age');
+  }
+
+  const overrides = new Map<string, string>();
+  const rawOverrides = parseJsonObject('FX_JUMP_RATIO_OVERRIDES', env.FX_JUMP_RATIO_OVERRIDES, problems) ?? {};
+  for (const [currency, ratio] of Object.entries(rawOverrides)) {
+    if (!/^[A-Z]{3}$/.test(currency) || typeof ratio !== 'string' || !JUMP_RATIO_PATTERN.test(ratio)) {
+      problems.push(`FX_JUMP_RATIO_OVERRIDES.${currency} must be a ratio string such as "0.35"`);
+      continue;
+    }
+    overrides.set(currency, ratio);
+  }
+
+  const bounds = new Map<string, FxRateBounds>();
+  const rawBounds = parseJsonObject('FX_RATE_BOUNDS', env.FX_RATE_BOUNDS, problems) ?? {};
+  for (const [currency, entry] of Object.entries(rawBounds)) {
+    const { minimum, maximum } = (entry ?? {}) as { minimum?: unknown; maximum?: unknown };
+    if (
+      !/^[A-Z]{3}$/.test(currency) || typeof minimum !== 'string' || typeof maximum !== 'string' ||
+      !DECIMAL_PATTERN.test(minimum) || !DECIMAL_PATTERN.test(maximum) || /^0(\.0*)?$/.test(minimum)
+    ) {
+      problems.push(`FX_RATE_BOUNDS.${currency} needs positive decimal strings {minimum, maximum}`);
+      continue;
+    }
+    bounds.set(currency, { minimum, maximum });
+  }
+  if (problems.length > before) return undefined;
+  return {
+    providerName: env.FX_PROVIDER_NAME,
+    baseUrl,
+    apiKey,
+    plan,
+    cadenceSeconds: profile.cadenceSeconds,
+    monthlyRequestBudget: (env.FX_MONTHLY_REQUEST_BUDGET as number | undefined) ?? profile.monthlyBudget,
+    dailyRequestBudget: (env.FX_DAILY_REQUEST_BUDGET as number | undefined) ?? profile.dailyBudget,
+    executableMaximumAgeSeconds,
+    displayMaximumAgeSeconds,
+    publicationGraceSeconds: (env.FX_PUBLICATION_GRACE_SECONDS as number | undefined) ?? profile.publicationGraceSeconds,
+    latePublicationRetrySeconds: profile.latePublicationRetrySeconds,
+    maximumJumpRatio: env.FX_MAXIMUM_JUMP_RATIO,
+    jumpRatioOverrides: overrides,
+    rateBounds: bounds,
+    quoteTimeToLiveSeconds: env.FX_QUOTE_TIME_TO_LIVE_SECONDS,
+    requestTimeoutMilliseconds: env.FX_REQUEST_TIMEOUT_MILLISECONDS,
+    readRetries: env.FX_READ_RETRIES,
+    pollIntervalMilliseconds: env.FX_POLL_INTERVAL_MILLISECONDS,
+    localCacheMilliseconds: env.FX_LOCAL_CACHE_MILLISECONDS,
   };
 }
 
