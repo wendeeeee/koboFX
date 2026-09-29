@@ -52,11 +52,17 @@ export class ConversionFlowsAndProvenance1790985600001 implements MigrationInter
     await queryRunner.query(`
       ALTER TABLE transactions ADD CONSTRAINT transactions_conversion_provenance CHECK (
         type <> 'CONVERSION' OR (
-          source_currency IS NOT NULL AND target_currency IS NOT NULL AND source_currency <> target_currency
-          AND source_amount_minor > 0 AND target_amount_minor > 0
-          AND rate_display > 0 AND reference_rate > 0
+          -- Every column spelled out NOT NULL: a CHECK passes when it evaluates to NULL,
+          -- so "rate_display > 0" alone would let a NULL rate through.
+          source_currency IS NOT NULL AND target_currency IS NOT NULL
+          AND source_amount_minor IS NOT NULL AND target_amount_minor IS NOT NULL
+          AND rate_display IS NOT NULL AND reference_rate IS NOT NULL
           AND rate_provider IS NOT NULL AND rate_fetched_at IS NOT NULL
           AND rate_provider_updated_at IS NOT NULL AND rate_snapshot_id IS NOT NULL
+          AND spread_basis_points IS NOT NULL
+          AND source_currency <> target_currency
+          AND source_amount_minor > 0 AND target_amount_minor > 0
+          AND rate_display > 0 AND reference_rate > 0
           AND spread_basis_points >= 0 AND spread_basis_points < 10000
         )
       )
