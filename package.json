@@ -39,6 +39,7 @@
     "helmet": "^8.3.0",
     "ioredis": "^5.11.1",
     "joi": "^18.2.9",
+    "lossless-json": "^4.3.1",
     "nestjs-pino": "^4.6.1",
     "nodemailer": "^10.0.11",
     "pg": "^8.23.0",

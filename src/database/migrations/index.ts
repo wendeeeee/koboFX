@@ -16,6 +16,9 @@ import { CreateFundingPayments1790812800001 } from './1790812800001-CreateFundin
 import { CreateIdempotencyKeys1790812800002 } from './1790812800002-CreateIdempotencyKeys';
 import { CreateWebhookEvents1790812800003 } from './1790812800003-CreateWebhookEvents';
 import { CreateProviderCalls1790812800004 } from './1790812800004-CreateProviderCalls';
+import { CreateCurrencyPairs1790899200000 } from './1790899200000-CreateCurrencyPairs';
+import { CreateExchangeRateSnapshots1790899200001 } from './1790899200001-CreateExchangeRateSnapshots';
+import { CreateQuotes1790899200002 } from './1790899200002-CreateQuotes';
 
 /** Explicit, ordered list — no globbing, so the CLI and the test harness run the same set. */
 export const MIGRATIONS = [
@@ -37,4 +40,7 @@ export const MIGRATIONS = [
   CreateIdempotencyKeys1790812800002,
   CreateWebhookEvents1790812800003,
   CreateProviderCalls1790812800004,
+  CreateCurrencyPairs1790899200000,
+  CreateExchangeRateSnapshots1790899200001,
+  CreateQuotes1790899200002,
 ];

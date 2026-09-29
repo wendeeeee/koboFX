@@ -22,6 +22,7 @@ const nonNegative: fc.Arbitrary<Dec> = fc
 
 const CONFIG: RoundingConfig = {
   [RoundingPurpose.USER_CREDIT]: RoundingStrategy.ROUND_DOWN,
+  [RoundingPurpose.USER_DEBIT]: RoundingStrategy.ROUND_UP,
   [RoundingPurpose.REVENUE]: RoundingStrategy.ROUND_HALF_EVEN,
   [RoundingPurpose.FEE]: RoundingStrategy.ROUND_HALF_EVEN,
 };

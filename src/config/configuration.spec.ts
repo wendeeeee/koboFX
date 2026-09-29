@@ -13,6 +13,7 @@ const VALID = {
   DB_MIGRATION_PASSWORD: 'b',
   REDIS_URL: 'redis://localhost:6379',
   ROUNDING_USER_CREDIT: 'ROUND_DOWN',
+  ROUNDING_USER_DEBIT: 'ROUND_UP',
   ROUNDING_REVENUE: 'ROUND_HALF_EVEN',
   ROUNDING_FEE: 'ROUND_HALF_EVEN',
   ...authenticationTestEnvironment(),
@@ -38,6 +39,7 @@ describe('loadConfig', () => {
     expect(config.db.app).toEqual({ user: 'fx_app', password: 'a' });
     expect(config.rounding).toEqual({
       [RoundingPurpose.USER_CREDIT]: RoundingStrategy.ROUND_DOWN,
+      [RoundingPurpose.USER_DEBIT]: RoundingStrategy.ROUND_UP,
       [RoundingPurpose.REVENUE]: RoundingStrategy.ROUND_HALF_EVEN,
       [RoundingPurpose.FEE]: RoundingStrategy.ROUND_HALF_EVEN,
     });
@@ -52,7 +54,7 @@ describe('loadConfig', () => {
 
   it('fails fast and reports EVERY problem at once', () => {
     const problems = problemsOf({ NODE_ENV: 'test' });
-    for (const key of ['DB_HOST', 'DB_NAME', 'DB_APP_USER', 'REDIS_URL', 'ROUNDING_USER_CREDIT']) {
+    for (const key of ['DB_HOST', 'DB_NAME', 'DB_APP_USER', 'REDIS_URL', 'ROUNDING_USER_CREDIT', 'ROUNDING_USER_DEBIT']) {
       expect(problems.some((p) => p.includes(key))).toBe(true);
     }
   });

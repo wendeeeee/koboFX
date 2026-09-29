@@ -1,7 +1,6 @@
-import { Logger } from '@nestjs/common';
-import { RandomSource, fullJitterDelayMilliseconds } from '../../common/polling/backoff';
-import { ProviderRequestRejectedError, ProviderResponseInvalidError, ProviderUnavailableError } from './payment.errors';
-import { ProviderCallDirection, ProviderCallRecorder, unparsedBody } from './provider-call-recorder';
+import { RandomSource } from '../../common/polling/backoff';
+import { ProviderHttpClient, ResponseClassification } from '../../common/http/provider-http-client';
+import { ProviderCallRecorder } from '../../common/http/provider-call-recorder';
 import { providerErrorCode } from './psp-responses';
 
 export interface PspHttpClientOptions {
@@ -40,121 +39,80 @@ export function isRetryable(method: PspRequest['method']): boolean {
 }
 
 /**
- * The transport to the PSP (design §7.2, handbook: consuming APIs):
- *
- * - a per-attempt timeout (`AbortSignal.timeout`);
- * - bounded retries with exponential backoff and full jitter — for GETs only;
- * - a `200` carrying an error body is an error, not a success;
- * - every attempt, success or failure, is one `provider_calls` row;
- * - the API key travels in a header and is never recorded (headers are not stored).
- *
- * Classification: timeout, network error, 5xx, 429, error body or unparseable JSON →
- * `ProviderUnavailableError` (transient; for a write the outcome is unknown); any other
- * 4xx → `ProviderRequestRejectedError` (definitive).
+ * How the PSP's answers are read: timeout, network error, 5xx, 429, an error body (even
+ * on a `200`) → transient (for a write the outcome is unknown); a body that is not JSON →
+ * invalid (retried like transient); any other 4xx → a definitive refusal.
+ */
+export function classifyPspResponse(status: number, text: string): ResponseClassification<unknown> {
+  let body: unknown;
+  try {
+    body = text.length === 0 ? null : JSON.parse(text);
+  } catch {
+    return { outcome: 'INVALID', error: 'unparseable JSON' };
+  }
+  const errorCode = providerErrorCode(body);
+  const ok = status >= 200 && status < 300;
+  if (status >= 500 || status === 429 || (ok && errorCode !== undefined)) {
+    return {
+      outcome: 'TRANSIENT',
+      error: `provider error ${errorCode ?? status}`,
+      ...(ok ? { warning: 'PSP returned 200 with an error body' } : {}),
+    };
+  }
+  if (!ok) return { outcome: 'DEFINITIVE', error: `rejected ${errorCode ?? ''}`.trim(), providerErrorCode: errorCode ?? null };
+  return { outcome: 'OK', value: body };
+}
+
+/**
+ * The transport to the PSP (design §7.2, handbook: consuming APIs): the shared
+ * `ProviderHttpClient` (per-attempt timeout, retries with full jitter on reads only,
+ * every attempt recorded) with the PSP's classification. The API key travels in a
+ * header and is never recorded (headers are not stored); writes carry the PSP's
+ * `Idempotency-Key` and are sent exactly once.
  */
 export class PspHttpClient {
-  private readonly logger = new Logger(PspHttpClient.name);
-  private readonly random: RandomSource;
-  private readonly sleep: (milliseconds: number) => Promise<void>;
-  private readonly fetch: typeof fetch;
+  private readonly client: ProviderHttpClient;
 
   constructor(
     private readonly options: PspHttpClientOptions,
-    private readonly recorder: ProviderCallRecorder,
+    recorder: ProviderCallRecorder,
   ) {
-    this.random = options.random ?? Math.random;
-    this.sleep = options.sleep ?? ((milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds)));
-    this.fetch = options.fetch ?? fetch;
+    this.client = new ProviderHttpClient(
+      {
+        provider: options.provider,
+        label: 'PSP',
+        baseUrl: options.baseUrl,
+        timeoutMilliseconds: options.timeoutMilliseconds,
+        readRetries: options.readRetries,
+        retryBaseMilliseconds: options.retryBaseMilliseconds,
+        retryCapMilliseconds: options.retryCapMilliseconds,
+        secrets: [options.secretKey],
+        recordResponseAs: 'redacted-json',
+        random: options.random,
+        sleep: options.sleep,
+        fetch: options.fetch,
+      },
+      recorder,
+    );
   }
 
   async send(request: PspRequest): Promise<PspResponse> {
     if (request.method === 'POST' && !request.idempotencyKey) {
       throw new Error(`PSP write ${request.operation} sent without an idempotency key`);
     }
-    const attempts = isRetryable(request.method) ? 1 + this.options.readRetries : 1;
-    let lastError: unknown;
-    for (let attempt = 1; attempt <= attempts; attempt += 1) {
-      try {
-        return await this.attempt(request, attempt);
-      } catch (error) {
-        lastError = error;
-        if (error instanceof ProviderRequestRejectedError || attempt === attempts) break;
-        await this.sleep(
-          fullJitterDelayMilliseconds(
-            attempt - 1,
-            this.options.retryBaseMilliseconds ?? 100,
-            this.options.retryCapMilliseconds ?? 2000,
-            this.random,
-          ),
-        );
-      }
-    }
-    throw lastError;
-  }
-
-  private async attempt(request: PspRequest, attempt: number): Promise<PspResponse> {
-    const started = Date.now();
-    const record = (fields: { responseStatus?: number; responseBody?: unknown; error?: string }) =>
-      this.recorder.recordQuietly({
-        provider: this.options.provider,
-        operation: request.operation,
-        direction: ProviderCallDirection.OUTBOUND,
-        flowId: request.flowId,
-        requestMethod: request.method,
-        requestPath: request.path,
-        attempt,
-        requestBody: request.body,
-        durationMilliseconds: Date.now() - started,
-        ...fields,
-      });
-
-    let response: Response;
-    let text: string;
-    try {
-      response = await this.fetch(new URL(request.path, this.options.baseUrl), {
-        method: request.method,
-        headers: {
-          Authorization: `Bearer ${this.options.secretKey}`,
-          Accept: 'application/json',
-          ...(request.body ? { 'Content-Type': 'application/json' } : {}),
-          ...(request.idempotencyKey ? { 'Idempotency-Key': request.idempotencyKey } : {}),
-        },
-        body: request.body ? JSON.stringify(request.body) : undefined,
-        signal: AbortSignal.timeout(this.options.timeoutMilliseconds),
-      });
-      text = await response.text();
-    } catch (error) {
-      // `AbortSignal.timeout` rejects with a DOMException named TimeoutError (not always `instanceof Error`).
-      const { name, message } = (error ?? {}) as { name?: unknown; message?: unknown };
-      const reason = name === 'TimeoutError' ? 'timed out' : 'network error';
-      await record({ error: `${reason}: ${typeof message === 'string' ? message : String(error)}` });
-      throw new ProviderUnavailableError(`PSP ${request.operation} ${reason}`, request.operation);
-    }
-
-    let body: unknown;
-    try {
-      body = text.length === 0 ? null : JSON.parse(text);
-    } catch {
-      await record({ responseStatus: response.status, responseBody: unparsedBody(text), error: 'unparseable JSON' });
-      throw new ProviderResponseInvalidError(`PSP ${request.operation} returned a body that is not JSON`, request.operation);
-    }
-
-    const errorCode = providerErrorCode(body);
-    if (response.status >= 500 || response.status === 429 || (response.ok && errorCode !== undefined)) {
-      await record({ responseStatus: response.status, responseBody: body, error: `provider error ${errorCode ?? response.status}` });
-      if (response.ok) this.logger.warn({ operation: request.operation, errorCode }, 'PSP returned 200 with an error body');
-      throw new ProviderUnavailableError(`PSP ${request.operation} failed (${response.status})`, request.operation, response.status);
-    }
-    if (!response.ok) {
-      await record({ responseStatus: response.status, responseBody: body, error: `rejected ${errorCode ?? ''}`.trim() });
-      throw new ProviderRequestRejectedError(
-        `PSP rejected ${request.operation} (${response.status})`,
-        request.operation,
-        response.status,
-        errorCode ?? null,
-      );
-    }
-    await record({ responseStatus: response.status, responseBody: body });
-    return { status: response.status, body };
+    const response = await this.client.send({
+      operation: request.operation,
+      method: request.method,
+      path: request.path,
+      body: request.body,
+      flowId: request.flowId,
+      retryable: isRetryable(request.method),
+      headers: {
+        Authorization: `Bearer ${this.options.secretKey}`,
+        ...(request.idempotencyKey ? { 'Idempotency-Key': request.idempotencyKey } : {}),
+      },
+      classify: classifyPspResponse,
+    });
+    return { status: response.status, body: response.value };
   }
 }

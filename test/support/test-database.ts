@@ -55,6 +55,7 @@ export async function startTestDatabase(overrides: Record<string, string> = {}):
     DB_POOL_MAX: '10',
     REDIS_URL: 'redis://localhost:6379',
     ROUNDING_USER_CREDIT: 'ROUND_DOWN',
+    ROUNDING_USER_DEBIT: 'ROUND_UP',
     ROUNDING_REVENUE: 'ROUND_HALF_EVEN',
     ROUNDING_FEE: 'ROUND_HALF_EVEN',
     ...authenticationTestEnvironment(),

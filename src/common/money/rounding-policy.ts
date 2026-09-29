@@ -25,6 +25,8 @@ export enum RoundingStrategy {
 export enum RoundingPurpose {
   /** The amount credited to a user in a conversion. */
   USER_CREDIT = 'USER_CREDIT',
+  /** The amount debited from a user when they ask for an exact target amount (never less than delivered). */
+  USER_DEBIT = 'USER_DEBIT',
   /** Revenue figures, e.g. the mid-value leg the spread is derived from. */
   REVENUE = 'REVENUE',
   FEE = 'FEE',

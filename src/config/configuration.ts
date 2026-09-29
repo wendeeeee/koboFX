@@ -162,6 +162,9 @@ const envSchema = Joi.object({
   ROUNDING_USER_CREDIT: Joi.string()
     .valid(...strategies)
     .required(),
+  ROUNDING_USER_DEBIT: Joi.string()
+    .valid(...strategies)
+    .required(),
   ROUNDING_REVENUE: Joi.string()
     .valid(...strategies)
     .required(),
@@ -283,6 +286,7 @@ export function loadConfig(raw: NodeJS.ProcessEnv | Record<string, string | unde
     redisUrl: env.REDIS_URL,
     rounding: {
       [RoundingPurpose.USER_CREDIT]: env.ROUNDING_USER_CREDIT,
+      [RoundingPurpose.USER_DEBIT]: env.ROUNDING_USER_DEBIT,
       [RoundingPurpose.REVENUE]: env.ROUNDING_REVENUE,
       [RoundingPurpose.FEE]: env.ROUNDING_FEE,
     },
