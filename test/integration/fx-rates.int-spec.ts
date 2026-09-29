@@ -42,6 +42,8 @@ describe('FX rates: poller, cache, read path (integration)', () => {
     // Time only moves forward (as it does in production): each test starts a day later, so
     // snapshots stored by earlier tests are simply older ones.
     clock.advance(86_400_000);
+    // A day later the access token has (correctly) expired: a fresh verified user per test.
+    user = await payments.signUp();
     fx.api.clearFaults();
     await fx.resetRedisState();
     await payments.clearRateLimits();
@@ -202,6 +204,7 @@ describe('FX rates: poller, cache, read path (integration)', () => {
     it('too old to display → ONE synchronous catch-up fetch, then fresh', async () => {
       await fx.warm();
       clock.advance(901_000);
+      user = await payments.signUp(); // the 900s access token expired with the jump
       expect((await fx.rates.current())!.freshness.tier).toBe(RateTier.UNSERVABLE);
       fx.publishFresh();
       const requests = fx.api.requests;
@@ -213,6 +216,7 @@ describe('FX rates: poller, cache, read path (integration)', () => {
     it('everything down and too old → 503 FX_RATE_UNAVAILABLE (and only one catch-up attempt a minute)', async () => {
       await fx.warm();
       clock.advance(901_000);
+      user = await payments.signUp(); // the 900s access token expired with the jump
       fx.api.failNext(...Array.from({ length: 10 }, () => ({ kind: 'server-error' as const })));
       const requests = fx.api.requests;
       for (let attempt = 0; attempt < 3; attempt += 1) {
@@ -251,6 +255,7 @@ describe('FX rates: poller, cache, read path (integration)', () => {
     it('50 concurrent cache misses → exactly one provider call; every loser gets the winner\'s rate', async () => {
       await fx.warm();
       clock.advance(901_000); // nothing displayable
+      user = await payments.signUp(); // the 900s access token expired with the jump
       fx.publishFresh();
       fx.api.failNext({ kind: 'hang', milliseconds: 250 }); // widen the race window
       const requests = fx.api.requests;
@@ -263,6 +268,7 @@ describe('FX rates: poller, cache, read path (integration)', () => {
     it('…and when the winner fails, every loser gets a clean 503 — still one call', async () => {
       await fx.warm();
       clock.advance(901_000);
+      user = await payments.signUp(); // the 900s access token expired with the jump
       // Longer than the client's per-attempt timeout (400ms in tests): the single catch-up attempt fails.
       fx.api.failNext({ kind: 'hang', milliseconds: 1_000 }, ...Array.from({ length: 5 }, () => ({ kind: 'server-error' as const })));
       const requests = fx.api.requests;

@@ -76,6 +76,10 @@ describe('FX pipeline properties (integration)', () => {
     payments = harness.payments!;
     clock = harness.auth!.clock;
     user = await payments.signUp();
+    // The first-ever fetch has no history and is judged on bounds only: establish the normal
+    // baseline first, as production's first fetch does (a generated "jump" as the very first
+    // publication would otherwise become the baseline, and every normal rate a > 20% move).
+    await fx.warm();
     const moduleRef = await Test.createTestingModule({ imports: [WorkerModule.forRoot(harness.db.env)] })
       .overrideProvider(Clock)
       .useValue(clock)
@@ -105,6 +109,8 @@ describe('FX pipeline properties (integration)', () => {
       fc.asyncProperty(fc.array(action, { minLength: 20, maxLength: 40 }), async (actions) => {
         // A fresh month and a clean slate for every run: budgets are per UTC month/day on the clock.
         clock.advance(40 * 86_400_000);
+        user = await payments.signUp();
+        let signedUpAt = clock.now().getTime();
         fx.api.clearFaults();
         await fx.resetRedisState();
         const requestsByDay = new Map<string, number>();
@@ -143,6 +149,11 @@ describe('FX pipeline properties (integration)', () => {
             }
             case 'burst': {
               await payments.clearRateLimits();
+              // Access tokens live 15 minutes on the clock: re-authenticate after long advances.
+              if (clock.now().getTime() - signedUpAt > 600_000) {
+                user = await payments.signUp();
+                signedUpAt = clock.now().getTime();
+              }
               const reads = await Promise.all(
                 Array.from({ length: step.reads }, () => http().get(`/${API_PREFIX}/fx/rates`).set('Authorization', `Bearer ${user.accessToken}`)),
               );
@@ -197,14 +208,14 @@ describe('FX pipeline properties (integration)', () => {
     );
 
     // Every interesting path ran at least once across the runs.
-    for (const path of ['ACCEPTED', 'REJECTED', 'FAILED:TRANSIENT', 'not-due', 'SKIPPED:BACKING_OFF', 'rates-fresh', 'rates-stale', 'rates-503', 'quote-201', 'quote-FX_RATE_STALE']) {
-      expect({ path, count: seen.get(path) ?? 0 }).toEqual({ path, count: expect.any(Number) });
-      expect(seen.get(path) ?? 0).toBeGreaterThan(0);
-    }
+    const required = ['ACCEPTED', 'REJECTED', 'FAILED:TRANSIENT', 'not-due', 'SKIPPED:BACKING_OFF', 'rates-fresh', 'rates-stale', 'rates-503', 'quote-201', 'quote-FX_RATE_STALE'];
+    expect({ missing: required.filter((path) => !seen.has(path)), seen: Object.fromEntries(seen) }).toEqual({ missing: [], seen: expect.anything() });
   });
 
   it('generative idempotency: every POST /fx/quotes replayed has zero additional effect', async () => {
     clock.advance(40 * 86_400_000);
+    user = await payments.signUp();
+    fx.api.clearFaults(); // faults a random run left queued
     await fx.resetRedisState();
     await fx.warm();
     const pairs = [

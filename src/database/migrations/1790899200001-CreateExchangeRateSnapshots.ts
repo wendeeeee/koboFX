@@ -45,7 +45,7 @@ export class CreateExchangeRateSnapshots1790899200001 implements MigrationInterf
     `);
     await queryRunner.query(`
       CREATE INDEX exchange_rate_snapshots_latest_accepted_index
-        ON exchange_rate_snapshots (provider, fetched_at DESC, id DESC) WHERE status = 'ACCEPTED'
+        ON exchange_rate_snapshots (provider, fetched_at DESC, provider_updated_at DESC, id DESC) WHERE status = 'ACCEPTED'
     `);
     await queryRunner.query(`
       CREATE TABLE exchange_rate_snapshot_rates (

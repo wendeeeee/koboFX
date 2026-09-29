@@ -33,6 +33,7 @@ describe('FX concurrency (integration)', () => {
   afterAll(() => harness?.close());
   beforeEach(async () => {
     clock.advance(86_400_000);
+    alice = await payments.signUp(); // the previous token expired a day ago
     fx.api.clearFaults();
     await fx.resetRedisState();
     await payments.clearRateLimits();
@@ -107,7 +108,7 @@ describe('FX concurrency (integration)', () => {
       const publications: Record<string, string>[] = [];
       for (let round = 0; round < 6; round += 1) {
         clock.advance(400_000); // due
-        const publication = { ...RECORDED_RATES, NGN: String(1329 + round), EUR: `0.8${round}`, GBP: `0.7${round}` };
+        const publication = { ...RECORDED_RATES, NGN: String(1329 + round), EUR: `0.8${round}5`, GBP: `0.7${round}5` };
         publications.push(publication);
         fx.publishFresh(publication);
         fx.api.failNext({ kind: 'hang', milliseconds: 150 }); // widen the window

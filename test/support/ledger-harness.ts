@@ -350,6 +350,8 @@ export async function startLedgerHarness(
       };
     }
     if (fxApi) {
+      // FX boundaries are tested to the millisecond: time moves only when a test says so.
+      auth.clock.freeze();
       const redisService = moduleRef.get(RedisService);
       const rates = moduleRef.get(FxRateService);
       const fetcher = moduleRef.get(FxRateFetcher);

@@ -35,8 +35,14 @@ return 1
 
 const READ = `return redis.call('GET', KEYS[1])`;
 
-export function snapshotOrder(snapshot: Pick<RateSnapshot, 'fetchedAt' | 'id'>): string {
-  return `${String(snapshot.fetchedAt.getTime()).padStart(15, '0')}:${snapshot.id}`;
+/**
+ * "Newer" for the cache — the same order as `latestAccepted()` in the database: fetch time,
+ * then the provider's publication time (two fetches in one millisecond must not be decided
+ * by a random id), then the id.
+ */
+export function snapshotOrder(snapshot: Pick<RateSnapshot, 'fetchedAt' | 'providerUpdatedAt' | 'id'>): string {
+  const pad = (date: Date) => String(date.getTime()).padStart(15, '0');
+  return `${pad(snapshot.fetchedAt)}:${pad(snapshot.providerUpdatedAt)}:${snapshot.id}`;
 }
 
 /**

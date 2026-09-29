@@ -97,7 +97,7 @@ export class ExchangeRateSnapshotRepository {
                  FROM exchange_rate_snapshot_rates rate WHERE rate.snapshot_id = snapshot.id) AS rates
          FROM exchange_rate_snapshots snapshot
         WHERE snapshot.provider = $1 AND snapshot.status = 'ACCEPTED'
-        ORDER BY snapshot.fetched_at DESC, snapshot.id DESC
+        ORDER BY snapshot.fetched_at DESC, snapshot.provider_updated_at DESC, snapshot.id DESC
         LIMIT 1`,
       [provider],
     )) as SnapshotRow[];
@@ -122,7 +122,7 @@ export class ExchangeRateSnapshotRepository {
       `SELECT id, fetched_at, provider_updated_at, provider_next_update_at, status
          FROM exchange_rate_snapshots
         WHERE provider = $1
-        ORDER BY fetched_at DESC, id DESC
+        ORDER BY fetched_at DESC, provider_updated_at DESC NULLS LAST, id DESC
         LIMIT 1`,
       [provider],
     )) as { id: string; fetched_at: Date; provider_updated_at: Date | null; provider_next_update_at: Date | null; status: SnapshotStatus }[];

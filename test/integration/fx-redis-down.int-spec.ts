@@ -47,7 +47,7 @@ describe('FX with Redis down (integration)', () => {
   });
 
   it('too old and Redis down → 503 FX_RATE_UNAVAILABLE, still without a provider call; readiness reports FX without failing on it', async () => {
-    clock.advance(901_000);
+    clock.advance(450_000); // rate age 910s (> 900s display window); the access token is 850s old, still valid — and with Redis down no new one can be issued
     const requests = fx.api.requests;
     const response = await http().get(`/${API_PREFIX}/fx/rates`).set('Authorization', `Bearer ${user.accessToken}`);
     expect([response.status, response.body.code]).toEqual([503, 'FX_RATE_UNAVAILABLE']);

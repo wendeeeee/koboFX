@@ -38,6 +38,9 @@ describe('FX quotes (integration)', () => {
   });
   beforeEach(async () => {
     clock.advance(86_400_000);
+    // A day later the access tokens have (correctly) expired: fresh verified users per test.
+    alice = await payments.signUp();
+    bob = await payments.signUp();
     fx.api.clearFaults();
     await fx.resetRedisState();
     await payments.clearRateLimits();
