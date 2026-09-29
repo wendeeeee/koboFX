@@ -212,6 +212,29 @@ describe('FX pipeline properties (integration)', () => {
     expect({ missing: required.filter((path) => !seen.has(path)), seen: Object.fromEntries(seen) }).toEqual({ missing: [], seen: expect.anything() });
   });
 
+  it('the budget binds: with the breaker cleared every time, exactly the daily budget reaches the provider', async () => {
+    clock.advance(40 * 86_400_000);
+    // Start at 01:00 UTC so the whole test stays inside one budget day.
+    const now = clock.now().getTime();
+    clock.advance(86_400_000 - (now % 86_400_000) + 3_600_000);
+    fx.api.clearFaults();
+    await fx.resetRedisState();
+    const requests = fx.api.requests;
+    const outcomes: string[] = [];
+    for (let attempt = 0; attempt < 8; attempt += 1) {
+      await fx.coordination.recordSuccess(); // close the breaker: only the budget stands in the way
+      fx.api.failNext({ kind: 'server-error' }, { kind: 'server-error' });
+      clock.advance(61_000);
+      const outcome = await fx.fetcher.fetch('POLL');
+      outcomes.push(outcome.kind === 'FAILED' ? outcome.failure : outcome.kind);
+    }
+    // FX_READ_RETRIES=1: two attempts per fetch; the fifth fetch finds the day's 8 spent before sending.
+    expect(fx.api.requests - requests).toBe(DAILY_BUDGET);
+    expect(outcomes).toEqual(['TRANSIENT', 'TRANSIENT', 'TRANSIENT', 'TRANSIENT', 'BUDGET_SPENT', 'BUDGET_SPENT', 'BUDGET_SPENT', 'BUDGET_SPENT']);
+    expect(await fx.coordination.usage()).toMatchObject({ dayUsed: DAILY_BUDGET, dailyBudget: DAILY_BUDGET });
+    fx.api.clearFaults();
+  });
+
   it('generative idempotency: every POST /fx/quotes replayed has zero additional effect', async () => {
     clock.advance(40 * 86_400_000);
     user = await payments.signUp();

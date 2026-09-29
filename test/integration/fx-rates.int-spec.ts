@@ -142,14 +142,19 @@ describe('FX rates: poller, cache, read path (integration)', () => {
     });
 
     it('the API key never reaches provider_calls (any column), an error text or a log line', async () => {
+      // Self-contained: a success, a timeout (whose error text could echo the URL) and a 5xx — all recorded now.
+      await fx.warm();
+      const [{ since }] = (await harness.dataSource.query(`SELECT coalesce(max(id), 0)::text AS since FROM provider_calls`)) as { since: string }[];
       fx.api.failNext({ kind: 'hang', milliseconds: 1_000 }, { kind: 'server-error' });
-      clock.advance(10 * 86_400_000);
-      await fx.poller.tick();
-      const [row] = (await harness.dataSource.query(`SELECT count(*)::int AS n, string_agg(p::text, '\n') AS everything FROM provider_calls p WHERE provider = 'exchange-rate-api'`)) as {
-        n: number;
-        everything: string;
-      }[];
-      expect(row.n).toBeGreaterThan(3);
+      clock.advance(400_000);
+      fx.publishFresh();
+      expect(await fx.poller.tick()).toMatchObject({ fetched: true, outcome: { kind: 'ACCEPTED' } });
+      const [row] = (await harness.dataSource.query(
+        `SELECT count(*)::int AS n, string_agg(p::text, '\n') AS everything FROM provider_calls p WHERE provider = 'exchange-rate-api' AND id > $1`,
+        [since],
+      )) as { n: number; everything: string }[];
+      expect(row.n).toBe(3);
+      expect(row.everything).toMatch(/timed out/);
       expect(row.everything).toContain('[REDACTED]');
       expect(row.everything).not.toContain(fx.apiKey);
       expect(logs.lines.join('')).not.toContain(fx.apiKey);
@@ -248,6 +253,41 @@ describe('FX rates: poller, cache, read path (integration)', () => {
       expect(quotes).toBe(500);
       expect(fx.api.requests).toBe(requests);
       expect(await fx.providerCallCount()).toBe(calls);
+    });
+  });
+
+  describe('the cache never goes backwards', () => {
+    it('an older snapshot offered after a newer one (a slow fetcher, a late re-seed) is refused', async () => {
+      await fx.warm();
+      const older = (await cached())!;
+      clock.advance(400_000);
+      await fx.warm();
+      const newer = (await cached())!;
+      expect(newer.id).not.toBe(older.id);
+      const cache = fx.rates['cache'];
+      expect(await cache.offer(older, 3_600)).toBe(false);
+      expect((await cached())!.id).toBe(newer.id);
+    });
+  });
+
+  describe('a provider stuck publishing old data', () => {
+    it('succeeds with an unservable rate: the catch-up gate still limits it to one call a minute', async () => {
+      await fx.warm();
+      clock.advance(901_000);
+      user = await payments.signUp(); // the 900s access token expired with the jump
+      // A plausible but old publication: accepted (it is what they publish), never displayable.
+      fx.publishFresh(RECORDED_RATES, { publishedSecondsAgo: 1_000, nextUpdateInSeconds: -500 });
+      const requests = fx.api.requests;
+      for (let attempt = 0; attempt < 5; attempt += 1) {
+        const response = await getRates();
+        expect([response.status, response.body.code]).toEqual([503, 'FX_RATE_UNAVAILABLE']);
+      }
+      // A success closes the breaker, so only the gate stands between user traffic and the provider.
+      expect(await fx.coordination.backoff()).toBeUndefined();
+      expect(fx.api.requests - requests).toBe(1);
+      clock.advance(61_000);
+      await getRates();
+      expect(fx.api.requests - requests).toBe(2);
     });
   });
 
