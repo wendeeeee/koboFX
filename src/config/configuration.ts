@@ -100,6 +100,18 @@ export interface FundingConfig {
   readonly limits: ReadonlyMap<string, FundingLimit>;
 }
 
+export interface ConversionLimit {
+  /** The largest single conversion from this currency, in its minor units. */
+  readonly maximumMinor: bigint;
+  /** The most one user may convert from this currency in any rolling 24 hours, in its minor units. */
+  readonly dailyMaximumMinor: bigint;
+}
+
+export interface ConversionConfig {
+  /** Per SOURCE currency. A currency with no entry cannot be converted from (checked at boot). */
+  readonly limits: ReadonlyMap<string, ConversionLimit>;
+}
+
 export interface FlowConfig {
   readonly pollIntervalMilliseconds: number;
   readonly batchSize: number;
@@ -167,6 +179,7 @@ export interface AppConfig {
   readonly outbox: OutboxConfig;
   readonly paymentProvider: PaymentProviderConfig;
   readonly funding: FundingConfig;
+  readonly conversion: ConversionConfig;
   readonly flows: FlowConfig;
   readonly fx: FxConfig;
   /** Reverse proxies in front of the API; `req.ip` is taken from X-Forwarded-For only this deep. */
@@ -269,6 +282,17 @@ const envSchema = Joi.object({
   // JSON {currency: {minimum, maximum}}, strings of minor units. Default: NGN ₦100 – ₦1,000,000.
   FUNDING_LIMITS: Joi.string().default('{"NGN":{"minimum":"10000","maximum":"100000000"}}'),
 
+  // JSON {currency: {maximum, dailyMaximum}} per SOURCE currency, strings of minor units.
+  // Default: ₦10,000,000 / $10,000 / €10,000 / £10,000 per conversion, five times that per rolling 24h.
+  CONVERSION_LIMITS: Joi.string().default(
+    JSON.stringify({
+      NGN: { maximum: '1000000000', dailyMaximum: '5000000000' },
+      USD: { maximum: '1000000', dailyMaximum: '5000000' },
+      EUR: { maximum: '1000000', dailyMaximum: '5000000' },
+      GBP: { maximum: '1000000', dailyMaximum: '5000000' },
+    }),
+  ),
+
   FLOW_POLL_INTERVAL_MILLISECONDS: Joi.number().integer().min(50).default(1000),
   FLOW_BATCH_SIZE: Joi.number().integer().min(1).max(500).default(20),
   FLOW_LEASE_SECONDS: Joi.number().integer().min(10).max(3600).default(60),
@@ -339,8 +363,9 @@ export function loadConfig(raw: NodeJS.ProcessEnv | Record<string, string | unde
   }
   const webhookSecrets = parseWebhookSecrets(raw.PSP_WEBHOOK_SECRETS, problems);
   const funding = parseFunding(env.PSP_FUNDING_CURRENCIES, env.FUNDING_LIMITS, problems);
+  const conversion = parseConversion(env.CONVERSION_LIMITS, problems);
   const fx = error ? undefined : parseFx(env, problems);
-  if (problems.length > 0 || !keys || !pepper || !webhookSecrets || !funding || !fx) {
+  if (problems.length > 0 || !keys || !pepper || !webhookSecrets || !funding || !conversion || !fx) {
     throw new ConfigValidationError(problems);
   }
   return {
@@ -404,6 +429,7 @@ export function loadConfig(raw: NodeJS.ProcessEnv | Record<string, string | unde
       readRetries: env.PSP_READ_RETRIES,
     },
     funding,
+    conversion,
     flows: {
       pollIntervalMilliseconds: env.FLOW_POLL_INTERVAL_MILLISECONDS,
       batchSize: env.FLOW_BATCH_SIZE,
@@ -573,6 +599,43 @@ function parseFunding(currencyList: string | undefined, limitsJson: string | und
     limits.set(currency, { minimumMinor: BigInt(minimum), maximumMinor: BigInt(maximum) });
   }
   return limits.size === currencies.length ? { currencies, limits } : undefined;
+}
+
+/** Conversion limits per source currency: strings of minor units, maximum ≤ daily maximum. */
+function parseConversion(limitsJson: string | undefined, problems: string[]): ConversionConfig | undefined {
+  if (!limitsJson) return undefined;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(limitsJson);
+  } catch {
+    problems.push('CONVERSION_LIMITS must be JSON');
+    return undefined;
+  }
+  if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+    problems.push('CONVERSION_LIMITS must map currency to {maximum, dailyMaximum}');
+    return undefined;
+  }
+  const limits = new Map<string, ConversionLimit>();
+  let valid = true;
+  for (const [currency, entry] of Object.entries(parsed as Record<string, unknown>)) {
+    const { maximum, dailyMaximum } = (entry ?? {}) as { maximum?: unknown; dailyMaximum?: unknown };
+    if (
+      !/^[A-Z]{3}$/.test(currency) ||
+      typeof maximum !== 'string' || typeof dailyMaximum !== 'string' ||
+      !MINOR_UNITS_PATTERN.test(maximum) || !MINOR_UNITS_PATTERN.test(dailyMaximum)
+    ) {
+      problems.push(`CONVERSION_LIMITS.${currency} needs maximum and dailyMaximum as positive strings of minor units`);
+      valid = false;
+      continue;
+    }
+    if (BigInt(maximum) > BigInt(dailyMaximum)) {
+      problems.push(`CONVERSION_LIMITS.${currency}: maximum exceeds dailyMaximum`);
+      valid = false;
+      continue;
+    }
+    limits.set(currency, { maximumMinor: BigInt(maximum), dailyMaximumMinor: BigInt(dailyMaximum) });
+  }
+  return valid ? { limits } : undefined;
 }
 
 const MINIMUM_RSA_MODULUS_BITS = 2048;

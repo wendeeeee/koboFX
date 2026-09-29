@@ -20,6 +20,8 @@ const FUNDING_TRANSITIONS = `
  *   Deltas from design §5.4.
  * - By construction: a CONVERSION carries its full provenance (CHECK); it may only cite an
  *   ACCEPTED snapshot (insert trigger); a quote backs at most one conversion (unique index).
+ * - `transactions_conversion_window_index`: the rolling 24-hour per-user, per-source-currency
+ *   conversion limit sums over it, under the source account's row lock.
  */
 export class ConversionFlowsAndProvenance1790985600001 implements MigrationInterface {
   name = 'ConversionFlowsAndProvenance1790985600001';
@@ -64,6 +66,10 @@ export class ConversionFlowsAndProvenance1790985600001 implements MigrationInter
         ON transactions (quote_id) WHERE quote_id IS NOT NULL AND type = 'CONVERSION'
     `);
     await queryRunner.query(`
+      CREATE INDEX transactions_conversion_window_index
+        ON transactions (user_id, source_currency, booking_time) WHERE type = 'CONVERSION' AND status = 'POSTED'
+    `);
+    await queryRunner.query(`
       CREATE FUNCTION transactions_conversion_snapshot_accepted() RETURNS trigger AS $$
       BEGIN
         IF NEW.rate_snapshot_id IS NOT NULL AND NOT EXISTS (
@@ -83,6 +89,7 @@ export class ConversionFlowsAndProvenance1790985600001 implements MigrationInter
   async down(queryRunner: QueryRunner): Promise<void> {
     await queryRunner.query(`DROP TRIGGER transactions_conversion_snapshot_accepted ON transactions`);
     await queryRunner.query(`DROP FUNCTION transactions_conversion_snapshot_accepted()`);
+    await queryRunner.query(`DROP INDEX transactions_conversion_window_index`);
     await queryRunner.query(`DROP INDEX transactions_quote_id_unique`);
     await queryRunner.query(`ALTER TABLE transactions DROP CONSTRAINT transactions_conversion_provenance`);
     await queryRunner.query(`ALTER TABLE transactions DROP COLUMN rate_provider_updated_at, DROP COLUMN rate_snapshot_id`);

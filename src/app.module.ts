@@ -22,6 +22,7 @@ import { FlowsModule } from './modules/flows/flows.module';
 import { FxModule } from './modules/fx/fx.module';
 import { PaymentsModule } from './modules/payments/payments.module';
 import { WebhooksModule } from './modules/payments/webhooks/webhooks.module';
+import { TradingModule } from './modules/trading/trading.module';
 import { WalletsModule } from './modules/wallets/wallets.module';
 import { RedisModule } from './redis/redis.module';
 
@@ -93,6 +94,7 @@ export class AppModule {
         WalletsModule,
         WebhooksModule,
         FxModule,
+        TradingModule,
         HealthModule,
       ],
       // Order matters: throttle first (before any token work), then authenticate,

@@ -84,6 +84,6 @@ export class FxConfigurationCheck implements OnApplicationBootstrap {
     QuoteService,
     RateSnapshotGuard,
   ],
-  exports: [FxRateService, FxRateFetcher, FxPoller, FxMetrics, FetchCoordination, QuoteService, RateProvider],
+  exports: [FxRateService, FxRateFetcher, FxPoller, FxMetrics, FetchCoordination, QuoteService, RateProvider, CurrencyPairRepository, RateSnapshotGuard],
 })
 export class FxModule {}

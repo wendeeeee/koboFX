@@ -79,6 +79,26 @@ export class FlowRepository {
     return row ? toFlow(row) : null;
   }
 
+  /**
+   * Move a SYNCHRONOUS flow (one created and finished inside the caller's transaction, e.g. a
+   * conversion) to its completion state. No lease is involved: nobody else can hold a row
+   * this transaction inserted. The state guard still applies, and the database trigger
+   * checks the transition.
+   */
+  async completeSynchronous(flowId: string, expectedState: string, completionState: string): Promise<void> {
+    const rows = (await this.unitOfWork.requireTransaction().query(
+      `WITH updated AS (
+         UPDATE flow_instances
+            SET state = $3, state_changed_at = now(), completed_at = now(), updated_at = now()
+          WHERE id = $1 AND state = $2 AND completed_at IS NULL AND lease_token IS NULL
+          RETURNING id
+       )
+       SELECT id FROM updated`,
+      [flowId, expectedState, completionState],
+    )) as { id: string }[];
+    if (rows.length !== 1) throw new StaleFlowStateError(flowId, expectedState, 'unknown');
+  }
+
   /** The resumer's claim: due, incomplete, unleased flows; never blocks on another worker's rows. */
   async claimDue(batchSize: number, leaseSeconds: number): Promise<ClaimedFlow[]> {
     const rows = (await this.unitOfWork.manager.query(

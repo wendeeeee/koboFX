@@ -2,11 +2,21 @@
 export enum OutboxEventType {
   EMAIL_VERIFICATION_REQUESTED = 'EmailVerificationRequested.v1',
   EXISTING_ACCOUNT_REGISTRATION_ATTEMPTED = 'ExistingAccountRegistrationAttempted.v1',
+  CONVERSION_POSTED = 'ConversionPosted.v1',
 }
 
 /** Payloads carry opaque ids only — no personal data, no credentials (design §9.5). */
 export interface UserEventPayload {
   readonly userId: string;
+}
+
+/** `ConversionPosted.v1`: aggregate = the transaction. Ids only. */
+export interface ConversionPostedPayload {
+  readonly transactionId: string;
+  readonly userId: string;
+  readonly flowId: string;
+  /** The quote a trade executed; null for a market conversion. */
+  readonly quoteId: string | null;
 }
 
 export interface ClaimedOutboxEvent {

@@ -2,7 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { InvariantViolationError } from '../../common/errors';
 import { RedisService } from '../../redis/redis.service';
 import { GenerateAndDispatchOneTimePasswordService } from '../auth/one-time-passwords/generate-and-dispatch-one-time-password.service';
-import { ClaimedOutboxEvent, OutboxEventHandler, OutboxEventType, UserEventPayload } from '../outbox/outbox.types';
+import { ClaimedOutboxEvent, ConversionPostedPayload, OutboxEventHandler, OutboxEventType, UserEventPayload } from '../outbox/outbox.types';
 import { UserRepository } from '../users/user.repository';
 import { EmailSender } from './email/email-sender';
 import { existingAccountEmail } from './email/email-templates';
@@ -65,5 +65,35 @@ export class ExistingAccountRegistrationAttemptedHandler implements OutboxEventH
     }
     await this.emailSender.send(existingAccountEmail(user.email));
     this.logger.log({ userId }, 'Existing-account notice sent');
+  }
+}
+
+/** Don't trust the payload's shape: ids only, the aggregate is the transaction. */
+export function conversionPostedOf(event: ClaimedOutboxEvent): ConversionPostedPayload {
+  const payload = (event.payload ?? {}) as Partial<ConversionPostedPayload>;
+  const isId = (value: unknown): value is string => typeof value === 'string' && UUID.test(value);
+  if (
+    !isId(payload.transactionId) || payload.transactionId !== event.aggregateId ||
+    !isId(payload.userId) || !isId(payload.flowId) ||
+    !(payload.quoteId === null || isId(payload.quoteId))
+  ) {
+    throw new InvariantViolationError(`Outbox event ${event.id} has a malformed payload.`);
+  }
+  return { transactionId: payload.transactionId, userId: payload.userId, flowId: payload.flowId, quoteId: payload.quoteId };
+}
+
+/**
+ * `ConversionPosted.v1` → acknowledged (Phase 7: no conversion notification is in scope).
+ * A no-op by design, registered so the dispatcher does not retry an unknown type loudly
+ * and dead-letter it; a receipt email or push would be added here. Idempotent.
+ */
+@Injectable()
+export class ConversionPostedHandler implements OutboxEventHandler {
+  readonly eventType = OutboxEventType.CONVERSION_POSTED;
+  private readonly logger = new Logger(ConversionPostedHandler.name);
+
+  async handle(event: ClaimedOutboxEvent): Promise<void> {
+    const payload = conversionPostedOf(event);
+    this.logger.log({ eventId: event.id, ...payload }, 'Conversion posted: acknowledged');
   }
 }

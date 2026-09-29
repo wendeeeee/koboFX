@@ -193,6 +193,18 @@ describe('loadConfig: payment provider, funding and flows (Phase 5)', () => {
     expect(problemsOf({ ...VALID, FUNDING_LIMITS: '[]' }).join()).toMatch(/must map currency/);
     expect(problemsOf({ ...VALID, PSP_FUNDING_CURRENCIES: 'ngn' }).join()).toMatch(/PSP_FUNDING_CURRENCIES/);
   });
+
+  it('parses conversion limits per source currency: strings of minor units, maximum ≤ daily maximum', () => {
+    expect(loadConfig(VALID).conversion.limits.get('NGN')).toEqual({ maximumMinor: 1_000_000_000n, dailyMaximumMinor: 5_000_000_000n });
+    expect(loadConfig(VALID).conversion.limits.get('GBP')).toEqual({ maximumMinor: 1_000_000n, dailyMaximumMinor: 5_000_000n });
+    const custom = loadConfig({ ...VALID, CONVERSION_LIMITS: '{"USD":{"maximum":"500","dailyMaximum":"500"}}' }).conversion.limits;
+    expect([...custom.keys()]).toEqual(['USD']);
+    expect(problemsOf({ ...VALID, CONVERSION_LIMITS: 'nope' }).join()).toMatch(/CONVERSION_LIMITS must be JSON/);
+    expect(problemsOf({ ...VALID, CONVERSION_LIMITS: '[]' }).join()).toMatch(/must map currency/);
+    expect(problemsOf({ ...VALID, CONVERSION_LIMITS: '{"USD":{"maximum":500,"dailyMaximum":"900"}}' }).join()).toMatch(/strings of minor units/);
+    expect(problemsOf({ ...VALID, CONVERSION_LIMITS: '{"usd":{"maximum":"5","dailyMaximum":"9"}}' }).join()).toMatch(/strings of minor units/);
+    expect(problemsOf({ ...VALID, CONVERSION_LIMITS: '{"USD":{"maximum":"901","dailyMaximum":"900"}}' }).join()).toMatch(/maximum exceeds dailyMaximum/);
+  });
 });
 
 describe('loadConfig: FX rates (Phase 6)', () => {

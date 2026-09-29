@@ -2,6 +2,8 @@ import { EntityManager } from 'typeorm';
 
 export enum FlowType {
   FUNDING = 'FUNDING',
+  /** Synchronous: created and completed in one transaction, so the resumer never sees one (Phase 7). */
+  CONVERSION = 'CONVERSION',
 }
 
 /** A `flow_instances` row (design §7.5). */
