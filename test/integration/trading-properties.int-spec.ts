@@ -192,7 +192,38 @@ describe('Trading properties (integration)', () => {
         const quotes: { owner: number; quoteId: string }[] = [];
         const traded: { owner: number; quoteId: string }[] = [];
 
-        for (const step of actions) {
+        // A fixed prelude that walks every trade outcome, so they run in every run (10 unseeded runs
+        // could otherwise miss one — seen twice in the Phase 8 full runs). Quotes are indexed in the
+        // order made (q0, q1, q2); a refused trade leaves its quote unconsumed. The generated tail
+        // keeps exploring from there.
+        const prelude: Action[] = [
+          { kind: 'quote', user: 0, pair: ['NGN', 'USD'], band: 'fits', amount: 5_000_000n }, // q0
+          { kind: 'trade', user: 0, pick: 0, reuse: false }, // 201
+          { kind: 'trade', user: 0, pick: 0, reuse: true }, // QUOTE_ALREADY_USED
+          { kind: 'trade', user: 1, pick: 0, reuse: false }, // another user's quote: QUOTE_NOT_FOUND
+          { kind: 'quote', user: 0, pair: ['NGN', 'USD'], band: 'above', amount: 1n }, // q1
+          { kind: 'trade', user: 0, pick: 1, reuse: false }, // INSUFFICIENT_FUNDS
+          { kind: 'quote', user: 0, pair: ['NGN', 'USD'], band: 'fits', amount: 1n }, // q2
+          { kind: 'advance', seconds: 31 },
+          { kind: 'trade', user: 0, pick: 2, reuse: false }, // QUOTE_EXPIRED
+          { kind: 'convert', user: 0, pair: ['NGN', 'USD'], byTarget: false, band: 'fits', amount: 1n }, // 201
+          { kind: 'convert', user: 0, pair: ['NGN', 'USD'], byTarget: false, band: 'above', amount: 1n }, // INSUFFICIENT_FUNDS
+          { kind: 'convert', user: 0, pair: ['NGN', 'USD'], byTarget: false, band: 'tiny', amount: 1n }, // AMOUNT_TOO_SMALL
+          { kind: 'convert', user: 0, pair: ['NGN', 'NGN'], byTarget: false, band: 'any', amount: 100_000n }, // SAME_CURRENCY
+          { kind: 'advance', seconds: 421 }, // past the executable window
+          { kind: 'convert', user: 0, pair: ['NGN', 'USD'], byTarget: false, band: 'fits', amount: 1n }, // FX_RATE_STALE
+          { kind: 'publish', ngnPerMille: 1000 }, // publish-ACCEPTED: fresh again for the tail
+        ];
+        const preludePaths = [
+          'trade-201', 'trade-QUOTE_ALREADY_USED', 'trade-QUOTE_NOT_FOUND', 'trade-INSUFFICIENT_FUNDS', 'trade-QUOTE_EXPIRED',
+          'convert-201', 'convert-INSUFFICIENT_FUNDS', 'convert-AMOUNT_TOO_SMALL', 'convert-SAME_CURRENCY', 'convert-FX_RATE_STALE', 'publish-ACCEPTED',
+        ];
+        const before = new Map(preludePaths.map((path) => [path, seen.get(path) ?? 0]));
+        for (const [index, step] of [...prelude, ...actions].entries()) {
+          // The prelude's promise, checked: by its end this run has walked every required path.
+          if (index === prelude.length) {
+            expect({ unwalked: preludePaths.filter((path) => (seen.get(path) ?? 0) === before.get(path)) }).toEqual({ unwalked: [] });
+          }
           await payments.clearRateLimits();
           await refreshSessions(traders);
           const transactionsBefore = ((await harness.dataSource.query(`SELECT count(*)::int AS n FROM transactions WHERE type = 'CONVERSION'`)) as { n: number }[])[0].n;

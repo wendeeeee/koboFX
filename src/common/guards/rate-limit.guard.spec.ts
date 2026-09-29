@@ -4,8 +4,8 @@ import type { Request } from 'express';
 import { RateLimiter } from '../../redis/rate-limiter';
 import { RedisService } from '../../redis/redis.service';
 import { RATE_LIMIT_KEY, RateLimitPolicy, SKIP_RATE_LIMIT_KEY } from '../decorators/rate-limit.decorator';
-import { DependencyUnavailableError, RateLimitedError } from '../errors';
-import { GLOBAL_RATE_LIMIT_RULE, RateLimitGuard, rateLimitCounters } from './rate-limit.guard';
+import { DependencyUnavailableError, ErrorCode, RateLimitedError } from '../errors';
+import { GLOBAL_RATE_LIMIT_RULE, RateLimitGuard, UserRateLimitGuard, rateLimitCounters } from './rate-limit.guard';
 
 function contextFor(request: Partial<Request>, metadata: Record<string, unknown> = {}) {
   const reflector = new Reflector();
@@ -80,6 +80,66 @@ describe('RateLimitGuard (design §9.1, decision #10)', () => {
     expect(lower.key).not.toBe(otherIp.key);
     expect(lower.key).toMatch(/^rate-limit:login:ip-and-email:[0-9a-f]{64}$/);
     expect(lower.key).not.toContain('example');
+  });
+});
+
+describe('UserRateLimitGuard (Phase 8: per-user rules, after authentication)', () => {
+  const limiter = { consume: jest.fn() } as unknown as jest.Mocked<RateLimiter>;
+  beforeEach(() => jest.resetAllMocks());
+  const perUser: RateLimitPolicy = {
+    rules: [
+      { name: 'history', subject: 'user', limit: 120, windowSeconds: 60 },
+      { name: 'history-ip', subject: 'ip', limit: 500, windowSeconds: 60 },
+    ],
+    whenUnavailable: 'fail-open',
+  };
+  const user = { id: 'c0000000-0000-4000-8000-000000000001' };
+
+  it('the first guard leaves user rules alone (no user is known yet); this one applies ONLY them, keyed by the authenticated id', async () => {
+    limiter.consume.mockResolvedValue({ allowed: true, retryAfterSeconds: 0 });
+    const first = contextFor({ ip: '10.0.0.1' }, { [RATE_LIMIT_KEY]: perUser });
+    await new RateLimitGuard(first.reflector, limiter).canActivate(first.context);
+    expect(limiter.consume.mock.calls[0][0].map((counter) => counter.limit)).toEqual([GLOBAL_RATE_LIMIT_RULE.limit, 500]);
+
+    const last = contextFor({ ip: '10.0.0.1', user } as Partial<Request>, { [RATE_LIMIT_KEY]: perUser });
+    await expect(new UserRateLimitGuard(last.reflector, limiter).canActivate(last.context)).resolves.toBe(true);
+    const [counter] = limiter.consume.mock.calls[1][0];
+    expect(limiter.consume.mock.calls[1][0]).toHaveLength(1);
+    expect(counter).toEqual({ key: expect.stringMatching(/^rate-limit:history:user:[0-9a-f]{64}$/), limit: 120, windowSeconds: 60 });
+    expect(counter.key).not.toContain(user.id);
+    // Two users, two counters.
+    const other = rateLimitCounters(perUser.rules.slice(0, 1), { ip: '10.0.0.1', user: { id: 'another' } } as unknown as Request);
+    expect(other[0].key).not.toBe(counter.key);
+  });
+
+  it('refuses with 429; Redis down fails open on a fail-open route and closed on a fail-closed one', async () => {
+    const route = contextFor({ ip: '10.0.0.1', user, path: '/transactions' } as Partial<Request>, { [RATE_LIMIT_KEY]: perUser });
+    limiter.consume.mockResolvedValue({ allowed: false, retryAfterSeconds: 7 });
+    await expect(new UserRateLimitGuard(route.reflector, limiter).canActivate(route.context)).rejects.toBeInstanceOf(RateLimitedError);
+    limiter.consume.mockRejectedValue(new DependencyUnavailableError('down'));
+    await expect(new UserRateLimitGuard(route.reflector, limiter).canActivate(route.context)).resolves.toBe(true);
+    const closedRoute = contextFor({ ip: '10.0.0.1', user } as Partial<Request>, { [RATE_LIMIT_KEY]: { ...perUser, whenUnavailable: 'fail-closed' } });
+    await expect(new UserRateLimitGuard(closedRoute.reflector, limiter).canActivate(closedRoute.context)).rejects.toThrow(DependencyUnavailableError);
+  });
+
+  it('no user rules, or @SkipRateLimit(): nothing consumed', async () => {
+    for (const metadata of [{}, { [RATE_LIMIT_KEY]: closed }, { [RATE_LIMIT_KEY]: perUser, [SKIP_RATE_LIMIT_KEY]: true }]) {
+      const route = contextFor({ ip: '10.0.0.1', user } as Partial<Request>, metadata);
+      await expect(new UserRateLimitGuard(route.reflector, limiter).canActivate(route.context)).resolves.toBe(true);
+    }
+    expect(limiter.consume).not.toHaveBeenCalled();
+  });
+
+  it('a user rule on a route with no authenticated user is a configuration bug: fails loudly', async () => {
+    const route = contextFor({ ip: '10.0.0.1', path: '/public' }, { [RATE_LIMIT_KEY]: perUser });
+    await expect(new UserRateLimitGuard(route.reflector, limiter).canActivate(route.context)).rejects.toMatchObject({ code: ErrorCode.INVARIANT_VIOLATION });
+  });
+
+  it('with replacesGlobalRule, the first guard applies only the non-user route rules', async () => {
+    limiter.consume.mockResolvedValue({ allowed: true, retryAfterSeconds: 0 });
+    const route = contextFor({ ip: '10.0.0.1' }, { [RATE_LIMIT_KEY]: { ...perUser, replacesGlobalRule: true } });
+    await new RateLimitGuard(route.reflector, limiter).canActivate(route.context);
+    expect(limiter.consume.mock.calls[0][0].map((counter) => counter.limit)).toEqual([500]);
   });
 });
 

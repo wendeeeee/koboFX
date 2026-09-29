@@ -19,7 +19,11 @@ describe('OutboxPoller (the worker loop)', () => {
     const poller = new OutboxPoller(dispatcher, config);
     poller.start();
     poller.start(); // idempotent
-    await new Promise((resolve) => setTimeout(resolve, 80));
+    // Wait for the cycles rather than a fixed 80ms: under coverage instrumentation and load a fixed
+    // sleep can end before the fourth cycle (seen in the Phase 8 full run). Bounded, so a loop that
+    // never gets there still fails.
+    const deadline = Date.now() + 5_000;
+    while (calls < 4 && Date.now() < deadline) await new Promise((resolve) => setTimeout(resolve, 5));
     await poller.stop();
     const callsAtStop = calls;
     expect(callsAtStop).toBeGreaterThanOrEqual(4);

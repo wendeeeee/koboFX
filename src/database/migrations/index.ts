@@ -21,6 +21,7 @@ import { CreateExchangeRateSnapshots1790899200001 } from './1790899200001-Create
 import { CreateQuotes1790899200002 } from './1790899200002-CreateQuotes';
 import { AddConversionFlowType1790985600000 } from './1790985600000-AddConversionFlowType';
 import { ConversionFlowsAndProvenance1790985600001 } from './1790985600001-ConversionFlowsAndProvenance';
+import { TransactionHistoryIndexes1791072000000 } from './1791072000000-TransactionHistoryIndexes';
 
 /** Explicit, ordered list — no globbing, so the CLI and the test harness run the same set. */
 export const MIGRATIONS = [
@@ -47,4 +48,5 @@ export const MIGRATIONS = [
   CreateQuotes1790899200002,
   AddConversionFlowType1790985600000,
   ConversionFlowsAndProvenance1790985600001,
+  TransactionHistoryIndexes1791072000000,
 ];

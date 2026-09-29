@@ -3,8 +3,12 @@ import { SetMetadata } from '@nestjs/common';
 export const RATE_LIMIT_KEY = 'rateLimit:policy';
 export const SKIP_RATE_LIMIT_KEY = 'rateLimit:skip';
 
-/** What a counter is keyed by. Emails are hashed before they reach Redis. */
-export type RateLimitSubject = 'ip' | 'email' | 'ip-and-email';
+/**
+ * What a counter is keyed by. Emails are hashed before they reach Redis. `user` is the
+ * AUTHENTICATED caller's id: those rules run in `UserRateLimitGuard`, after authentication (the
+ * first guard runs before it, when the only trustworthy subject is the IP).
+ */
+export type RateLimitSubject = 'ip' | 'email' | 'ip-and-email' | 'user';
 
 export interface RateLimitRule {
   /** Counter name. Rules with the same name share a counter across routes. */

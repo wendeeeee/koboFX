@@ -131,6 +131,9 @@ export interface FxHarness {
   quote(user: SignedUpUser, body: Record<string, unknown>, idempotencyKey?: string): request.Test;
 }
 
+/** Every `signUp()` user's password: a test that outlives the 900s access token logs in again with it. */
+export const HARNESS_USER_PASSWORD = 'correct horse battery staple';
+
 /** A verified user with a live access token. */
 export interface SignedUpUser {
   readonly userId: string;
@@ -149,8 +152,8 @@ export interface PaymentsHarness {
   signUp(): Promise<SignedUpUser>;
   /** `POST /wallet/fund` through the real pipeline. */
   fund(user: SignedUpUser, body: Record<string, unknown>, idempotencyKey?: string): request.Test;
-  /** Clear every `rate-limit:*` counter (tests that repeat a subject inside a window). */
-  clearRateLimits(): Promise<void>;
+  /** Clear every `rate-limit:*` counter (tests that repeat a subject inside a window), or only one rule's (`'global'`). */
+  clearRateLimits(rule?: string): Promise<void>;
   /** Make every waiting flow and webhook event due now ("time passes"; leases are untouched). */
   makeAllDue(): Promise<void>;
   /** Let every held lease lapse (a dead worker's lease, after its timeout). */
@@ -312,7 +315,7 @@ export async function startLedgerHarness(
       let signUpQueue: Promise<unknown> = Promise.resolve();
       const signUpOne = async (): Promise<SignedUpUser> => {
         const email = `funding-${randomUUID().slice(0, 12)}@example.com`;
-        const password = 'correct horse battery staple';
+        const password = HARNESS_USER_PASSWORD;
         await moduleRef.get(AccountCreationService).register(email, password);
         await authHarness.deliverOutbox();
         const session = await moduleRef
@@ -339,10 +342,11 @@ export async function startLedgerHarness(
             .send(body);
         },
         makeAllDue,
-        async clearRateLimits() {
+        async clearRateLimits(rule?: string) {
+          const pattern = rule === undefined ? 'rate-limit:*' : `rate-limit:${rule}:*`;
           await moduleRef
             .get(RedisService)
-            .evaluate(`for _, key in ipairs(redis.call('KEYS', 'rate-limit:*')) do redis.call('DEL', key) end return 0`, [], []);
+            .evaluate(`for _, key in ipairs(redis.call('KEYS', ARGV[1])) do redis.call('DEL', key) end return 0`, [], [pattern]);
         },
         async lapseLeases() {
           await appDataSource.query(

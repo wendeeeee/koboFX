@@ -1,0 +1,245 @@
+import { Injectable } from '@nestjs/common';
+import { UnitOfWork } from '../../database/transaction/unit-of-work';
+import { TransactionType } from '../ledger/ledger.types';
+import { HistoryPosition, HistoryQuery, HistorySort } from './history-cursor';
+import { microsecondsToTimestamp, timestampToMicroseconds } from './history-time';
+import { TransactionLookup } from './reference';
+import { HistoryRow } from './transaction.view';
+
+/**
+ * Whose history, and how much of it (design §7.8, §14 `transactions/`). Every query filters by
+ * `userId` in SQL. Phase 10's admin views reuse this repository with another scope; the user
+ * scope is the only one today.
+ */
+export interface HistoryScope {
+  readonly userId: string;
+}
+
+export interface HistoryStatement {
+  readonly sql: string;
+  readonly parameters: readonly unknown[];
+}
+
+/** Collects positional parameters: `bind(value)` returns `$n`. */
+class Parameters {
+  readonly values: unknown[] = [];
+
+  bind(value: unknown): string {
+    this.values.push(value);
+    return `$${this.values.length}`;
+  }
+}
+
+const TIME_COLUMN: Readonly<Record<HistorySort, 'value_time' | 'booking_time'>> = {
+  [HistorySort.VALUE_TIME]: 'value_time',
+  [HistorySort.BOOKING_TIME]: 'booking_time',
+};
+
+/**
+ * The read model over the books and the funding flows (Phase 8). It never writes, never touches
+ * Redis or the FX path, and never reads a balance: history is derived from `transactions`,
+ * `ledger_entries` and `funding_payments` on every request, so it cannot drift from them.
+ *
+ * Each request is ONE statement — one snapshot — so nothing here assumes read-your-writes beyond
+ * it (design §13: a read replica must work unchanged). A funding that posts meanwhile is either
+ * unposted (the funding branch) or posted (the transaction branch), never both, never neither:
+ * `funding_transaction_id` is set in the posting's own transaction.
+ *
+ * Shape: a `page` CTE of `(source, id, sort_time)` from index-ordered branches (keyset, never
+ * OFFSET), then one projection joining the row, its correction links and the USER's own legs.
+ */
+@Injectable()
+export class TransactionHistoryRepository {
+  constructor(private readonly unitOfWork: UnitOfWork) {}
+
+  /** Up to `limit` rows after `position` (exclusive), newest first in the query's sort. */
+  async page(scope: HistoryScope, query: HistoryQuery, position: HistoryPosition | null, limit: number): Promise<HistoryRow[]> {
+    return this.run(this.buildPage(scope, query, position, limit));
+  }
+
+  /** One transaction (or unposted funding) by reference or id, scoped by the caller; `null` if none. */
+  async find(scope: HistoryScope, lookup: TransactionLookup): Promise<HistoryRow | null> {
+    const [row] = await this.run(this.buildFind(scope, lookup));
+    return row ?? null;
+  }
+
+  /** The exact statement `page()` runs — public so a test can EXPLAIN it (index use is part of the contract). */
+  buildPage(scope: HistoryScope, query: HistoryQuery, position: HistoryPosition | null, limit: number): HistoryStatement {
+    const parameters = new Parameters();
+    const user = parameters.bind(scope.userId);
+    const size = parameters.bind(limit);
+    const branches = [this.transactionBranch(parameters, user, size, query, position)];
+    if (query.type === null || query.type === TransactionType.FUNDING) {
+      branches.push(this.unpostedFundingBranch(parameters, user, size, query, position));
+    }
+    // Each branch is ordered and limited on its own index; the merge only ever sees ≤ 2·size rows.
+    const page = `SELECT * FROM (${branches.map((branch) => `(${branch})`).join('\nUNION ALL\n')}) AS candidates
+      ORDER BY sort_time DESC, id DESC LIMIT ${size}`;
+    return this.select(parameters, user, page);
+  }
+
+  /** The exact statement `find()` runs. */
+  buildFind(scope: HistoryScope, lookup: TransactionLookup): HistoryStatement {
+    const parameters = new Parameters();
+    const user = parameters.bind(scope.userId);
+    const branches: string[] = [];
+    if (lookup.kind === 'reference') {
+      branches.push(`SELECT 'TRANSACTION'::text AS source, transactions.id, transactions.value_time AS sort_time
+                       FROM transactions WHERE transactions.reference = ${parameters.bind(lookup.reference)} AND transactions.user_id = ${user}`);
+      // A funding keeps its reference from the moment it is requested (Phase 8 decision 1).
+      if (lookup.prefix === 'funding') {
+        branches.push(`SELECT 'FUNDING'::text, funding_payments.flow_id, funding_payments.created_at
+                         FROM funding_payments
+                        WHERE funding_payments.flow_id = ${parameters.bind(lookup.id)}::uuid AND funding_payments.user_id = ${user}
+                          AND funding_payments.funding_transaction_id IS NULL`);
+      }
+    } else {
+      // A bare UUID is the transaction id — which is also the reference of a transaction posted without one.
+      const id = parameters.bind(lookup.id);
+      branches.push(`SELECT 'TRANSACTION'::text AS source, transactions.id, transactions.value_time AS sort_time
+                       FROM transactions WHERE transactions.id = ${id}::uuid AND transactions.user_id = ${user}`);
+    }
+    return this.select(parameters, user, branches.join('\nUNION ALL\n'));
+  }
+
+  private async run(statement: HistoryStatement): Promise<HistoryRow[]> {
+    return (await this.unitOfWork.manager.query(statement.sql, [...statement.parameters])) as HistoryRow[];
+  }
+
+  /**
+   * Booked transactions. Without `currency`: `transactions_user_[type_]{value,booking}_time_index`.
+   * With it: the user's ONE account in that currency (`accounts_wallet_currency_unique`), then
+   * `ledger_entries_account_{value,booking}_time_index` — O(limit) for a rare currency too.
+   * `DISTINCT` collapses a transaction with two entries on the same account (adjacent in the
+   * index: a Unique node, not a Sort).
+   */
+  private transactionBranch(parameters: Parameters, user: string, size: string, query: HistoryQuery, position: HistoryPosition | null): string {
+    const time = TIME_COLUMN[query.sort];
+    const typeFilter = query.type === null ? '' : `AND transactions.type = ${parameters.bind(query.type)}::transaction_type`;
+    if (query.currency === null) {
+      const column = `transactions.${time}`;
+      return `SELECT 'TRANSACTION'::text AS source, transactions.id, ${column} AS sort_time
+                FROM transactions
+               WHERE transactions.user_id = ${user} ${typeFilter}
+                 ${rangeFilter(parameters, column, query)}
+                 ${keysetFilter(parameters, column, 'transactions.id', position)}
+               ORDER BY ${column} DESC, transactions.id DESC
+               LIMIT ${size}`;
+    }
+    const column = `ledger_entries.${time}`;
+    return `SELECT DISTINCT 'TRANSACTION'::text AS source, ledger_entries.transaction_id AS id, ${column} AS sort_time
+              FROM ledger_entries
+              JOIN transactions ON transactions.id = ledger_entries.transaction_id
+             WHERE ledger_entries.account_id = (
+                     SELECT accounts.id FROM accounts JOIN wallets ON wallets.id = accounts.wallet_id
+                      WHERE wallets.user_id = ${user} AND accounts.currency_code = ${parameters.bind(query.currency)})
+               AND transactions.user_id = ${user} ${typeFilter}
+               ${rangeFilter(parameters, column, query)}
+               ${keysetFilter(parameters, column, 'ledger_entries.transaction_id', position)}
+             ORDER BY ${column} DESC, ledger_entries.transaction_id DESC
+             LIMIT ${size}`;
+  }
+
+  /**
+   * Fundings that never posted (PENDING / FAILED): `funding_payments_unposted_user_index`. Their
+   * value and booking time are both the moment the user asked (`created_at`).
+   */
+  private unpostedFundingBranch(parameters: Parameters, user: string, size: string, query: HistoryQuery, position: HistoryPosition | null): string {
+    const column = 'funding_payments.created_at';
+    const currencyFilter = query.currency === null ? '' : `AND funding_payments.currency_code = ${parameters.bind(query.currency)}`;
+    return `SELECT 'FUNDING'::text AS source, funding_payments.flow_id AS id, ${column} AS sort_time
+              FROM funding_payments
+             WHERE funding_payments.user_id = ${user} AND funding_payments.funding_transaction_id IS NULL ${currencyFilter}
+               ${rangeFilter(parameters, column, query)}
+               ${keysetFilter(parameters, column, 'funding_payments.flow_id', position)}
+             ORDER BY ${column} DESC, funding_payments.flow_id DESC
+             LIMIT ${size}`;
+  }
+
+  /** The one projection, list and detail alike. Every join is scoped by the caller again. */
+  private select(parameters: Parameters, user: string, page: string): HistoryStatement {
+    const sql = `
+      WITH page AS (${page})
+      SELECT page.source,
+             page.id::text AS id,
+             ${timestampToMicroseconds('page.sort_time')} AS position_microseconds,
+             COALESCE(transactions.reference, 'funding:' || funding_payments.flow_id::text) AS reference,
+             COALESCE(transactions.type::text, 'FUNDING') AS type,
+             COALESCE(transactions.status::text, flow_instances.state) AS status,
+             transactions.reason_code,
+             COALESCE(transactions.initiated_by, 'user:' || funding_payments.user_id::text) AS initiated_by,
+             COALESCE(transactions.failure_code, funding_payments.failure_code) AS failure_code,
+             COALESCE(transactions.value_time, funding_payments.created_at) AS value_time,
+             COALESCE(transactions.booking_time, funding_payments.created_at) AS booking_time,
+             transactions.settlement_time,
+             transactions.rate_display::text AS rate_display,
+             transactions.reference_rate::text AS reference_rate,
+             transactions.rate_provider,
+             transactions.rate_fetched_at,
+             transactions.rate_provider_updated_at,
+             transactions.rate_snapshot_id::text AS rate_snapshot_id,
+             transactions.spread_basis_points,
+             transactions.quote_id::text AS quote_id,
+             transactions.corrects_transaction_id::text AS corrects_transaction_id,
+             transactions.corrected_by_transaction_id::text AS corrected_by_transaction_id,
+             corrects.reference AS corrects_reference,
+             corrects.type::text AS corrects_type,
+             corrected_by.reference AS corrected_by_reference,
+             corrected_by.type::text AS corrected_by_type,
+             legs.legs,
+             funding_payments.currency_code AS requested_currency,
+             requested_currency.minor_unit AS requested_minor_unit,
+             funding_payments.amount_minor::text AS requested_amount
+        FROM page
+        LEFT JOIN transactions
+          ON page.source = 'TRANSACTION' AND transactions.id = page.id AND transactions.user_id = ${user}
+        LEFT JOIN transactions AS corrects
+          ON corrects.id = transactions.corrects_transaction_id AND corrects.user_id = ${user}
+        LEFT JOIN transactions AS corrected_by
+          ON corrected_by.id = transactions.corrected_by_transaction_id AND corrected_by.user_id = ${user}
+        LEFT JOIN funding_payments
+          ON page.source = 'FUNDING' AND funding_payments.flow_id = page.id AND funding_payments.user_id = ${user}
+        LEFT JOIN flow_instances ON flow_instances.id = funding_payments.flow_id
+        LEFT JOIN currencies AS requested_currency ON requested_currency.code = funding_payments.currency_code
+        LEFT JOIN LATERAL (
+          -- The USER's own legs only (Phase 8 decision 5): internal accounts have no wallet.
+          -- Debits (money out) before credits; entry ids follow the ledger's lock order, not the draft's.
+          SELECT json_agg(json_build_object(
+                   'currency', ledger_entries.currency_code,
+                   'minorUnit', currencies.minor_unit,
+                   'direction', ledger_entries.direction,
+                   'amount', ledger_entries.amount_minor::text,
+                   'balanceAfter', ledger_entries.balance_after_minor::text
+                 ) ORDER BY ledger_entries.direction, ledger_entries.id) AS legs
+            FROM ledger_entries
+            JOIN accounts ON accounts.id = ledger_entries.account_id
+            JOIN wallets ON wallets.id = accounts.wallet_id AND wallets.user_id = ${user}
+            JOIN currencies ON currencies.code = ledger_entries.currency_code
+           WHERE ledger_entries.transaction_id = transactions.id
+        ) AS legs ON TRUE
+       ORDER BY page.sort_time DESC, page.id DESC`;
+    return { sql, parameters: parameters.values };
+  }
+}
+
+/** `[from, to)` on the sort's time — half-open, like `period_locks`. */
+function rangeFilter(parameters: Parameters, column: string, query: HistoryQuery): string {
+  const conditions: string[] = [];
+  if (query.fromMicroseconds !== null) {
+    conditions.push(`AND ${column} >= ${microsecondsToTimestamp(parameters.bind(query.fromMicroseconds.toString()))}`);
+  }
+  if (query.toMicroseconds !== null) {
+    conditions.push(`AND ${column} < ${microsecondsToTimestamp(parameters.bind(query.toMicroseconds.toString()))}`);
+  }
+  return conditions.join(' ');
+}
+
+/**
+ * Strictly after the cursor in `(time DESC, id DESC)` order: a row comparison, which btree
+ * evaluates as an index condition. The id breaks ties between rows sharing a microsecond.
+ */
+function keysetFilter(parameters: Parameters, timeColumn: string, idColumn: string, position: HistoryPosition | null): string {
+  if (position === null) return '';
+  const time = microsecondsToTimestamp(parameters.bind(position.timeMicroseconds.toString()));
+  return `AND (${timeColumn}, ${idColumn}) < (${time}, ${parameters.bind(position.id)}::uuid)`;
+}

@@ -117,7 +117,32 @@ describe('FX pipeline properties (integration)', () => {
         const requestsByMonth = new Map<string, number>();
         let lastRates: Record<string, string> = { ...RECORDED_RATES };
 
-        for (const step of actions) {
+        // A fixed prelude that walks EVERY required path, so each runs in every run: 12 unseeded runs
+        // missed a different one in three Phase 8 full runs ('rates-fresh', 'REJECTED',
+        // 'FAILED:TRANSIENT'). ~5 provider calls of the daily 8. The generated tail keeps exploring.
+        const prelude: Action[] = [
+          { kind: 'publish', variant: 'good' },
+          { kind: 'tick', pollers: 'first' }, // ACCEPTED
+          { kind: 'burst', reads: 1, quotes: 1 }, // rates-fresh, quote-201
+          { kind: 'tick', pollers: 'first' }, // not-due (just fetched)
+          { kind: 'fault', fault: { kind: 'server-error' }, times: 2 },
+          { kind: 'advance', seconds: 421 }, // past the next publication + jitter; the rate is now display-only
+          { kind: 'tick', pollers: 'first' }, // FAILED:TRANSIENT (breaker 60s)
+          { kind: 'tick', pollers: 'first' }, // SKIPPED:BACKING_OFF
+          { kind: 'burst', reads: 1, quotes: 1 }, // rates-stale, quote-FX_RATE_STALE
+          { kind: 'publish', variant: 'jump' },
+          { kind: 'advance', seconds: 61 }, // the breaker lapses
+          { kind: 'tick', pollers: 'first' }, // REJECTED
+          { kind: 'advance', seconds: 900 }, // nothing displayable any more
+          { kind: 'burst', reads: 1, quotes: 0 }, // rates-503
+        ];
+        const preludePaths = ['ACCEPTED', 'REJECTED', 'FAILED:TRANSIENT', 'not-due', 'SKIPPED:BACKING_OFF', 'rates-fresh', 'rates-stale', 'rates-503', 'quote-201', 'quote-FX_RATE_STALE'];
+        const before = new Map(preludePaths.map((path) => [path, seen.get(path) ?? 0]));
+        for (const [index, step] of [...prelude, ...actions].entries()) {
+          // The prelude's promise, checked: by its end this run has walked every required path.
+          if (index === prelude.length) {
+            expect({ unwalked: preludePaths.filter((path) => (seen.get(path) ?? 0) === before.get(path)) }).toEqual({ unwalked: [] });
+          }
           const day = clock.now().toISOString().slice(0, 10);
           const month = day.slice(0, 7);
           const requestsBefore = fx.api.requests;

@@ -3,7 +3,7 @@ import { APP_GUARD, APP_INTERCEPTOR } from '@nestjs/core';
 import { LoggerModule } from 'nestjs-pino';
 import type { DestinationStream } from 'pino';
 import { ClockModule } from './common/clock';
-import { JwtAuthGuard, RateLimitGuard, RolesGuard, VerifiedUserGuard } from './common/guards';
+import { JwtAuthGuard, RateLimitGuard, RolesGuard, UserRateLimitGuard, VerifiedUserGuard } from './common/guards';
 import { IdempotencyInterceptor } from './common/interceptors/idempotency/idempotency.interceptor';
 import { IdempotencyKeyStore } from './common/interceptors/idempotency/idempotency-key.store';
 import { IdempotencyMetrics } from './common/interceptors/idempotency/idempotency-metrics';
@@ -23,6 +23,7 @@ import { FxModule } from './modules/fx/fx.module';
 import { PaymentsModule } from './modules/payments/payments.module';
 import { WebhooksModule } from './modules/payments/webhooks/webhooks.module';
 import { TradingModule } from './modules/trading/trading.module';
+import { TransactionsModule } from './modules/transactions/transactions.module';
 import { WalletsModule } from './modules/wallets/wallets.module';
 import { RedisModule } from './redis/redis.module';
 
@@ -95,6 +96,7 @@ export class AppModule {
         WebhooksModule,
         FxModule,
         TradingModule,
+        TransactionsModule,
         HealthModule,
       ],
       // Order matters: throttle first (before any token work), then authenticate,
@@ -104,6 +106,8 @@ export class AppModule {
         { provide: APP_GUARD, useClass: JwtAuthGuard },
         { provide: APP_GUARD, useClass: RolesGuard },
         { provide: APP_GUARD, useClass: VerifiedUserGuard },
+        // Per-user limits need the authenticated user, so they come last.
+        { provide: APP_GUARD, useClass: UserRateLimitGuard },
         // After the guards: the barrier is scoped by the authenticated user (design §6.5).
         { provide: APP_INTERCEPTOR, useClass: IdempotencyInterceptor },
         IdempotencyKeyStore,
