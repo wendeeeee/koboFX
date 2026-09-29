@@ -204,7 +204,7 @@ describe('Trading (e2e: real pipeline, worker loops running)', () => {
 
     // The audit trail, end to end (design §11 E2E).
     const dataSource = app.get(DataSource);
-    const actions = (await dataSource.query(`SELECT action FROM audit_logs ORDER BY created_at, id`)) as { action: string }[];
+    const actions = (await dataSource.query(`SELECT action FROM audit_logs ORDER BY occurred_at, id`)) as { action: string }[];
     expect(actions.map((row) => row.action)).toEqual(
       expect.arrayContaining(['USER_REGISTERED', 'USER_VERIFIED', 'FUNDING_INITIATED', 'CONVERSION_POSTED']),
     );

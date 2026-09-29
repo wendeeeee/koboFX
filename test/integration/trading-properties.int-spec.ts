@@ -13,14 +13,21 @@ const PASSWORD = 'correct horse battery staple';
 
 type Action =
   | { readonly kind: 'fund'; readonly user: 0 | 1; readonly currency: Currency; readonly amount: bigint }
-  | { readonly kind: 'convert'; readonly user: 0 | 1; readonly from: Currency; readonly to: Currency; readonly byTarget: boolean; readonly band: 'fits' | 'above' | 'tiny' | 'any'; readonly amount: bigint }
-  | { readonly kind: 'quote'; readonly user: 0 | 1; readonly from: Currency; readonly to: Currency; readonly band: 'fits' | 'above'; readonly amount: bigint }
-  | { readonly kind: 'trade'; readonly user: 0 | 1; readonly pick: number }
+  | { readonly kind: 'convert'; readonly user: 0 | 1; readonly pair: readonly [Currency, Currency]; readonly byTarget: boolean; readonly band: 'fits' | 'above' | 'tiny' | 'any'; readonly amount: bigint }
+  | { readonly kind: 'quote'; readonly user: 0 | 1; readonly pair: readonly [Currency, Currency]; readonly band: 'fits' | 'above'; readonly amount: bigint }
+  | { readonly kind: 'trade'; readonly user: 0 | 1; readonly pick: number; readonly reuse: boolean }
   | { readonly kind: 'publish'; readonly ngnPerMille: number }
   | { readonly kind: 'advance'; readonly seconds: number };
 
 const user = fc.constantFrom(0 as const, 1 as const);
 const currency = fc.constantFrom(...CURRENCIES);
+/** Pair minimums (Phase 6 seed): ₦1,000 / $1 / €1. */
+const MINIMUM: Record<Currency, bigint> = { NGN: 100_000n, USD: 100n, EUR: 100n };
+/** Mostly real pairs; now and then the same currency (a refusal path). */
+const pair = fc.oneof(
+  { weight: 9, arbitrary: fc.constantFrom(...CURRENCIES.flatMap((from) => CURRENCIES.filter((to) => to !== from).map((to) => [from, to] as const))) },
+  { weight: 1, arbitrary: currency.map((code) => [code, code] as const) },
+);
 
 /** Steered: amounts land in narrow bands (fits the balance, just above it, below the pair minimum) so every refusal path runs. */
 const action: fc.Arbitrary<Action> = fc.oneof(
@@ -30,27 +37,25 @@ const action: fc.Arbitrary<Action> = fc.oneof(
     arbitrary: fc.record({
       kind: fc.constant('convert' as const),
       user,
-      from: currency,
-      to: currency,
+      pair,
       byTarget: fc.boolean(),
       band: fc.constantFrom('fits' as const, 'fits' as const, 'above' as const, 'tiny' as const, 'any' as const),
       amount: fc.bigInt({ min: 1n, max: 30_000_000n }),
     }),
   },
   {
-    weight: 3,
+    weight: 4,
     arbitrary: fc.record({
       kind: fc.constant('quote' as const),
       user,
-      from: currency,
-      to: currency,
-      band: fc.constantFrom('fits' as const, 'fits' as const, 'above' as const),
+      pair,
+      band: fc.constantFrom('fits' as const, 'above' as const),
       amount: fc.bigInt({ min: 1n, max: 30_000_000n }),
     }),
   },
-  { weight: 4, arbitrary: fc.record({ kind: fc.constant('trade' as const), user, pick: fc.nat() }) },
+  { weight: 5, arbitrary: fc.record({ kind: fc.constant('trade' as const), user, pick: fc.nat(), reuse: fc.boolean() }) },
   { weight: 1, arbitrary: fc.record({ kind: fc.constant('publish' as const), ngnPerMille: fc.integer({ min: 970, max: 1030 }) }) },
-  { weight: 2, arbitrary: fc.record({ kind: fc.constant('advance' as const), seconds: fc.constantFrom(1, 5, 29, 31, 61, 421) }) },
+  { weight: 3, arbitrary: fc.record({ kind: fc.constant('advance' as const), seconds: fc.constantFrom(1, 5, 29, 31, 61, 421, 421) }) },
 );
 
 /**
@@ -101,6 +106,15 @@ describe('Trading properties (integration)', () => {
     trader.tokenIssuedAt = clock.now().getTime();
   }
 
+  /**
+   * Access tokens live 900s on the clock and one step advances it by up to 482s (421 + a
+   * publication's 61): re-authenticate any session older than 400s, before a step and before
+   * its checks.
+   */
+  async function refreshSessions(traders: Trader[]): Promise<void> {
+    for (const trader of traders) if (clock.now().getTime() - trader.tokenIssuedAt > 400_000) await signIn(trader);
+  }
+
   async function credit(trader: Trader, code: Currency, amountMinor: bigint): Promise<void> {
     const [{ id: walletId }] = (await harness.dataSource.query(`SELECT id FROM wallets WHERE user_id = $1`, [trader.account.userId])) as { id: string }[];
     const account = await harness.chartOfAccounts.openUserAccount(walletId, code);
@@ -115,8 +129,16 @@ describe('Trading properties (integration)', () => {
     const first = await send();
     const before = await harness.snapshot();
     const replay = await send();
-    expect({ path, status: replay.status, text: replay.text }).toEqual({ path, status: first.status, text: first.text });
-    // A transient refusal (503) is not stored: its replay is processed afresh, and writes nothing either.
+    if (first.status < 500) {
+      // A stored outcome replays byte for byte.
+      expect({ path, status: replay.status, text: replay.text }).toEqual({ path, status: first.status, text: first.text });
+    } else {
+      // A transient refusal (503) is never stored: the replay is processed afresh — same refusal,
+      // its own correlation id and timestamp.
+      const essence = (body: Record<string, unknown>) => ({ ...body, correlationId: undefined, timestamp: undefined });
+      expect({ path, status: replay.status, body: essence(replay.body) }).toEqual({ path, status: first.status, body: essence(first.body) });
+    }
+    // Either way the replay writes nothing.
     expect(await harness.snapshot()).toEqual(before);
     return first;
   }
@@ -160,13 +182,19 @@ describe('Trading properties (integration)', () => {
         const traders: Trader[] = [];
         for (let index = 0; index < 2; index += 1) {
           const account = await payments.signUp();
-          traders.push({ account, token: account.accessToken, tokenIssuedAt: clock.now().getTime(), balances: new Map() });
+          const trader: Trader = { account, token: account.accessToken, tokenIssuedAt: clock.now().getTime(), balances: new Map() };
+          // Seed every currency, so conversions can succeed from the first step.
+          await credit(trader, 'NGN', 20_000_000n);
+          await credit(trader, 'USD', 50_000n);
+          await credit(trader, 'EUR', 50_000n);
+          traders.push(trader);
         }
         const quotes: { owner: number; quoteId: string }[] = [];
+        const traded: { owner: number; quoteId: string }[] = [];
 
         for (const step of actions) {
           await payments.clearRateLimits();
-          for (const trader of traders) if (clock.now().getTime() - trader.tokenIssuedAt > 600_000) await signIn(trader);
+          await refreshSessions(traders);
           const transactionsBefore = ((await harness.dataSource.query(`SELECT count(*)::int AS n FROM transactions WHERE type = 'CONVERSION'`)) as { n: number }[])[0].n;
 
           switch (step.kind) {
@@ -177,13 +205,15 @@ describe('Trading properties (integration)', () => {
             case 'convert':
             case 'quote': {
               const trader = traders[step.user];
-              const available = trader.balances.get(step.from) ?? 0n;
+              const [from, to] = step.pair;
+              const available = trader.balances.get(from) ?? 0n;
               const byTarget = step.kind === 'convert' && step.byTarget;
               let amount = step.amount;
-              if (!byTarget && step.band === 'fits' && available > 0n) amount = 1n + (step.amount % available);
+              // fits: between the pair minimum and what is available (the whole balance at most).
+              if (!byTarget && step.band === 'fits' && available >= MINIMUM[from]) amount = MINIMUM[from] + (step.amount % (available - MINIMUM[from] + 1n));
               if (!byTarget && step.band === 'above') amount = available + 1n + (step.amount % 1_000n);
               if (step.kind === 'convert' && step.band === 'tiny') amount = 1n + (step.amount % 50n);
-              const body = { from: step.from, to: step.to, [byTarget ? 'targetAmount' : 'sourceAmount']: amount.toString() };
+              const body = { from, to, [byTarget ? 'targetAmount' : 'sourceAmount']: amount.toString() };
               const response = await sendTwice(trader, step.kind === 'convert' ? '/wallet/convert' : '/fx/quotes', body);
               see(`${step.kind}-${response.status === 201 ? '201' : response.body.code}`);
               if (response.status === 201 && step.kind === 'quote') quotes.push({ owner: step.user, quoteId: response.body.quoteId });
@@ -192,10 +222,16 @@ describe('Trading properties (integration)', () => {
             }
             case 'trade': {
               const trader = traders[step.user];
-              const chosen = quotes.length > 0 ? quotes[step.pick % quotes.length] : undefined;
+              // reuse: one of this trader's already-traded quotes (the used-quote path); else any quote, either owner's.
+              const own = traded.filter((quote) => quote.owner === step.user);
+              const pool = step.reuse && own.length > 0 ? own : quotes;
+              const chosen = pool.length > 0 ? pool[step.pick % pool.length] : undefined;
               const response = await sendTwice(trader, '/wallet/trade', { quoteId: chosen?.quoteId ?? randomUUID() });
               see(`trade-${response.status === 201 ? '201' : response.body.code}`);
-              if (response.status === 201) applyConversion(trader, response.body);
+              if (response.status === 201) {
+                applyConversion(trader, response.body);
+                traded.push({ owner: step.user, quoteId: response.body.quoteId });
+              }
               break;
             }
             case 'publish': {
@@ -214,6 +250,7 @@ describe('Trading properties (integration)', () => {
           }
 
           // After EVERY step: the model, holds, the books, and each new conversion's arithmetic.
+          await refreshSessions(traders);
           for (const trader of traders) {
             const wallet = (await http().get(`/${API_PREFIX}/wallet`).set('Authorization', `Bearer ${trader.token}`).expect(200)).body.balances as {
               currency: string;
@@ -233,7 +270,7 @@ describe('Trading properties (integration)', () => {
           for (const { id } of fresh) await assertConversionArithmetic(id);
         }
       }),
-      { numRuns: 8 },
+      { numRuns: 10 },
     );
 
     const required = [
@@ -251,5 +288,6 @@ describe('Trading properties (integration)', () => {
       trader.balances.set(body.debited.currency, before - debited);
       trader.balances.set(body.credited.currency, (trader.balances.get(body.credited.currency) ?? 0n) + BigInt(body.credited.amount));
     }
-  });
+    // Every step re-checks the whole book and replays its command: slow by design.
+  }, 1_200_000);
 });
