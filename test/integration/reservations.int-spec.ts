@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { Client } from 'pg';
 import { ErrorCode } from '../../src/common/errors';
 import { Money } from '../../src/common/money';
-import { EntryDirection, PostingAuthorization, TransactionType } from '../../src/modules/ledger/ledger.types';
+import { ConversionProvenance, EntryDirection, PostingAuthorization, TransactionType } from '../../src/modules/ledger/ledger.types';
 import { ReservationMetrics } from '../../src/modules/reservations/reservation-metrics';
 import { ReservationStatus, SettlementPosting } from '../../src/modules/reservations/reservation.types';
 import { LedgerHarness, UserAccount, startLedgerHarness } from '../support/ledger-harness';
@@ -40,8 +40,16 @@ const directDebit = (account: UserAccount, amountMinor: bigint) => ({
 });
 
 /** Design §5.6: NGN → USD, five entries, the spread booked to revenue. */
-const conversion = (source: UserAccount, target: UserAccount, sourceMinor: bigint, targetMinor: bigint, spreadMinor: bigint): SettlementPosting => ({
+const conversion = (
+  source: UserAccount,
+  target: UserAccount,
+  sourceMinor: bigint,
+  targetMinor: bigint,
+  spreadMinor: bigint,
+  provenance: ConversionProvenance,
+): SettlementPosting => ({
   transaction: {
+    conversion: provenance,
     type: TransactionType.CONVERSION,
     valueTime: new Date(),
     initiatedBy: `user:${source.userId}`,
@@ -301,10 +309,16 @@ describe('ReservationService (real Postgres 16)', () => {
       const wallet = await harness.createWallet();
       const naira = await funded('NGN', 100_000n, wallet);
       const dollars = await funded('USD', 0n, wallet);
+      const provenance = await harness.conversionProvenance({
+        sourceCurrency: 'NGN',
+        sourceAmountMinor: 80_000n,
+        targetCurrency: 'USD',
+        targetAmountMinor: 5_000n,
+      });
       const settled = await harness.unitOfWork.run(async () => {
         await harness.ledger.lockUserAccounts([naira.accountId, dollars.accountId]);
         const hold = await reserve(naira, 80_000n);
-        return harness.reservations.settle(hold.id, conversion(naira, dollars, 80_000n, 5_000n, 25n));
+        return harness.reservations.settle(hold.id, conversion(naira, dollars, 80_000n, 5_000n, 25n, provenance));
       });
       expect(settled.status).toBe(ReservationStatus.SETTLED);
       expect(await harness.balanceOf(naira.accountId)).toBe(20_000n);

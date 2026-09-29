@@ -98,12 +98,14 @@ export class IdempotencyInterceptor implements NestInterceptor {
       try {
         const value = await lastValueFrom(next.handle(), { defaultValue: undefined });
         const body = JSON.stringify(value ?? null);
-        const flowId = options.flowIdField ? flowIdOf(value, options.flowIdField) : undefined;
+        const flowId = options.flowIdField ? stringFieldOf(value, options.flowIdField) : undefined;
+        const transactionId = options.transactionIdField ? stringFieldOf(value, options.transactionIdField) : undefined;
         await this.store.complete(manager, scope, {
           status: IdempotencyKeyStatus.COMPLETED,
           statusCode: successStatus,
           body,
           flowId,
+          transactionId,
         });
         return { kind: 'SUCCESS', value };
       } catch (error) {
@@ -126,7 +128,7 @@ export class IdempotencyInterceptor implements NestInterceptor {
   }
 }
 
-function flowIdOf(value: unknown, field: string): string | undefined {
+function stringFieldOf(value: unknown, field: string): string | undefined {
   const candidate = typeof value === 'object' && value !== null ? (value as Record<string, unknown>)[field] : undefined;
   return typeof candidate === 'string' ? candidate : undefined;
 }

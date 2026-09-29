@@ -35,6 +35,7 @@ import { LedgerChecksService, LedgerIntegrityReport } from '../../src/modules/le
 import { LedgerModule } from '../../src/modules/ledger/ledger.module';
 import { LedgerService } from '../../src/modules/ledger/ledger.service';
 import {
+  ConversionProvenance,
   EntryDirection,
   PostedTransaction,
   PostingAuthorization,
@@ -188,6 +189,17 @@ export interface LedgerHarness {
   /** System-driven funding: DEBIT BANK:{currency} (asset up), CREDIT the user (we owe more). */
   fund(account: UserAccount, amountMinor: bigint): Promise<PostedTransaction>;
   balanceOf(accountId: string): Promise<bigint>;
+  /**
+   * Conversion provenance for tests that post a CONVERSION directly through the ledger
+   * (every CONVERSION must carry it since Phase 7), citing one ACCEPTED fixture snapshot
+   * created on first use. The rates are placeholders; `rateDisplay` is derived from the amounts.
+   */
+  conversionProvenance(input: {
+    sourceCurrency: string;
+    sourceAmountMinor: bigint;
+    targetCurrency: string;
+    targetAmountMinor: bigint;
+  }): Promise<ConversionProvenance>;
   reservedOf(accountId: string): Promise<bigint>;
   snapshot(): Promise<LedgerSnapshot>;
   /**
@@ -426,6 +438,7 @@ export async function startLedgerHarness(
     ])) as { id: string }[];
     return { userId: user.id, walletId: wallet.id };
   };
+  let fixtureSnapshotId: string | undefined;
 
   const harness: LedgerHarness = {
     db,
@@ -470,6 +483,30 @@ export async function startLedgerHarness(
           { account: { accountId: account.accountId }, direction: EntryDirection.CREDIT, amount: Money.of(amountMinor, account.currency) },
         ],
       });
+    },
+    async conversionProvenance(input) {
+      fixtureSnapshotId ??= (
+        (await dataSource.query(
+          `INSERT INTO exchange_rate_snapshots
+             (provider, base_currency_code, provider_updated_at, provider_next_update_at, fetched_at, status)
+           VALUES ('test-fixture', 'USD', now(), now() + interval '1 hour', now(), 'ACCEPTED')
+           RETURNING id`,
+        )) as { id: string }[]
+      )[0].id;
+      const [{ rate }] = (await dataSource.query(`SELECT ($1::numeric / $2::numeric)::text AS rate`, [
+        input.targetAmountMinor.toString(),
+        input.sourceAmountMinor.toString(),
+      ])) as { rate: string }[];
+      return {
+        ...input,
+        rateDisplay: rate,
+        referenceRate: rate,
+        rateProvider: 'test-fixture',
+        rateFetchedAt: new Date(),
+        rateProviderUpdatedAt: new Date(),
+        rateSnapshotId: fixtureSnapshotId,
+        spreadBasisPoints: 50,
+      };
     },
     async balanceOf(accountId) {
       const [row] = (await dataSource.query(`SELECT balance_minor::text AS balance FROM accounts WHERE id = $1`, [

@@ -5,7 +5,7 @@ import { InvariantViolationError, NotFoundError } from '../../common/errors';
 import { Money } from '../../common/money';
 import { APP_CONFIG } from '../../config/config.module';
 import { AppConfig } from '../../config/configuration';
-import { sqlState } from '../../database/database-errors';
+import { constraintName, sqlState } from '../../database/database-errors';
 import { UnitOfWork } from '../../database/transaction/unit-of-work';
 import {
   AccountCurrencyMismatchError,
@@ -345,12 +345,17 @@ export class LedgerService {
     draft: TransactionDraft,
   ): Promise<{ reference: string; bookingTime: Date }> {
     const reference = draft.reference ?? transactionId;
+    const conversion = draft.conversion;
     try {
       const [row] = (await manager.query(
         `INSERT INTO transactions
            (id, reference, user_id, type, status, value_time, settlement_time, initiated_by,
-            reason_code, corrects_transaction_id, idempotency_key, external_reference, metadata)
-         VALUES ($1, $2, $3, $4, 'POSTED', $5, $6, $7, $8, $9, $10, $11, $12)
+            reason_code, corrects_transaction_id, idempotency_key, external_reference, metadata,
+            source_currency, source_amount_minor, target_currency, target_amount_minor, rate_display,
+            reference_rate, rate_provider, rate_fetched_at, rate_provider_updated_at, rate_snapshot_id,
+            spread_basis_points, quote_id)
+         VALUES ($1, $2, $3, $4, 'POSTED', $5, $6, $7, $8, $9, $10, $11, $12,
+                 $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24)
          RETURNING booking_time`,
         [
           transactionId,
@@ -365,10 +370,27 @@ export class LedgerService {
           draft.idempotencyKey ?? null,
           draft.externalReference ?? null,
           JSON.stringify(draft.metadata ?? {}),
+          conversion?.sourceCurrency ?? null,
+          conversion?.sourceAmountMinor.toString() ?? null,
+          conversion?.targetCurrency ?? null,
+          conversion?.targetAmountMinor.toString() ?? null,
+          conversion?.rateDisplay ?? null,
+          conversion?.referenceRate ?? null,
+          conversion?.rateProvider ?? null,
+          conversion?.rateFetchedAt ?? null,
+          conversion?.rateProviderUpdatedAt ?? null,
+          conversion?.rateSnapshotId ?? null,
+          conversion?.spreadBasisPoints ?? null,
+          conversion?.quoteId ?? null,
         ],
       )) as { booking_time: Date }[];
       return { reference, bookingTime: row.booking_time };
     } catch (error) {
+      if (sqlState(error) === '23505' && constraintName(error) === 'transactions_quote_id_unique') {
+        throw new InvalidPostingError('A quote backs at most one conversion.', { quoteId: conversion?.quoteId ?? null }, {
+          cause: error,
+        });
+      }
       if (sqlState(error) === '23505') {
         throw new InvalidPostingError('Transaction reference is already in use.', { reference }, { cause: error });
       }

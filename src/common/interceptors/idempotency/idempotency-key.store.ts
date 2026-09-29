@@ -60,13 +60,16 @@ export class IdempotencyKeyStore {
       statusCode: number;
       body: string;
       flowId?: string;
+      transactionId?: string;
     },
   ): Promise<void> {
     await manager.query(
       `UPDATE idempotency_keys
-          SET status = $4, response_status_code = $5, response_body = $6, flow_id = $7, completed_at = now()
+          SET status = $4, response_status_code = $5, response_body = $6, flow_id = $7, transaction_id = $8,
+              completed_at = now()
         WHERE user_id = $1 AND endpoint = $2 AND key = $3 AND status = 'IN_PROGRESS'`,
-      [scope.userId, scope.endpoint, scope.key, outcome.status, outcome.statusCode, outcome.body, outcome.flowId ?? null],
+      [scope.userId, scope.endpoint, scope.key, outcome.status, outcome.statusCode, outcome.body, outcome.flowId ?? null,
+       outcome.transactionId ?? null],
     );
   }
 }

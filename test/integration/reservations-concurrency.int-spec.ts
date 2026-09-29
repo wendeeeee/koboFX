@@ -1,7 +1,7 @@
 import { Client } from 'pg';
 import { DomainError, ErrorCode } from '../../src/common/errors';
 import { Money } from '../../src/common/money';
-import { EntryDirection, PostingAuthorization, TransactionType } from '../../src/modules/ledger/ledger.types';
+import { ConversionProvenance, EntryDirection, PostingAuthorization, TransactionType } from '../../src/modules/ledger/ledger.types';
 import { ReservationMetrics } from '../../src/modules/reservations/reservation-metrics';
 import { Reservation, ReservationStatus, SettlementPosting } from '../../src/modules/reservations/reservation.types';
 import { LedgerHarness, UserAccount, startLedgerHarness } from '../support/ledger-harness';
@@ -32,11 +32,17 @@ const spend = (account: UserAccount, amountMinor: bigint): SettlementPosting => 
 });
 
 /** NGN → USD at a flat ₦160/$1 with a 25-cent spread — the §5.6 five entries, minus a real rate (Phase 7). */
-const conversion = (source: UserAccount, target: UserAccount, sourceMinor: bigint): SettlementPosting => {
+const conversion = (source: UserAccount, target: UserAccount, sourceMinor: bigint, provenance: ConversionProvenance): SettlementPosting => {
   const targetMinor = sourceMinor / 160n;
   const spreadMinor = 25n;
   return {
-    transaction: { type: TransactionType.CONVERSION, valueTime: new Date(), initiatedBy: `user:${source.userId}`, userId: source.userId },
+    transaction: {
+      type: TransactionType.CONVERSION,
+      valueTime: new Date(),
+      initiatedBy: `user:${source.userId}`,
+      userId: source.userId,
+      conversion: provenance,
+    },
     entries: [
       { account: { accountId: source.accountId }, direction: EntryDirection.DEBIT, amount: Money.of(sourceMinor, 'NGN') },
       { account: { systemAccount: 'FX_POSITION' }, direction: EntryDirection.CREDIT, amount: Money.of(sourceMinor, 'NGN') },
@@ -246,13 +252,19 @@ describe('Reservation concurrency (real pool, testcontainers)', () => {
     const wallet = await harness.createWallet();
     const naira = await funded('NGN', 100_000n, wallet);
     const dollars = await funded('USD', 0n, wallet);
+    const provenance = await harness.conversionProvenance({
+      sourceCurrency: 'NGN',
+      sourceAmountMinor: 80_000n,
+      targetCurrency: 'USD',
+      targetAmountMinor: 80_000n / 160n - 25n,
+    });
     await warmPool();
 
     const attempt = () =>
       harness.unitOfWork.run(async () => {
         await harness.ledger.lockUserAccounts([naira.accountId, dollars.accountId]);
         const hold = await reserve(naira, 80_000n);
-        return harness.reservations.settle(hold.id, conversion(naira, dollars, 80_000n));
+        return harness.reservations.settle(hold.id, conversion(naira, dollars, 80_000n, provenance));
       });
     const { fulfilled, failureCodes, unexpected } = await outcomes(Array.from({ length: 100 }, attempt));
 

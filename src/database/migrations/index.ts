@@ -19,6 +19,8 @@ import { CreateProviderCalls1790812800004 } from './1790812800004-CreateProvider
 import { CreateCurrencyPairs1790899200000 } from './1790899200000-CreateCurrencyPairs';
 import { CreateExchangeRateSnapshots1790899200001 } from './1790899200001-CreateExchangeRateSnapshots';
 import { CreateQuotes1790899200002 } from './1790899200002-CreateQuotes';
+import { AddConversionFlowType1790985600000 } from './1790985600000-AddConversionFlowType';
+import { ConversionFlowsAndProvenance1790985600001 } from './1790985600001-ConversionFlowsAndProvenance';
 
 /** Explicit, ordered list — no globbing, so the CLI and the test harness run the same set. */
 export const MIGRATIONS = [
@@ -43,4 +45,6 @@ export const MIGRATIONS = [
   CreateCurrencyPairs1790899200000,
   CreateExchangeRateSnapshots1790899200001,
   CreateQuotes1790899200002,
+  AddConversionFlowType1790985600000,
+  ConversionFlowsAndProvenance1790985600001,
 ];

@@ -122,7 +122,15 @@ describe('LedgerService.post() (real Postgres 16)', () => {
     await harness.fund(naira, 100_000_000n);
 
     const posted = await harness.ledger.post({
-      transaction: userDraft(naira, { type: TransactionType.CONVERSION }),
+      transaction: userDraft(naira, {
+        type: TransactionType.CONVERSION,
+        conversion: await harness.conversionProvenance({
+          sourceCurrency: 'NGN',
+          sourceAmountMinor: 100_000_000n,
+          targetCurrency: 'USD',
+          targetAmountMinor: 65_011n,
+        }),
+      }),
       entries: [
         debit({ accountId: naira.accountId }, 100_000_000n, 'NGN'),
         credit({ systemAccount: 'FX_POSITION' }, 100_000_000n, 'NGN'),

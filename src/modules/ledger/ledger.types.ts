@@ -66,6 +66,31 @@ export interface LedgerEntryDraft {
   readonly amount: Money;
 }
 
+/**
+ * What a CONVERSION records beyond its entries (design §4.3, §5.4): both legs' amounts and
+ * the provenance of the reference rate it was priced off. Required for CONVERSION, refused
+ * otherwise; the database CHECK `transactions_conversion_provenance` says the same.
+ */
+export interface ConversionProvenance {
+  readonly sourceCurrency: string;
+  readonly sourceAmountMinor: bigint;
+  readonly targetCurrency: string;
+  readonly targetAmountMinor: bigint;
+  /** Display only, derived from the two amounts (the amounts are authoritative). A plain decimal string. */
+  readonly rateDisplay: string;
+  /** The reference mid priced off (target per source), exact, as a plain decimal string. */
+  readonly referenceRate: string;
+  readonly rateProvider: string;
+  readonly rateFetchedAt: Date;
+  /** The provider's publication time of the snapshot. */
+  readonly rateProviderUpdatedAt: Date;
+  /** The ACCEPTED exchange rate snapshot priced off. */
+  readonly rateSnapshotId: string;
+  readonly spreadBasisPoints: number;
+  /** The quote a trade executed; absent for a market conversion. */
+  readonly quoteId?: string;
+}
+
 export interface TransactionDraft {
   readonly type: TransactionType;
   readonly authorization: PostingAuthorization;
@@ -85,6 +110,8 @@ export interface TransactionDraft {
   readonly idempotencyKey?: string;
   readonly settlementTime?: Date;
   readonly metadata?: Record<string, unknown>;
+  /** Required for CONVERSION, forbidden otherwise. */
+  readonly conversion?: ConversionProvenance;
 }
 
 export interface PostingRequest {

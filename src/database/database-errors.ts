@@ -19,6 +19,14 @@ export function sqlState(error: unknown): string | undefined {
   return typeof code === 'string' ? code : undefined;
 }
 
+/** The violated constraint's name, when the driver reports one. */
+export function constraintName(error: unknown): string | undefined {
+  if (typeof error !== 'object' || error === null) return undefined;
+  const candidate = error as { constraint?: unknown; driverError?: { constraint?: unknown } };
+  const name = candidate.driverError?.constraint ?? candidate.constraint;
+  return typeof name === 'string' ? name : undefined;
+}
+
 /** Map transient database failures to domain errors; anything else is returned as-is. */
 export function translateDatabaseError(error: unknown): unknown {
   const state = sqlState(error);

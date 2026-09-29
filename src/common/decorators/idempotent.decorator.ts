@@ -5,6 +5,8 @@ export const IDEMPOTENT_KEY = 'idempotency:options';
 export interface IdempotentOptions {
   /** A field of the success body holding the flow the request started, linked on the key row. */
   readonly flowIdField?: string;
+  /** A field of the success body holding the ledger transaction the request posted, linked on the key row. */
+  readonly transactionIdField?: string;
 }
 
 /**

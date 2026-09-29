@@ -3,6 +3,7 @@ import { Money } from '../../../common/money';
 import { InvalidPostingError, LedgerUnbalancedError } from '../ledger.errors';
 import {
   AccountReference,
+  ConversionProvenance,
   EntryDirection,
   PostingAuthorization,
   PostingRequest,
@@ -57,6 +58,37 @@ function validateAccountReference(reference: AccountReference | undefined, index
   }
 }
 
+const PLAIN_POSITIVE_DECIMAL = /^(0|[1-9]\d*)(\.\d+)?$/;
+const CURRENCY_CODE = /^[A-Z]{3}$/;
+
+function validateConversion(conversion: ConversionProvenance, request: PostingRequest): void {
+  const fail = (message: string): never => {
+    throw new InvalidPostingError(`Conversion provenance: ${message}`);
+  };
+  if (!CURRENCY_CODE.test(conversion.sourceCurrency) || !CURRENCY_CODE.test(conversion.targetCurrency)) fail('currencies must be ISO codes.');
+  if (conversion.sourceCurrency === conversion.targetCurrency) fail('source and target currency must differ.');
+  if (typeof conversion.sourceAmountMinor !== 'bigint' || conversion.sourceAmountMinor <= 0n) fail('the source amount must be positive.');
+  if (typeof conversion.targetAmountMinor !== 'bigint' || conversion.targetAmountMinor <= 0n) fail('the target amount must be positive.');
+  for (const [name, rate] of [['rateDisplay', conversion.rateDisplay], ['referenceRate', conversion.referenceRate]] as const) {
+    if (typeof rate !== 'string' || !PLAIN_POSITIVE_DECIMAL.test(rate) || /^0(\.0+)?$/.test(rate)) fail(`${name} must be a positive plain decimal.`);
+  }
+  if (typeof conversion.rateProvider !== 'string' || conversion.rateProvider === '') fail('the provider is required.');
+  if (!isValidDate(conversion.rateFetchedAt) || !isValidDate(conversion.rateProviderUpdatedAt)) fail('rate times must be valid Dates.');
+  if (!isUuid(conversion.rateSnapshotId)) fail('the snapshot id must be a UUID.');
+  if (conversion.quoteId !== undefined && !isUuid(conversion.quoteId)) fail('the quote id must be a UUID when given.');
+  if (!Number.isInteger(conversion.spreadBasisPoints) || conversion.spreadBasisPoints < 0 || conversion.spreadBasisPoints >= 10_000) {
+    fail('the spread must be an integer number of basis points in [0, 10000).');
+  }
+  const currencies = new Set(request.entries.map((entry) => entry.amount.currency));
+  if (currencies.size !== 2 || !currencies.has(conversion.sourceCurrency) || !currencies.has(conversion.targetCurrency)) {
+    fail('the entries must be in exactly the source and target currencies.');
+  }
+  const sourceDebits = request.entries
+    .filter((entry) => entry.amount.currency === conversion.sourceCurrency && entry.direction === EntryDirection.DEBIT)
+    .reduce((sum, entry) => sum + entry.amount.amountMinor, 0n);
+  if (sourceDebits !== conversion.sourceAmountMinor) fail('the source amount must equal the source-currency debits.');
+}
+
 /**
  * Everything about a posting that can be checked without the database (design §6.1,
  * "at runtime"). Runs BEFORE any write, so a rejected posting leaves no trace.
@@ -104,6 +136,12 @@ export function validatePostingRequest(request: PostingRequest): void {
     );
   }
 
+  if ((transaction.type === TransactionType.CONVERSION) !== (transaction.conversion !== undefined)) {
+    throw new InvalidPostingError('CONVERSION postings must carry their conversion provenance; other types must not.', {
+      type: transaction.type,
+    });
+  }
+
   if (!Array.isArray(entries) || entries.length < 2) {
     throw new InvalidPostingError('A posting needs at least two entries.', {
       entryCount: Array.isArray(entries) ? entries.length : 0,
@@ -143,4 +181,5 @@ export function validatePostingRequest(request: PostingRequest): void {
   if (unbalanced.length > 0) {
     throw new LedgerUnbalancedError('Debits must equal credits in every currency.', { unbalanced });
   }
+  if (transaction.conversion !== undefined) validateConversion(transaction.conversion, request);
 }
