@@ -178,9 +178,20 @@ describe('funding under concurrency (integration)', () => {
       }
       for (const flowId of flows) expect(await stateOf(flowId)).toBe('POSTED');
       const after = psp.statistics();
-      // One lookup, one authorization, one capture per flow: nothing ran twice.
-      expect(after.requests.list - before.requests.list).toBe(40);
+      // One authorization and one capture per flow: no side effect ran twice.
       expect(after.requests.authorize - before.requests.authorize).toBe(40);
+      // One lookup per flow, plus only what PSP failures explain: the test's 300ms per-attempt
+      // timeout makes a slow lookup retry (reads are retried) and a slow authorize re-run its
+      // step, which looks the payment up first. Extra lookups without a failure = a step ran twice.
+      const [calls] = (await harness.dataSource.query(
+        `SELECT count(*) FILTER (WHERE operation = 'find-payment-by-reference')::int AS lookups,
+                count(*) FILTER (WHERE error IS NOT NULL OR response_status >= 500)::int AS failures
+           FROM provider_calls WHERE flow_id = ANY($1::uuid[])`,
+        [flows],
+      )) as { lookups: number; failures: number }[];
+      expect(after.requests.list - before.requests.list).toBe(calls.lookups);
+      expect(calls.lookups).toBeGreaterThanOrEqual(40);
+      expect(calls.lookups - 40).toBeLessThanOrEqual(calls.failures);
       expect(after.effectiveCaptures - before.effectiveCaptures).toBe(40);
       await harness.expectCleanBooks();
     } finally {
