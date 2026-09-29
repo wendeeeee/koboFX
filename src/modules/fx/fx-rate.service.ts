@@ -42,6 +42,7 @@ const CATCH_UP_POLL_MILLISECONDS = 100;
 export class FxRateService {
   private readonly logger = new Logger(FxRateService.name);
   private local: { snapshot: RateSnapshot; source: 'REDIS' | 'DATABASE'; readAt: number } | undefined;
+  private inflight: Promise<{ snapshot: RateSnapshot; source: ServedSnapshot['source'] } | undefined> | undefined;
 
   constructor(
     private readonly cache: RateCache,
@@ -121,11 +122,20 @@ export class FxRateService {
     this.local = undefined;
   }
 
-  private async read(): Promise<{ snapshot: RateSnapshot; source: ServedSnapshot['source'] } | undefined> {
+  private read(): Promise<{ snapshot: RateSnapshot; source: ServedSnapshot['source'] } | undefined> {
     const local = this.local;
     if (local && Date.now() - local.readAt < this.config.fx.localCacheMilliseconds) {
-      return { snapshot: local.snapshot, source: 'MEMORY' };
+      return Promise.resolve({ snapshot: local.snapshot, source: 'MEMORY' });
     }
+    // Concurrent readers in this process share one read: a burst never becomes a burst of
+    // Redis (or, with Redis down, database) queries.
+    this.inflight ??= this.readThrough().finally(() => {
+      this.inflight = undefined;
+    });
+    return this.inflight;
+  }
+
+  private async readThrough(): Promise<{ snapshot: RateSnapshot; source: ServedSnapshot['source'] } | undefined> {
     let snapshot: RateSnapshot | undefined;
     let source: 'REDIS' | 'DATABASE' = 'REDIS';
     try {

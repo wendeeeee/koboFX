@@ -19,6 +19,8 @@ export interface PairRateView {
 
 export interface RatesView {
   readonly provider: string;
+  /** The snapshot served (provenance: there is no canonical rate). */
+  readonly snapshotId: string;
   /** When the provider published these rates — the rate's own time. */
   readonly asOf: string;
   /** When we fetched them. */
@@ -55,6 +57,7 @@ export function ratesView(served: ServedSnapshot, pairs: readonly CurrencyPair[]
   }
   return {
     provider: snapshot.provider,
+    snapshotId: snapshot.id,
     asOf: snapshot.providerUpdatedAt.toISOString(),
     fetchedAt: snapshot.fetchedAt.toISOString(),
     rateAgeSeconds: ageSeconds(freshness),
