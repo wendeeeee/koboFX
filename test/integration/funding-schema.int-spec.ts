@@ -207,7 +207,11 @@ describe('Phase 5 schema guards (flow_instances, funding_payments, idempotency_k
         await refused(client, `UPDATE provider_calls SET response_status = 200 WHERE id = $1`, [id], /append-only/);
         await refused(client, `DELETE FROM provider_calls WHERE id = $1`, [id], /append-only/);
       }
-      await refused(superuser, `TRUNCATE provider_calls`, [], /append-only/);
+      // Since Phase 6, exchange_rate_snapshots.provider_call_id references provider_calls: a plain
+      // TRUNCATE is refused by the foreign key first, and CASCADE (the form that would get past it)
+      // meets the append-only triggers.
+      await refused(superuser, `TRUNCATE provider_calls`, [], /append-only|referenced in a foreign key/);
+      await refused(superuser, `TRUNCATE provider_calls CASCADE`, [], /append-only/);
     });
   });
 });

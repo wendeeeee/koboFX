@@ -79,7 +79,12 @@ describe('Redis down', () => {
 
   it('readiness reports Redis down', async () => {
     const response = await http().get('/api/v1/health/ready').expect(503);
-    expect(response.body).toEqual({ status: 'unavailable', checks: { postgres: 'up', redis: 'down' } });
+    // Since Phase 6 readiness also REPORTS rate freshness (never failing on it); no snapshot here.
+    expect(response.body).toEqual({
+      status: 'unavailable',
+      checks: { postgres: 'up', redis: 'down' },
+      fx: { tier: 'NONE', rateAgeSeconds: null, provider: null, asOf: null },
+    });
     await http().get('/api/v1/health/live').expect(200);
   });
 });
