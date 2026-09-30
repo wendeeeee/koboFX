@@ -171,7 +171,9 @@ export class TransactionHistoryRepository {
              COALESCE(transactions.failure_code, funding_payments.failure_code) AS failure_code,
              COALESCE(transactions.value_time, funding_payments.created_at) AS value_time,
              COALESCE(transactions.booking_time, funding_payments.created_at) AS booking_time,
-             transactions.settlement_time,
+             -- A funding's transaction row is append-only (Phase 2 decision 3); when the PSP settles
+             -- it (Phase 9), the settlement time is recorded on its funding payment instead.
+             COALESCE(transactions.settlement_time, settled_funding.settled_at) AS settlement_time,
              transactions.rate_display::text AS rate_display,
              transactions.reference_rate::text AS reference_rate,
              transactions.rate_provider,
@@ -197,6 +199,9 @@ export class TransactionHistoryRepository {
           ON corrects.id = transactions.corrects_transaction_id AND corrects.user_id = ${user}
         LEFT JOIN transactions AS corrected_by
           ON corrected_by.id = transactions.corrected_by_transaction_id AND corrected_by.user_id = ${user}
+        LEFT JOIN funding_payments AS settled_funding
+          ON transactions.type = 'FUNDING' AND settled_funding.funding_transaction_id = transactions.id
+         AND settled_funding.user_id = ${user}
         LEFT JOIN funding_payments
           ON page.source = 'FUNDING' AND funding_payments.flow_id = page.id AND funding_payments.user_id = ${user}
         LEFT JOIN flow_instances ON flow_instances.id = funding_payments.flow_id

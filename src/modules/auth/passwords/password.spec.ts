@@ -1,6 +1,29 @@
 import * as argon2 from 'argon2';
+import { plainToInstance } from 'class-transformer';
+import { validate } from 'class-validator';
+import { UserRole, UserStatus } from '../../users/user.types';
+import { toSafeUser } from '../auth.types';
+import { RegisterDto } from '../dto/auth.dto';
 import { PASSWORD_HASHING_OPTIONS, PasswordHasher } from './password-hasher';
 import { MAXIMUM_PASSWORD_LENGTH, normalizePassword, passwordProblem } from './password-policy';
+
+describe('the password DTO message', () => {
+  it('a password that is not a string at all is reported (as too short), never a crash', async () => {
+    const errors = await validate(plainToInstance(RegisterDto, { email: 'someone@example.com', password: 123456789012345 }));
+    const password = errors.find((error) => error.property === 'password');
+    expect(Object.values(password?.constraints ?? {})).toContainEqual(expect.stringMatching(/^password is too short|^password must be/));
+  });
+});
+
+describe('toSafeUser', () => {
+  it('an unverified profile has verifiedAt null; a verified one an ISO string', () => {
+    const base = { id: 'u', email: 'e@example.com', status: UserStatus.PENDING_VERIFICATION, role: UserRole.USER };
+    expect(toSafeUser({ ...base, verifiedAt: null } as Parameters<typeof toSafeUser>[0]).verifiedAt).toBeNull();
+    expect(toSafeUser({ ...base, verifiedAt: new Date('2026-09-29T00:00:00Z') } as Parameters<typeof toSafeUser>[0]).verifiedAt).toBe(
+      '2026-09-29T00:00:00.000Z',
+    );
+  });
+});
 
 describe('password policy (decision #12)', () => {
   it.each([

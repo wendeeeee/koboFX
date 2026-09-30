@@ -72,6 +72,8 @@ export interface ProviderHttpRequest<T> {
    */
   readonly beforeAttempt?: (attempt: number) => Promise<void>;
   readonly classify: ResponseClassifier<T>;
+  /** Overrides the client's `recordResponseAs` for this request (e.g. a settlement report's raw text). */
+  readonly recordResponseAs?: 'redacted-json' | 'raw-json-text';
 }
 
 export interface ProviderHttpResponse<T> {
@@ -156,7 +158,7 @@ export class ProviderHttpClient {
         requestBody: request.body,
         durationMilliseconds: Date.now() - started,
         responseStatus: fields.responseStatus,
-        ...(fields.responseText === undefined ? {} : this.recordedBody(fields.responseText)),
+        ...(fields.responseText === undefined ? {} : this.recordedBody(fields.responseText, request.recordResponseAs)),
         ...(fields.error === undefined ? {} : { error: this.scrub(fields.error) }),
       });
 
@@ -207,14 +209,17 @@ export class ProviderHttpClient {
     }
   }
 
-  private recordedBody(text: string): { responseBody?: unknown; responseBodyText?: string } {
+  private recordedBody(
+    text: string,
+    recordResponseAs = this.options.recordResponseAs,
+  ): { responseBody?: unknown; responseBodyText?: string } {
     let parsed: unknown;
     try {
       parsed = text.length === 0 ? null : JSON.parse(text);
     } catch {
       return { responseBody: unparsedBody(this.scrub(text)) };
     }
-    if (this.options.recordResponseAs === 'raw-json-text' && text.length > 0) {
+    if (recordResponseAs === 'raw-json-text' && text.length > 0) {
       return { responseBodyText: this.scrub(text) };
     }
     return { responseBody: parsed };

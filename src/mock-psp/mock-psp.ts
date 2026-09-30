@@ -31,7 +31,7 @@ export type MockPaymentStatus =
   | 'capture_failed'
   | 'charged_back';
 
-export type MockOperation = 'authorize' | 'capture' | 'void' | 'get' | 'list';
+export type MockOperation = 'authorize' | 'capture' | 'void' | 'get' | 'list' | 'list_settlements' | 'get_settlement' | 'list_chargebacks';
 
 export type FaultKind =
   | 'server_error'
@@ -87,6 +87,55 @@ export interface MockPspOptions {
   readonly deliverWebhook?: WebhookDeliverer;
   /** How long a timeout fault holds the response (longer than the client's timeout). */
   readonly hangMilliseconds?: number;
+  /** The PSP's clock (capture, chargeback and settlement times). Tests pass their TestClock. */
+  readonly now?: () => Date;
+}
+
+interface MockSettlementLine {
+  id: string;
+  type: 'payment' | 'chargeback';
+  payment_id: string;
+  chargeback_id: string | null;
+  currency: string;
+  amount: string;
+  fee: string;
+}
+
+interface MockSettlementBatch {
+  id: string;
+  currency: string;
+  status: 'paid' | 'pending';
+  settledAt: string;
+  /** Listed only once the PSP's clock reaches this (a late batch is published after it settled). */
+  visibleFrom: string;
+  lines: MockSettlementLine[];
+  /** Added to the stated gross only (a report whose totals don't add up). */
+  grossDelta: bigint;
+}
+
+export interface SettleOptions {
+  readonly currency: string;
+  /** Which captured payments to pay out; default every captured (or charged back) unsettled one. */
+  readonly paymentIds?: readonly string[];
+  /** Deduct chargebacks not yet deducted (default true). */
+  readonly deductChargebacks?: boolean;
+  readonly settledAt?: Date;
+  /** When the batch becomes visible in the list (default: when it settled). */
+  readonly visibleFrom?: Date;
+  readonly status?: 'paid' | 'pending';
+  /** The PSP's fee: `floor(amount × bps / 10,000) + fixed` — its rounding, not ours. Default 150 bps. */
+  readonly feeBasisPoints?: number;
+  readonly fixedFeeMinor?: bigint;
+  readonly chargebackFeeMinor?: bigint;
+  // Scripted faults (Phase 9).
+  /** Leave these payments out (a missing line); they stay unsettled at the PSP. */
+  readonly omit?: readonly string[];
+  /** Pay these payments out with a different amount (a wrong amount). */
+  readonly alterAmounts?: Readonly<Record<string, bigint>>;
+  /** Add lines for payment ids the PSP's own API does not know. */
+  readonly unknownLines?: number;
+  /** Add this to the stated gross (lines no longer add up to the totals). */
+  readonly grossDelta?: bigint;
 }
 
 interface StoredWrite {
@@ -94,7 +143,7 @@ interface StoredWrite {
   readonly body: unknown;
 }
 
-const OPERATIONS: readonly MockOperation[] = ['authorize', 'capture', 'void', 'get', 'list'];
+const OPERATIONS: readonly MockOperation[] = ['authorize', 'capture', 'void', 'get', 'list', 'list_settlements', 'get_settlement', 'list_chargebacks'];
 
 export class MockPsp {
   private readonly payments = new Map<string, MockPayment>();
@@ -103,7 +152,15 @@ export class MockPsp {
   private readonly faults = new Map<MockOperation, FaultKind[]>();
   private readonly queue: MockWebhookEvent[] = [];
   private readonly timers = new Set<NodeJS.Timeout>();
-  private readonly requests: Record<MockOperation, number> = { authorize: 0, capture: 0, void: 0, get: 0, list: 0 };
+  private readonly requests: Record<MockOperation, number> = {
+    authorize: 0, capture: 0, void: 0, get: 0, list: 0, list_settlements: 0, get_settlement: 0, list_chargebacks: 0,
+  };
+  private readonly batches = new Map<string, MockSettlementBatch>();
+  /** Payment id → the batch that paid it out; chargeback id → the batch that deducted it. */
+  private readonly settledPayments = new Map<string, string>();
+  private readonly deductedChargebacks = new Map<string, string>();
+  private pageSize = 100;
+  private readonly now: () => Date;
   private effectiveAuthorizations = 0;
   private effectiveCaptures = 0;
   private effectiveVoids = 0;
@@ -116,6 +173,7 @@ export class MockPsp {
   constructor(private readonly options: MockPspOptions) {
     this.captureCompletion = options.captureCompletion ?? 'manual';
     this.deliverer = options.deliverWebhook;
+    this.now = options.now ?? (() => new Date());
   }
 
   // ── lifecycle ─────────────────────────────────────────────────────────────
@@ -186,7 +244,7 @@ export class MockPsp {
   completeCapture(paymentId: string): void {
     const payment = this.require(paymentId);
     if (payment.status !== 'capture_pending') throw new Error(`Payment ${paymentId} is ${payment.status}, not capture_pending`);
-    this.change(payment, { status: 'captured', capturedAt: new Date().toISOString() });
+    this.change(payment, { status: 'captured', capturedAt: this.now().toISOString() });
   }
 
   expireAuthorization(paymentId: string): void {
@@ -200,7 +258,7 @@ export class MockPsp {
     if (payment.status !== 'captured') throw new Error(`Payment ${paymentId} is ${payment.status}, not captured`);
     this.change(payment, {
       status: 'charged_back',
-      chargeback: { id: `cb_${randomBytes(8).toString('hex')}`, amount: amount ?? payment.amount, created_at: new Date().toISOString() },
+      chargeback: { id: `cb_${randomBytes(8).toString('hex')}`, amount: amount ?? payment.amount, created_at: this.now().toISOString() },
     });
   }
 
@@ -250,6 +308,251 @@ export class MockPsp {
     return signWebhook(this.options.webhookSecret, body, timestampSeconds);
   }
 
+  // ── settlement (Phase 9) ─────────────────────────────────────────────────
+
+  /** Page size of every list (payments by date, settlements, a report's lines). */
+  setPageSize(size: number): void {
+    this.pageSize = size;
+  }
+
+  /**
+   * A captured payment we never initiated: its reference is no flow of ours (another
+   * integration, a dashboard charge). Money from someone we cannot identify.
+   */
+  createForeignPayment(amount: string, currency: string): string {
+    const now = this.now().toISOString();
+    const payment: MockPayment = {
+      id: `pay_${randomBytes(10).toString('hex')}`,
+      reference: `foreign-${randomBytes(6).toString('hex')}`,
+      status: 'captured',
+      amount,
+      currency,
+      capturedAt: now,
+      declineCode: null,
+      chargeback: null,
+      createdAt: now,
+      scenario: 'normal',
+      laggingView: null,
+      lagReadsLeft: 0,
+    };
+    this.payments.set(payment.id, payment);
+    this.byReference.set(payment.reference, payment.id);
+    return payment.id;
+  }
+
+  /** The PSP loses a payment (its API 404s it from now on): a deposit we booked that the PSP does not have. */
+  forget(paymentId: string): void {
+    const payment = this.require(paymentId);
+    this.payments.delete(paymentId);
+    this.byReference.delete(payment.reference);
+  }
+
+  /** Pay out a batch (T+X is the caller's choice of `settledAt`). Returns the batch id. */
+  settle(options: SettleOptions): string {
+    const currency = options.currency;
+    const settledAt = options.settledAt ?? this.now();
+    const basisPoints = BigInt(options.feeBasisPoints ?? 150);
+    const fixed = options.fixedFeeMinor ?? 0n;
+    const omit = new Set(options.omit ?? []);
+    const payable = (payment: MockPayment) =>
+      payment.currency === currency &&
+      (payment.status === 'captured' || payment.status === 'charged_back') &&
+      !this.settledPayments.has(payment.id) &&
+      !omit.has(payment.id);
+    const chosen = options.paymentIds
+      ? options.paymentIds.map((id) => this.require(id)).filter(payable)
+      : [...this.payments.values()].filter(payable);
+    const batchId = `stl_${randomBytes(8).toString('hex')}`;
+    const lines: MockSettlementLine[] = [];
+    let sequence = 0;
+    const lineId = () => `${batchId}_l${String((sequence += 1)).padStart(4, '0')}`;
+    for (const payment of chosen) {
+      const amount = BigInt(payment.amount) + (options.alterAmounts?.[payment.id] ?? 0n);
+      lines.push({
+        id: lineId(),
+        type: 'payment',
+        payment_id: payment.id,
+        chargeback_id: null,
+        currency,
+        amount: amount.toString(),
+        fee: ((amount * basisPoints) / 10_000n + fixed).toString(),
+      });
+      this.settledPayments.set(payment.id, batchId);
+    }
+    for (let index = 0; index < (options.unknownLines ?? 0); index += 1) {
+      lines.push({
+        id: lineId(),
+        type: 'payment',
+        payment_id: `pay_unknown_${randomBytes(6).toString('hex')}`,
+        chargeback_id: null,
+        currency,
+        amount: '100000',
+        fee: '1500',
+      });
+    }
+    if (options.deductChargebacks !== false) {
+      for (const payment of this.payments.values()) {
+        const chargeback = payment.chargeback;
+        if (payment.currency !== currency || !chargeback || this.deductedChargebacks.has(chargeback.id) || omit.has(payment.id)) {
+          continue;
+        }
+        lines.push({
+          id: lineId(),
+          type: 'chargeback',
+          payment_id: payment.id,
+          chargeback_id: chargeback.id,
+          currency,
+          amount: chargeback.amount,
+          fee: (options.chargebackFeeMinor ?? 0n).toString(),
+        });
+        this.deductedChargebacks.set(chargeback.id, batchId);
+      }
+    }
+    this.batches.set(batchId, {
+      id: batchId,
+      currency,
+      status: options.status ?? 'paid',
+      settledAt: settledAt.toISOString(),
+      visibleFrom: (options.visibleFrom ?? settledAt).toISOString(),
+      lines,
+      grossDelta: options.grossDelta ?? 0n,
+    });
+    return batchId;
+  }
+
+  /** The same lines paid out again under a new batch id (a duplicated batch). */
+  reissue(batchId: string, options: { settledAt?: Date } = {}): string {
+    const original = this.requireBatch(batchId);
+    const copyId = `stl_${randomBytes(8).toString('hex')}`;
+    const settledAt = (options.settledAt ?? this.now()).toISOString();
+    this.batches.set(copyId, {
+      ...original,
+      id: copyId,
+      settledAt,
+      visibleFrom: settledAt,
+      lines: original.lines.map((line, index) => ({ ...line, id: `${copyId}_l${String(index + 1).padStart(4, '0')}` })),
+    });
+    return copyId;
+  }
+
+  /** Change a published report after the fact (a corrected batch): every fee + `feeDelta`. */
+  revise(batchId: string, feeDelta: bigint): void {
+    const batch = this.requireBatch(batchId);
+    batch.lines = batch.lines.map((line) => ({ ...line, fee: (BigInt(line.fee) + feeDelta).toString() }));
+  }
+
+  /** Make a pending batch paid (or back), and visible now. */
+  publish(batchId: string, status: 'paid' | 'pending' = 'paid'): void {
+    const batch = this.requireBatch(batchId);
+    batch.status = status;
+    batch.visibleFrom = this.now().toISOString();
+  }
+
+  batchIds(): string[] {
+    return [...this.batches.keys()];
+  }
+
+  /** The whole report as the API would serve it on one page, for assertions. */
+  report(batchId: string): Record<string, unknown> {
+    const batch = this.requireBatch(batchId);
+    return this.reportView(batch, batch.lines, null);
+  }
+
+  private requireBatch(batchId: string): MockSettlementBatch {
+    const batch = this.batches.get(batchId);
+    if (!batch) throw new Error(`Unknown settlement batch ${batchId}`);
+    return batch;
+  }
+
+  /** Totals as the PSP computes them from its lines (plus any scripted `grossDelta`). */
+  private reportView(
+    batch: MockSettlementBatch,
+    lines: readonly MockSettlementLine[],
+    nextCursor: string | null,
+  ): Record<string, unknown> {
+    let gross = 0n;
+    let fees = 0n;
+    let chargebacks = 0n;
+    for (const line of batch.lines) {
+      fees += BigInt(line.fee);
+      if (line.type === 'payment') gross += BigInt(line.amount);
+      else chargebacks += BigInt(line.amount);
+    }
+    return {
+      id: batch.id,
+      object: 'settlement',
+      currency: batch.currency,
+      status: batch.status,
+      settled_at: batch.settledAt,
+      gross: (gross + batch.grossDelta).toString(),
+      fees: fees.toString(),
+      chargebacks: chargebacks.toString(),
+      net: (gross - fees - chargebacks).toString(),
+      line_count: batch.lines.length,
+      bank_reference: `BNK${batch.id.slice(4, 12).toUpperCase()}`,
+      lines: { object: 'list', data: lines, next_cursor: nextCursor },
+    };
+  }
+
+  /** Offset pagination behind an opaque cursor. */
+  private page<T>(items: readonly T[], cursor: unknown): { data: T[]; next_cursor: string | null } {
+    const decoded = typeof cursor === 'string' ? Buffer.from(cursor, 'base64url').toString() : '';
+    const offset = /^\d+$/.test(decoded) ? Number(decoded) : 0;
+    const data = items.slice(offset, offset + this.pageSize);
+    const next = offset + this.pageSize < items.length ? Buffer.from(String(offset + this.pageSize)).toString('base64url') : null;
+    return { data, next_cursor: next };
+  }
+
+  private inRange(value: string, request: Request, field: string): boolean {
+    const from = request.query[`${field}_from`];
+    const to = request.query[`${field}_to`];
+    const time = Date.parse(value);
+    return (typeof from !== 'string' || time >= Date.parse(from)) && (typeof to !== 'string' || time < Date.parse(to));
+  }
+
+  private listByCreation(request: Request): StoredWrite {
+    const payments = [...this.payments.values()]
+      .filter((payment) => this.inRange(payment.createdAt, request, 'created'))
+      .sort((a, b) => a.createdAt.localeCompare(b.createdAt) || a.id.localeCompare(b.id))
+      .map((payment) => this.view(payment));
+    return { statusCode: 200, body: { object: 'list', ...this.page(payments, request.query.cursor) } };
+  }
+
+  private listChargebacks(request: Request): StoredWrite {
+    const chargebacks = [...this.payments.values()]
+      .flatMap((payment) => (payment.chargeback ? [{ payment, chargeback: payment.chargeback }] : []))
+      .filter(({ chargeback }) => this.inRange(chargeback.created_at, request, 'created'))
+      .sort((a, b) => a.chargeback.created_at.localeCompare(b.chargeback.created_at) || a.chargeback.id.localeCompare(b.chargeback.id))
+      .map(({ payment, chargeback }) => ({
+        id: chargeback.id,
+        object: 'chargeback',
+        payment_id: payment.id,
+        amount: chargeback.amount,
+        currency: payment.currency,
+        created_at: chargeback.created_at,
+        reason: 'fraudulent',
+      }));
+    return { statusCode: 200, body: { object: 'list', ...this.page(chargebacks, request.query.cursor) } };
+  }
+
+  private listSettlements(request: Request): StoredWrite {
+    const now = this.now().getTime();
+    const batches = [...this.batches.values()]
+      .filter((batch) => Date.parse(batch.visibleFrom) <= now && this.inRange(batch.settledAt, request, 'settled'))
+      .sort((a, b) => a.settledAt.localeCompare(b.settledAt) || a.id.localeCompare(b.id))
+      .map((batch) => ({ id: batch.id, object: 'settlement', currency: batch.currency, status: batch.status, settled_at: batch.settledAt }));
+    return { statusCode: 200, body: { object: 'list', ...this.page(batches, request.query.cursor) } };
+  }
+
+  private getSettlement(batchId: string, request: Request): StoredWrite {
+    const batch = this.batches.get(batchId);
+    if (!batch || Date.parse(batch.visibleFrom) > this.now().getTime()) {
+      return { statusCode: 404, body: { error: { code: 'settlement_not_found' } } };
+    }
+    const { data, next_cursor } = this.page(batch.lines, request.query.cursor);
+    return { statusCode: 200, body: this.reportView(batch, data, next_cursor) };
+  }
+
   // ── HTTP ─────────────────────────────────────────────────────────────────
 
   private buildApp(): express.Express {
@@ -276,7 +579,18 @@ export class MockPsp {
       void this.handle('get', request, response, () => this.read(String(request.params.id))),
     );
     app.get('/v1/payments', (request, response) =>
-      void this.handle('list', request, response, () => this.list(String(request.query.reference ?? ''))),
+      void this.handle('list', request, response, () =>
+        request.query.reference !== undefined ? this.list(String(request.query.reference)) : this.listByCreation(request),
+      ),
+    );
+    app.get('/v1/chargebacks', (request, response) =>
+      void this.handle('list_chargebacks', request, response, () => this.listChargebacks(request)),
+    );
+    app.get('/v1/settlements', (request, response) =>
+      void this.handle('list_settlements', request, response, () => this.listSettlements(request)),
+    );
+    app.get('/v1/settlements/:id', (request, response) =>
+      void this.handle('get_settlement', request, response, () => this.getSettlement(String(request.params.id), request)),
     );
 
     // Dev control surface (the same secret): complete a capture, charge back, deliver.
@@ -384,7 +698,7 @@ export class MockPsp {
       capturedAt: null,
       declineCode: declined ? declined[1] : null,
       chargeback: null,
-      createdAt: new Date().toISOString(),
+      createdAt: this.now().toISOString(),
       scenario: token.startsWith('tok_expire') ? 'expire' : token.startsWith('tok_capture_fail') ? 'capture_fail' : 'normal',
       laggingView: null,
       lagReadsLeft: 0,
@@ -419,7 +733,7 @@ export class MockPsp {
     this.change(payment, { status: 'capture_pending' });
     const completion = this.captureCompletion;
     if (completion === 'immediate') {
-      this.change(payment, { status: 'captured', capturedAt: new Date().toISOString() });
+      this.change(payment, { status: 'captured', capturedAt: this.now().toISOString() });
     } else if (completion !== 'manual') {
       const timer = setTimeout(() => {
         this.timers.delete(timer);
@@ -502,7 +816,7 @@ export class MockPsp {
   private enqueue(type: string, object: Record<string, unknown>): MockWebhookEvent {
     this.eventSequence += 1;
     const id = `evt_${String(this.eventSequence).padStart(6, '0')}_${randomBytes(4).toString('hex')}`;
-    const body = Buffer.from(JSON.stringify({ id, object: 'event', type, created: new Date().toISOString(), data: { object } }));
+    const body = Buffer.from(JSON.stringify({ id, object: 'event', type, created: this.now().toISOString(), data: { object } }));
     const event = { id, type, paymentId: String(object.id), body };
     this.queue.push(event);
     if (this.options.autoDeliverWebhooks && this.deliverer) {

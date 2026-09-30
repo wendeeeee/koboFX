@@ -22,6 +22,12 @@ import { CreateQuotes1790899200002 } from './1790899200002-CreateQuotes';
 import { AddConversionFlowType1790985600000 } from './1790985600000-AddConversionFlowType';
 import { ConversionFlowsAndProvenance1790985600001 } from './1790985600001-ConversionFlowsAndProvenance';
 import { TransactionHistoryIndexes1791072000000 } from './1791072000000-TransactionHistoryIndexes';
+import { AddSettlementTransactionType1791158400000 } from './1791158400000-AddSettlementTransactionType';
+import { CreateSettlementBatches1791158400001 } from './1791158400001-CreateSettlementBatches';
+import { FundingPaymentsSettlement1791158400002 } from './1791158400002-FundingPaymentsSettlement';
+import { CreateReconciliationRuns1791158400003 } from './1791158400003-CreateReconciliationRuns';
+import { CreateReconciliationBreaks1791158400004 } from './1791158400004-CreateReconciliationBreaks';
+import { ReconciliationIndexes1791158400005 } from './1791158400005-ReconciliationIndexes';
 
 /** Explicit, ordered list — no globbing, so the CLI and the test harness run the same set. */
 export const MIGRATIONS = [
@@ -49,4 +55,10 @@ export const MIGRATIONS = [
   AddConversionFlowType1790985600000,
   ConversionFlowsAndProvenance1790985600001,
   TransactionHistoryIndexes1791072000000,
+  AddSettlementTransactionType1791158400000,
+  CreateSettlementBatches1791158400001,
+  FundingPaymentsSettlement1791158400002,
+  CreateReconciliationRuns1791158400003,
+  CreateReconciliationBreaks1791158400004,
+  ReconciliationIndexes1791158400005,
 ];

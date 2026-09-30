@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import * as argon2 from 'argon2';
 import type Redis from 'ioredis';
 import * as jsonwebtoken from 'jsonwebtoken';
 import { Client } from 'pg';
@@ -18,6 +19,7 @@ import { UnauthenticatedError } from '../../src/common/errors';
 import { ChartOfAccountsService } from '../../src/modules/ledger/chart-of-accounts.service';
 import { InvalidPostingError } from '../../src/modules/ledger/ledger.errors';
 import { WalletProvisioningService } from '../../src/modules/wallets/wallet-provisioning.service';
+import { UserRepository } from '../../src/modules/users/user.repository';
 import { RedisService } from '../../src/redis/redis.service';
 import { AuthHarness, LedgerHarness, startLedgerHarness } from '../support/ledger-harness';
 
@@ -485,6 +487,33 @@ describe('authentication (integration: real Postgres + Redis)', () => {
       for (const error of errors) {
         expect(error).toMatchObject({ code: 'INVALID_CREDENTIALS', httpStatus: 401, message: (errors[0] as Error).message });
       }
+    });
+
+    it('a hash made with older (weaker) argon2 parameters is replaced at the design parameters on the next login (decision #12)', async () => {
+      const { email, userId } = await activeUser();
+      const weak = await argon2.hash(PASSWORD.normalize('NFKC'), { type: argon2.argon2id, memoryCost: 4096, timeCost: 1, parallelism: 1 });
+      await owner.query(`UPDATE users SET password_hash = $2 WHERE id = $1`, [userId, weak]);
+      await expect(login.login(email, PASSWORD)).resolves.toMatchObject({ user: { email } });
+      const [{ password_hash: rehashed }] = (await owner.query(`SELECT password_hash FROM users WHERE id = $1`, [userId])).rows as { password_hash: string }[];
+      expect(rehashed).not.toBe(weak);
+      const parameters = /^\$argon2id\$v=19\$([^$]+)\$/.exec(rehashed)![1].split(',').sort();
+      expect(parameters).toEqual(['m=19456', 'p=1', 't=2']);
+      await expect(login.login(email, PASSWORD)).resolves.toMatchObject({ user: { email } });
+    });
+  });
+
+  describe('verification races', () => {
+    it('a verify that loses the activation race (the user was activated meanwhile) fails as VERIFICATION_FAILED and changes nothing', async () => {
+      const { email, code } = await registerWithCode();
+      const users = harness.moduleRef.get(UserRepository);
+      const activate = jest.spyOn(users, 'activate').mockResolvedValueOnce(null);
+      try {
+        await expect(harness.moduleRef.get(VerificationService).verifyEmail(email, PASSWORD, code)).rejects.toBeInstanceOf(VerificationFailedError);
+      } finally {
+        activate.mockRestore();
+      }
+      const [{ status }] = (await owner.query(`SELECT status FROM users WHERE email = $1`, [email])).rows as { status: string }[];
+      expect(status).toBe('PENDING_VERIFICATION');
     });
   });
 

@@ -117,6 +117,28 @@ export class FundingPaymentRepository {
     return row?.flow_id ?? null;
   }
 
+  /**
+   * What a PSP settlement said about this deposit (Phase 9): the batch line that paid it out,
+   * when, and the PSP's fee for it. Set once, together, only on a posted and not-yet-settled
+   * deposit — returns false otherwise (the caller's attribution was stale).
+   */
+  async recordSettlement(
+    manager: EntityManager,
+    flowId: string,
+    settlement: { settlementBatchLineId: string; settledAt: Date; feeMinor: bigint },
+  ): Promise<boolean> {
+    const rows = (await manager.query(
+      `WITH updated AS (
+         UPDATE funding_payments
+            SET settled_at = $2, settlement_batch_line_id = $3, settlement_fee_minor = $4, updated_at = now()
+          WHERE flow_id = $1 AND funding_transaction_id IS NOT NULL AND settlement_batch_line_id IS NULL
+         RETURNING flow_id
+       ) SELECT flow_id FROM updated`,
+      [flowId, settlement.settledAt, settlement.settlementBatchLineId, settlement.feeMinor.toString()],
+    )) as { flow_id: string }[];
+    return rows.length === 1;
+  }
+
   /** Set-once facts use `coalesce`, so re-running a step never tries to change one. */
   async update(manager: EntityManager, flowId: string, update: FundingPaymentUpdate): Promise<void> {
     await manager.query(

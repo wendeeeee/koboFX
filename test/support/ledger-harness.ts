@@ -44,9 +44,19 @@ import {
 import { ReservationChecksService } from '../../src/modules/reservations/reservation-checks.service';
 import { ReservationService } from '../../src/modules/reservations/reservation.service';
 import { ReservationsModule } from '../../src/modules/reservations/reservations.module';
+import { BreakService, ReconciliationBreak } from '../../src/modules/reconciliation/break.service';
+import { ExternalReconciliationJob } from '../../src/modules/reconciliation/external-reconciliation.job';
+import { InternalReconciliationJob } from '../../src/modules/reconciliation/internal-reconciliation.job';
+import { ReconciliationCheckpoints } from '../../src/modules/reconciliation/reconciliation-checkpoints';
+import { ReconciliationMetrics } from '../../src/modules/reconciliation/reconciliation-metrics';
+import { ReconciliationRun, ReconciliationRunRepository } from '../../src/modules/reconciliation/reconciliation-run.repository';
+import { ReconciliationRunKind } from '../../src/modules/reconciliation/reconciliation-schedule';
+import { ReconciliationScheduler, RunResult } from '../../src/modules/reconciliation/reconciliation-scheduler';
+import { SettlementIngestionService } from '../../src/modules/reconciliation/settlement-ingestion.service';
 import { CapturingEmailSender, TestClock } from './auth-test-doubles';
 import { paymentProviderTestSecrets } from './authentication-secrets';
 import { ScriptedFlowCheckpoints } from './flow-test-doubles';
+import { ScriptedReconciliationCheckpoints } from './reconciliation-test-doubles';
 import { TestDatabase, startTestDatabase } from './test-database';
 
 /** A structurally valid argon2id PHC string for users created outside the auth flow. */
@@ -141,6 +151,30 @@ export interface SignedUpUser {
   readonly accessToken: string;
 }
 
+/**
+ * Reconciliation (Phase 9), present with `{ payments }`: the jobs, the scheduler, the scripted
+ * crash seam, and row readers. Runs are driven by the test (`runPeriod` / `tick`), on the
+ * harness's `TestClock` — the mock PSP shares that clock, so capture, chargeback and settlement
+ * times and the T+X windows all move together.
+ */
+export interface ReconciliationHarness {
+  readonly scheduler: ReconciliationScheduler;
+  readonly internal: InternalReconciliationJob;
+  readonly external: ExternalReconciliationJob;
+  readonly ingestion: SettlementIngestionService;
+  readonly breaks: BreakService;
+  readonly runs: ReconciliationRunRepository;
+  readonly metrics: ReconciliationMetrics;
+  readonly checkpoints: ScriptedReconciliationCheckpoints;
+  /** Run one period now (a fresh period key per call unless given). */
+  run(kind: ReconciliationRunKind, periodKey?: string): Promise<RunResult>;
+  /** Every break, oldest first. */
+  allBreaks(): Promise<ReconciliationBreak[]>;
+  /** Live (OPEN / ESCALATED) breaks, oldest first. */
+  liveBreaks(): Promise<ReconciliationBreak[]>;
+  runRow(kind: ReconciliationRunKind, periodKey: string): Promise<ReconciliationRun | null>;
+}
+
 /** Present when the harness was started with `{ payments }`. */
 export interface PaymentsHarness {
   readonly psp: MockPsp;
@@ -152,6 +186,8 @@ export interface PaymentsHarness {
   signUp(): Promise<SignedUpUser>;
   /** `POST /wallet/fund` through the real pipeline. */
   fund(user: SignedUpUser, body: Record<string, unknown>, idempotencyKey?: string): request.Test;
+  /** Log in again (a fresh access token) — for tests that move the clock past the token's life. */
+  logIn(user: SignedUpUser): Promise<SignedUpUser>;
   /** Clear every `rate-limit:*` counter (tests that repeat a subject inside a window), or only one rule's (`'global'`). */
   clearRateLimits(rule?: string): Promise<void>;
   /** Make every waiting flow and webhook event due now ("time passes"; leases are untouched). */
@@ -163,6 +199,7 @@ export interface PaymentsHarness {
    * flows, make everything due again — up to `rounds` times.
    */
   drive(options?: { rounds?: number; deliverWebhooks?: boolean }): Promise<void>;
+  readonly reconciliation: ReconciliationHarness;
 }
 
 export interface LedgerHarness {
@@ -226,12 +263,15 @@ export async function startLedgerHarness(
   const redis = options.auth || withPayments ? await new RedisContainer('redis:7-alpine').start() : undefined;
   const pspSecrets = paymentProviderTestSecrets();
   const pspOptions = options.payments === true ? {} : (options.payments ?? {});
+  // One clock for the app and the simulated PSP: capture, chargeback and settlement times move with it.
+  const clock = new TestClock();
   const psp = withPayments
     ? new MockPsp({
         secretKey: pspSecrets.secretKey,
         webhookSecret: pspSecrets.webhookSecret,
         captureCompletion: pspOptions.captureCompletion ?? 'immediate',
         hangMilliseconds: pspOptions.hangMilliseconds ?? 600,
+        now: () => clock.now(),
       })
     : undefined;
   const pspUrl = psp ? await psp.start() : undefined;
@@ -244,6 +284,7 @@ export async function startLedgerHarness(
           PSP_REQUEST_TIMEOUT_MILLISECONDS: '300',
           FUNDING_LIMITS: '{"NGN":{"minimum":"100","maximum":"100000000000"},"USD":{"minimum":"100","maximum":"10000000"}}',
           PSP_FUNDING_CURRENCIES: 'NGN,USD',
+          SETTLEMENT_WINDOWS: '{"NGN":{"businessDays":2,"graceHours":24},"USD":{"businessDays":2,"graceHours":24}}',
         }
       : {}),
     ...(fxUrl
@@ -264,9 +305,9 @@ export async function startLedgerHarness(
   let auth: AuthHarness | undefined;
   let payments: PaymentsHarness | undefined;
   const checkpoints = new ScriptedFlowCheckpoints();
+  const reconciliationCheckpoints = new ScriptedReconciliationCheckpoints();
   if (redis) {
     const emails = new CapturingEmailSender();
-    const clock = new TestClock();
     moduleRef = await Test.createTestingModule({
       imports: [AppModule.forRoot(db.env, { logStream: options.logStream })],
     })
@@ -276,6 +317,8 @@ export async function startLedgerHarness(
       .useValue(clock)
       .overrideProvider(FlowCheckpoints)
       .useValue(checkpoints)
+      .overrideProvider(ReconciliationCheckpoints)
+      .useValue(reconciliationCheckpoints)
       .compile();
     const app = moduleRef.createNestApplication<NestExpressApplication>({ bodyParser: false });
     configureApp(app);
@@ -323,7 +366,36 @@ export async function startLedgerHarness(
           .verifyEmail(email, password, authHarness.emails.latestCodeFor(email));
         return { userId: session.user.id, email, accessToken: session.tokens.access.token };
       };
+      const scheduler = moduleRef.get(ReconciliationScheduler);
+      const breaks = moduleRef.get(BreakService);
+      const runs = moduleRef.get(ReconciliationRunRepository);
+      let periodSequence = 0;
+      const reconciliation: ReconciliationHarness = {
+        scheduler,
+        internal: moduleRef.get(InternalReconciliationJob),
+        external: moduleRef.get(ExternalReconciliationJob),
+        ingestion: moduleRef.get(SettlementIngestionService),
+        breaks,
+        runs,
+        metrics: moduleRef.get(ReconciliationMetrics),
+        checkpoints: reconciliationCheckpoints,
+        async run(kind, periodKey) {
+          // A distinct, well-formed period per call (years from 3000 on: never a real date's key).
+          periodSequence += 1;
+          const key = periodKey ?? `${String(3000 + periodSequence).padStart(4, '0')}-01-01`;
+          const result = await scheduler.runPeriod(kind, key);
+          if (!result) throw new Error(`Run ${kind} ${key} was not claimed`);
+          return result;
+        },
+        async allBreaks() {
+          const rows = (await appDataSource.query(`SELECT id FROM reconciliation_breaks ORDER BY first_detected_at, id`)) as { id: string }[];
+          return Promise.all(rows.map(async (row) => (await breaks.findById(row.id))!));
+        },
+        liveBreaks: () => breaks.live(),
+        runRow: (kind, periodKey) => runs.find(kind, periodKey),
+      };
       payments = {
+        reconciliation,
         psp,
         runner,
         resumer,
@@ -342,6 +414,11 @@ export async function startLedgerHarness(
             .send(body);
         },
         makeAllDue,
+        async logIn(user) {
+          const response = await http().post(`/${API_PREFIX}/auth/login`).send({ email: user.email, password: HARNESS_USER_PASSWORD });
+          if (response.status !== 200) throw new Error(`logIn(): ${response.status} ${JSON.stringify(response.body)}`);
+          return { ...user, accessToken: (response.body as { tokens: { access: { token: string } } }).tokens.access.token };
+        },
         async clearRateLimits(rule?: string) {
           const pattern = rule === undefined ? 'rate-limit:*' : `rate-limit:${rule}:*`;
           await moduleRef

@@ -166,6 +166,42 @@ export interface FxConfig {
   readonly localCacheMilliseconds: number;
 }
 
+export interface SettlementWindow {
+  /** T+X: business days (UTC Mon–Fri) after the capture date by which the PSP should settle. */
+  readonly businessDays: number;
+  /** Slack after the end of that day before an unsettled deposit is a break. */
+  readonly graceHours: number;
+}
+
+/** A UTC time of day. */
+export interface TimeOfDay {
+  readonly hour: number;
+  readonly minute: number;
+}
+
+export interface ReconciliationConfig {
+  /** Run the scheduler loop in the worker. */
+  readonly enabled: boolean;
+  /** How often the scheduler wakes to ask "is a run due?". */
+  readonly tickMilliseconds: number;
+  /** When the nightly internal run (design §8.1) is due, UTC. */
+  readonly internalAt: TimeOfDay;
+  /** When the daily external run (design §8.2) is due, UTC. */
+  readonly externalDailyAt: TimeOfDay;
+  /** Minute past each hour the hourly sweep is due. */
+  readonly externalHourlyMinute: number;
+  /** How long a claimed run is ours before another worker may resume it. */
+  readonly leaseSeconds: number;
+  /** The internal run's own statement timeout, inside its read-only snapshot (Phase 9 §H.7). */
+  readonly statementTimeoutSeconds: number;
+  /** How far back each external run re-reads the PSP (settlements and payments). */
+  readonly lookbackDays: number;
+  /** A deposit the PSP captured this long ago that we have not booked is a break (the webhook never came). */
+  readonly unresolvedFlowAgeMinutes: number;
+  /** T+X per currency; required for every funding currency (checked at boot). */
+  readonly settlementWindows: ReadonlyMap<string, SettlementWindow>;
+}
+
 export interface AppConfig {
   readonly env: NodeEnv;
   readonly port: number;
@@ -182,6 +218,7 @@ export interface AppConfig {
   readonly conversion: ConversionConfig;
   readonly flows: FlowConfig;
   readonly fx: FxConfig;
+  readonly reconciliation: ReconciliationConfig;
   /** Reverse proxies in front of the API; `req.ip` is taken from X-Forwarded-For only this deep. */
   readonly trustProxyHops: number;
 }
@@ -301,6 +338,18 @@ const envSchema = Joi.object({
   WEBHOOK_MAX_ATTEMPTS: Joi.number().integer().min(1).max(100).default(10),
   RESERVATION_SWEEP_INTERVAL_MILLISECONDS: Joi.number().integer().min(100).default(30_000),
 
+  // Reconciliation (Phase 9; design §8). Times are UTC.
+  RECONCILIATION_ENABLED: Joi.boolean().default(true),
+  RECONCILIATION_TICK_MILLISECONDS: Joi.number().integer().min(50).default(60_000),
+  RECONCILIATION_INTERNAL_AT: Joi.string().pattern(/^([01]\d|2[0-3]):[0-5]\d$/).default('01:00'),
+  RECONCILIATION_EXTERNAL_DAILY_AT: Joi.string().pattern(/^([01]\d|2[0-3]):[0-5]\d$/).default('02:00'),
+  RECONCILIATION_EXTERNAL_HOURLY_MINUTE: Joi.number().integer().min(0).max(59).default(15),
+  RECONCILIATION_LEASE_SECONDS: Joi.number().integer().min(10).max(86_400).default(300),
+  RECONCILIATION_STATEMENT_TIMEOUT_SECONDS: Joi.number().integer().min(1).max(86_400).default(900),
+  RECONCILIATION_LOOKBACK_DAYS: Joi.number().integer().min(1).max(400).default(35),
+  RECONCILIATION_UNRESOLVED_FLOW_AGE_MINUTES: Joi.number().integer().min(1).default(60),
+  SETTLEMENT_WINDOWS: Joi.string().default('{"NGN":{"businessDays":2,"graceHours":24}}'),
+
   // FX rates (design §7.2, §7.4; Phase 6). One provider, ExchangeRate-API, behind a port.
   // Validated as a URL in parseFx, after the {apiKey} placeholder (braces are not URI characters).
   FX_RATE_BASE_URL: Joi.string().max(2048).default('https://open.er-api.com/v6/latest'),
@@ -365,7 +414,8 @@ export function loadConfig(raw: NodeJS.ProcessEnv | Record<string, string | unde
   const funding = parseFunding(env.PSP_FUNDING_CURRENCIES, env.FUNDING_LIMITS, problems);
   const conversion = parseConversion(env.CONVERSION_LIMITS, problems);
   const fx = error ? undefined : parseFx(env, problems);
-  if (problems.length > 0 || !keys || !pepper || !webhookSecrets || !funding || !conversion || !fx) {
+  const reconciliation = error ? undefined : parseReconciliation(env, funding?.currencies ?? [], problems);
+  if (problems.length > 0 || !keys || !pepper || !webhookSecrets || !funding || !conversion || !fx || !reconciliation) {
     throw new ConfigValidationError(problems);
   }
   return {
@@ -440,6 +490,7 @@ export function loadConfig(raw: NodeJS.ProcessEnv | Record<string, string | unde
       reservationSweepIntervalMilliseconds: env.RESERVATION_SWEEP_INTERVAL_MILLISECONDS,
     },
     fx,
+    reconciliation,
     trustProxyHops: env.TRUST_PROXY_HOPS,
   };
 }
@@ -602,6 +653,54 @@ function parseFunding(currencyList: string | undefined, limitsJson: string | und
 }
 
 /** Conversion limits per source currency: strings of minor units, maximum ≤ daily maximum. */
+function parseTimeOfDay(value: string): TimeOfDay {
+  const [hour, minute] = value.split(':').map((part) => Number.parseInt(part, 10));
+  return { hour, minute };
+}
+
+/**
+ * Reconciliation settings (Phase 9). `SETTLEMENT_WINDOWS` is JSON per currency
+ * (`{"NGN":{"businessDays":2,"graceHours":24}}`); every funding currency needs one, or an
+ * unsettled deposit could never be told apart from an expected one (refused at boot).
+ */
+function parseReconciliation(
+  env: Record<string, never>,
+  fundingCurrencies: readonly string[],
+  problems: string[],
+): ReconciliationConfig | undefined {
+  const before = problems.length;
+  const windows = new Map<string, SettlementWindow>();
+  const raw = parseJsonObject('SETTLEMENT_WINDOWS', env.SETTLEMENT_WINDOWS, problems) ?? {};
+  for (const [currency, entry] of Object.entries(raw)) {
+    const { businessDays, graceHours } = (entry ?? {}) as { businessDays?: unknown; graceHours?: unknown };
+    if (
+      !/^[A-Z]{3}$/.test(currency) ||
+      !Number.isInteger(businessDays) || (businessDays as number) < 0 || (businessDays as number) > 30 ||
+      !Number.isInteger(graceHours) || (graceHours as number) < 0 || (graceHours as number) > 24 * 30
+    ) {
+      problems.push(`SETTLEMENT_WINDOWS.${currency} needs integer {businessDays (0–30), graceHours (0–720)}`);
+      continue;
+    }
+    windows.set(currency, { businessDays: businessDays as number, graceHours: graceHours as number });
+  }
+  for (const currency of fundingCurrencies) {
+    if (!windows.has(currency)) problems.push(`SETTLEMENT_WINDOWS has no settlement window for funding currency ${currency}`);
+  }
+  if (problems.length > before) return undefined;
+  return {
+    enabled: env.RECONCILIATION_ENABLED,
+    tickMilliseconds: env.RECONCILIATION_TICK_MILLISECONDS,
+    internalAt: parseTimeOfDay(env.RECONCILIATION_INTERNAL_AT),
+    externalDailyAt: parseTimeOfDay(env.RECONCILIATION_EXTERNAL_DAILY_AT),
+    externalHourlyMinute: env.RECONCILIATION_EXTERNAL_HOURLY_MINUTE,
+    leaseSeconds: env.RECONCILIATION_LEASE_SECONDS,
+    statementTimeoutSeconds: env.RECONCILIATION_STATEMENT_TIMEOUT_SECONDS,
+    lookbackDays: env.RECONCILIATION_LOOKBACK_DAYS,
+    unresolvedFlowAgeMinutes: env.RECONCILIATION_UNRESOLVED_FLOW_AGE_MINUTES,
+    settlementWindows: windows,
+  };
+}
+
 function parseConversion(limitsJson: string | undefined, problems: string[]): ConversionConfig | undefined {
   if (!limitsJson) return undefined;
   let parsed: unknown;

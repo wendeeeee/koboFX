@@ -81,8 +81,9 @@ export class FundingFlow implements FlowDefinition, OnModuleInit {
       case FundingState.CAPTURED:
         return this.postFunding(flow, payment, runtime);
       case FundingState.POSTED:
-        return this.checkForChargeback(flow, payment, runtime);
       case FundingState.SETTLED:
+        // A chargeback usually lands AFTER settlement (Phase 5 decision 2): SETTLED → REVERSED.
+        return this.checkForChargeback(flow, payment, runtime, state);
       case FundingState.FAILED:
       case FundingState.REVERSED:
         return { kind: 'IDLE', state };
@@ -200,7 +201,12 @@ export class FundingFlow implements FlowDefinition, OnModuleInit {
     return { kind: 'TRANSITIONED', from: FundingState.CAPTURED, to: FundingState.POSTED };
   }
 
-  private async checkForChargeback(flow: ClaimedFlow, payment: FundingPayment, runtime: FlowStepRuntime): Promise<StepOutcome> {
+  private async checkForChargeback(
+    flow: ClaimedFlow,
+    payment: FundingPayment,
+    runtime: FlowStepRuntime,
+    state: FundingState.POSTED | FundingState.SETTLED,
+  ): Promise<StepOutcome> {
     const paymentId = requirePaymentId(flow, payment);
     const fundingTransactionId = payment.fundingTransactionId;
     if (!fundingTransactionId) throw new InvariantViolationError('A posted funding has no transaction.', { flowId: flow.id });
@@ -210,8 +216,8 @@ export class FundingFlow implements FlowDefinition, OnModuleInit {
 
     const chargeback = result.status === ProviderPaymentStatus.CHARGED_BACK ? result.chargeback : null;
     if (!chargeback) {
-      if (flow.completedAt) return { kind: 'IDLE', state: FundingState.POSTED };
-      return this.progress(flow, runtime, FundingState.POSTED, { providerStatus: result.status }, 0, true);
+      if (flow.completedAt) return { kind: 'IDLE', state };
+      return this.progress(flow, runtime, state, { providerStatus: result.status }, 0, true);
     }
     if (!chargeback.amount.equals(payment.amount)) {
       this.logger.error(
@@ -220,12 +226,13 @@ export class FundingFlow implements FlowDefinition, OnModuleInit {
       );
       return {
         kind: 'WAITING',
-        state: FundingState.POSTED,
+        state,
         reason: `PARTIAL_CHARGEBACK_UNSUPPORTED: ${chargeback.amount.toMinorString()} of ${payment.amount.toMinorString()}`,
         retryInSeconds: PARKED_RETRY_SECONDS,
       };
     }
-    await runtime.commit(FundingState.POSTED, { to: FundingState.REVERSED, complete: true }, async (manager) => {
+    assertTransition(state, FundingState.REVERSED);
+    await runtime.commit(state, { to: FundingState.REVERSED, complete: true }, async (manager) => {
       const reversal = await this.ledger.buildReversalRequest(fundingTransactionId, {
         valueTime: chargeback.createdAt,
         initiatedBy: FUNDING_INITIATED_BY,
@@ -244,9 +251,9 @@ export class FundingFlow implements FlowDefinition, OnModuleInit {
         chargebackTransactionId: posted.transactionId,
         providerStatus: result.status,
       });
-      await this.recordTransition(flow, FundingState.POSTED, FundingState.REVERSED, { transactionId: posted.transactionId });
+      await this.recordTransition(flow, state, FundingState.REVERSED, { transactionId: posted.transactionId });
     });
-    return { kind: 'TRANSITIONED', from: FundingState.POSTED, to: FundingState.REVERSED };
+    return { kind: 'TRANSITIONED', from: state, to: FundingState.REVERSED };
   }
 
   private async transition(

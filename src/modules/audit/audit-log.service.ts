@@ -12,12 +12,19 @@ export enum AuditAction {
   FUNDING_INITIATED = 'FUNDING_INITIATED',
   FUNDING_STATE_CHANGED = 'FUNDING_STATE_CHANGED',
   CONVERSION_POSTED = 'CONVERSION_POSTED',
+  SETTLEMENT_POSTED = 'SETTLEMENT_POSTED',
+  SETTLEMENT_REJECTED = 'SETTLEMENT_REJECTED',
+  RECONCILIATION_BREAK_DETECTED = 'RECONCILIATION_BREAK_DETECTED',
+  RECONCILIATION_BREAK_ESCALATED = 'RECONCILIATION_BREAK_ESCALATED',
+  RECONCILIATION_BREAK_RESOLVED = 'RECONCILIATION_BREAK_RESOLVED',
 }
 
 export enum AuditSubjectType {
   USER = 'USER',
   REFRESH_TOKEN_FAMILY = 'REFRESH_TOKEN_FAMILY',
   FLOW = 'FLOW',
+  SETTLEMENT_BATCH = 'SETTLEMENT_BATCH',
+  RECONCILIATION_BREAK = 'RECONCILIATION_BREAK',
 }
 
 export type AuditActor =
@@ -42,6 +49,13 @@ export interface AuditState {
   readonly failureCode?: string;
   /** The ledger transaction a step posted (an opaque id). */
   readonly transactionId?: string;
+  /** Reconciliation (Phase 9): a break's type and lifecycle status — ids and codes only. */
+  readonly breakType?: string;
+  readonly breakStatus?: string;
+  readonly resolutionKind?: string;
+  /** A settlement batch's outcome (`POSTED` / `REJECTED`) and why it was refused. */
+  readonly settlementStatus?: string;
+  readonly rejectionCode?: string;
 }
 
 export interface AuditEntry {

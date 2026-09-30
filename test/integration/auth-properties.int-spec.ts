@@ -109,11 +109,33 @@ describe('authentication properties', () => {
     return new Set(rows.map((row) => row.token_hash));
   }
 
+  /**
+   * Walked at the start of EVERY run, so each path runs whatever the generated tail does
+   * (unseeded runs once missed REFUSE_EXPIRED: a coin toss, not a finding). Token indexes
+   * are positions in the model's token list:
+   * t0 = login (family 1) → rotate t0 into t1 → replay t0 (REUSE revokes family 1) →
+   * t2 = login (family 2) → refresh t1 (REFUSE_REVOKED) → logout family 2 →
+   * t3 = login (family 3) → past the refresh lifetime → refresh t3 (REFUSE_EXPIRED).
+   */
+  const PRELUDE: readonly Command[] = [
+    { kind: 'login' },
+    { kind: 'refresh', pick: 0, preferLive: true },
+    { kind: 'refresh', pick: 0, preferLive: false },
+    { kind: 'login' },
+    { kind: 'refresh', pick: 1, preferLive: false },
+    { kind: 'logout', pick: 1 },
+    { kind: 'login' },
+    { kind: 'advance', milliseconds: REFRESH_TIME_TO_LIVE + HOUR },
+    { kind: 'refresh', pick: 3, preferLive: false },
+  ];
+
   it('for any sequence of login, refresh, replay, logout and expiry, live tokens match the model after every step', async () => {
     const exercised = { ROTATE: 0, REUSE: 0, REFUSE_REVOKED: 0, REFUSE_EXPIRED: 0, LOGOUT: 0 };
 
     await fc.assert(
-      fc.asyncProperty(fc.array(command, { minLength: 4, maxLength: 16 }), async (commands) => {
+      fc.asyncProperty(fc.array(command, { minLength: 4, maxLength: 16 }), async (tail) => {
+        const commands = [...PRELUDE, ...tail];
+        const before = { ...exercised };
         auth.clock.reset();
         const { email, userId } = await activeUser();
         // The verification session is not part of the model: log it out.
@@ -124,7 +146,13 @@ describe('authentication properties', () => {
         const model = new SessionModel();
         const families: string[] = [];
 
-        for (const step of commands) {
+        for (const [index, step] of commands.entries()) {
+          if (index === PRELUDE.length) {
+            // The prelude walked every path in THIS run.
+            for (const path of Object.keys(exercised) as (keyof typeof exercised)[]) {
+              expect({ path, ranInPrelude: exercised[path] > before[path] }).toEqual({ path, ranInPrelude: true });
+            }
+          }
           const now = auth.clock.now().getTime();
           switch (step.kind) {
             case 'login': {

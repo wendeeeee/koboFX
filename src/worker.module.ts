@@ -13,12 +13,13 @@ import { MoneyModule } from './common/money/money.module';
 import { LedgerModule } from './modules/ledger/ledger.module';
 import { ReservationsModule } from './modules/reservations/reservations.module';
 import { WebhooksModule } from './modules/payments/webhooks/webhooks.module';
+import { ReconciliationModule } from './modules/reconciliation/reconciliation.module';
 import { RedisModule } from './redis/redis.module';
 
 /**
  * The worker process (design §3, §14): no HTTP. It runs the outbox dispatcher, the flow
- * resumer, the webhook processor, the reservation sweeper and the FX poller; later phases
- * add reconciliation here.
+ * resumer, the webhook processor, the reservation sweeper, the FX poller and the
+ * reconciliation scheduler (Phase 9).
  */
 @Module({})
 export class WorkerModule {
@@ -41,6 +42,7 @@ export class WorkerModule {
         WebhooksModule,
         MoneyModule,
         FxModule,
+        ReconciliationModule,
       ],
     };
   }

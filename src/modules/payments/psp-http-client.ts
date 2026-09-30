@@ -26,11 +26,15 @@ export interface PspRequest {
   /** Required on every POST: the PSP deduplicates writes on it. */
   readonly idempotencyKey?: string;
   readonly flowId?: string;
+  /** Record the response as its raw text (every digit kept) instead of redacted JSON. */
+  readonly recordRawResponse?: boolean;
 }
 
 export interface PspResponse {
   readonly status: number;
   readonly body: unknown;
+  /** The `provider_calls` row of the successful attempt, when it could be written. */
+  readonly providerCallId: string | undefined;
 }
 
 /** Only a read may be retried: re-sending a write could double its effect (design §7.2). */
@@ -112,7 +116,8 @@ export class PspHttpClient {
         ...(request.idempotencyKey ? { 'Idempotency-Key': request.idempotencyKey } : {}),
       },
       classify: classifyPspResponse,
+      ...(request.recordRawResponse ? { recordResponseAs: 'raw-json-text' as const } : {}),
     });
-    return { status: response.status, body: response.value };
+    return { status: response.status, body: response.value, providerCallId: response.providerCallId };
   }
 }

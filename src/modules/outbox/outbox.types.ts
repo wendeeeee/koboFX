@@ -3,6 +3,7 @@ export enum OutboxEventType {
   EMAIL_VERIFICATION_REQUESTED = 'EmailVerificationRequested.v1',
   EXISTING_ACCOUNT_REGISTRATION_ATTEMPTED = 'ExistingAccountRegistrationAttempted.v1',
   CONVERSION_POSTED = 'ConversionPosted.v1',
+  RECONCILIATION_BREAK_CHANGED = 'ReconciliationBreakChanged.v1',
 }
 
 /** Payloads carry opaque ids only — no personal data, no credentials (design §9.5). */
@@ -17,6 +18,13 @@ export interface ConversionPostedPayload {
   readonly flowId: string;
   /** The quote a trade executed; null for a market conversion. */
   readonly quoteId: string | null;
+}
+
+/** `ReconciliationBreakChanged.v1`: aggregate = the break. Ids and codes only (Phase 10's admin consumes it). */
+export interface ReconciliationBreakChangedPayload {
+  readonly breakId: string;
+  readonly type: string;
+  readonly status: string;
 }
 
 export interface ClaimedOutboxEvent {

@@ -53,12 +53,34 @@ describe('FundingFlow — invariants and odd PSP answers (unit)', () => {
     expect(definition.isHintSatisfied('WEIRD', 'payment.captured')).toBe(false);
   });
 
-  it('terminal and settled states have nothing to do', async () => {
+  it('terminal states have nothing to do', async () => {
     const { definition, runtime, commits } = setUp(payment());
-    for (const state of ['SETTLED', 'FAILED', 'REVERSED']) {
+    for (const state of ['FAILED', 'REVERSED']) {
       await expect(definition.step(flow(state), runtime)).resolves.toEqual({ kind: 'IDLE', state });
     }
     expect(commits).toEqual([]);
+  });
+
+  it('SETTLED still checks for a chargeback (Phase 9: they land after settlement): none ⇒ idle; partial ⇒ parked, nothing posted', async () => {
+    const settled = payment({ fundingTransactionId: 'txn-1', capturedAt: new Date() });
+    const quiet = setUp(settled, { getPayment: async () => pspPayment({ status: ProviderPaymentStatus.CAPTURED, capturedAt: new Date() }) });
+    await expect(quiet.definition.step(flow('SETTLED', new Date()), quiet.runtime)).resolves.toEqual({ kind: 'IDLE', state: 'SETTLED' });
+    expect(quiet.commits).toEqual([]);
+
+    const partial = setUp(settled, {
+      getPayment: async () =>
+        pspPayment({
+          status: ProviderPaymentStatus.CHARGED_BACK,
+          capturedAt: new Date(),
+          chargeback: { chargebackId: 'cb_1', amount: Money.of(50_000n, 'NGN'), createdAt: new Date() },
+        }),
+    });
+    await expect(partial.definition.step(flow('SETTLED', new Date()), partial.runtime)).resolves.toMatchObject({
+      kind: 'WAITING',
+      state: 'SETTLED',
+      reason: expect.stringMatching(/^PARTIAL_CHARGEBACK_UNSUPPORTED/),
+    });
+    expect(partial.commits).toEqual([]);
   });
 
   it('INITIATED with no payment at the PSP and no token left fails loudly', async () => {

@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { Inject, Injectable, Logger } from '@nestjs/common';
+import { EntityManager } from 'typeorm';
 import { RequestContext } from '../../common/context';
 import { InvariantViolationError } from '../../common/errors';
 import { exponentialBackoffSeconds } from '../../common/polling/backoff';
@@ -68,6 +69,44 @@ export class FlowRunner {
     }
     if (initialState === undefined || finalState === undefined) return { kind: 'NOT_CLAIMED' };
     return { kind: 'RAN', initialState, finalState, outcomes };
+  }
+
+  /**
+   * Move a flow on a fact its definition does not fetch itself — a PSP settlement report says a
+   * deposit was paid out (POSTED → SETTLED, Phase 9). Still the one way a flow moves: claim the
+   * lease (completed flows included), then ONE fenced, state-guarded commit running `work` (the
+   * caller's audit and row updates). The database trigger checks the transition.
+   *
+   * - `NOT_CLAIMED`: someone else holds the flow right now; try again later.
+   * - `STALE`: the flow is no longer in `from` (e.g. a chargeback reversed it first); the lease is
+   *   given back untouched — its schedule and parked note are preserved.
+   */
+  async applyExternalTransition(
+    flowId: string,
+    from: string,
+    to: string,
+    work: (manager: EntityManager) => Promise<void>,
+  ): Promise<'APPLIED' | 'NOT_CLAIMED' | 'STALE'> {
+    const flow = await this.repository.claimOne(flowId, this.config.flows.leaseSeconds, true);
+    if (!flow) return 'NOT_CLAIMED';
+    const keepSchedule = Math.max(0, Math.ceil((flow.nextAttemptAt.getTime() - Date.now()) / 1000));
+    if (flow.state !== from) {
+      await this.repository.release(flow, keepSchedule, flow.lastError);
+      return 'STALE';
+    }
+    try {
+      await this.repository.commit(
+        flow,
+        from,
+        { to, complete: true, retryInSeconds: keepSchedule, ...(flow.lastError ? { note: flow.lastError } : {}) },
+        work,
+        () => this.checkpoints.reached(FlowCheckpoint.BEFORE_COMMIT, { flowId: flow.id, state: flow.state }),
+      );
+    } catch (error) {
+      await this.repository.release(flow, keepSchedule, flow.lastError).catch(() => undefined);
+      throw error;
+    }
+    return 'APPLIED';
   }
 
   /** Run one step of a flow this process has claimed. Never throws for a step failure. */

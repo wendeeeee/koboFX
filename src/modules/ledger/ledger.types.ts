@@ -26,6 +26,8 @@ export enum TransactionType {
   CORRECTION = 'CORRECTION',
   PROMOTIONAL = 'PROMOTIONAL',
   WRITE_OFF = 'WRITE_OFF',
+  /** A PSP settlement batch (Phase 9): no user, never in any user's history. */
+  SETTLEMENT = 'SETTLEMENT',
 }
 
 export enum TransactionStatus {

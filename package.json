@@ -22,7 +22,7 @@
     "test:int": "jest --selectProjects integration --runInBand",
     "test:e2e": "jest --selectProjects e2e --runInBand",
     "test:all": "jest --runInBand",
-    "test:cov": "jest --runInBand --coverage",
+    "test:cov": "jest --maxWorkers=1 --workerIdleMemoryLimit=1024MB --coverage",
     "start:mock-psp:dev": "ts-node src/mock-psp/main.ts",
     "start:mock-fx:dev": "ts-node src/mock-exchange-rate-api/main.ts"
   },

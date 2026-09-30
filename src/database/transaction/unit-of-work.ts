@@ -52,6 +52,30 @@ export class UnitOfWork implements OnModuleInit, OnModuleDestroy {
     return manager;
   }
 
+  /**
+   * ONE `REPEATABLE READ READ ONLY` transaction: every statement inside sees the same snapshot,
+   * so a check made of several queries cannot be fooled by a posting that commits between two
+   * of them (Phase 9 §H.7). A read-only snapshot takes no row locks — writers never wait on it —
+   * so it may raise its own `statement_timeout` for a long walk without touching the hot path's
+   * 10s control. Never nested inside another unit.
+   */
+  async runReadOnlySnapshot<T>(work: (manager: EntityManager) => Promise<T>, options: { statementTimeoutMilliseconds: number }): Promise<T> {
+    if (this.storage.getStore()) {
+      throw new InvariantViolationError('A read-only snapshot cannot join an ambient transaction.');
+    }
+    const timeout = Math.trunc(options.statementTimeoutMilliseconds);
+    if (!Number.isInteger(timeout) || timeout <= 0) throw new InvariantViolationError('A snapshot needs a positive statement timeout.');
+    try {
+      return await this.dataSource.transaction('REPEATABLE READ', async (manager) => {
+        await manager.query('SET TRANSACTION READ ONLY');
+        await manager.query(`SET LOCAL statement_timeout = ${timeout}`);
+        return this.storage.run(manager, () => work(manager));
+      });
+    } catch (error) {
+      throw translateDatabaseError(error);
+    }
+  }
+
   async run<T>(work: (manager: EntityManager) => Promise<T>): Promise<T> {
     const ambient = this.storage.getStore();
     if (ambient) return work(ambient);
