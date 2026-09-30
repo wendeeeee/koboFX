@@ -226,7 +226,7 @@ describe('Admin schema: approvals, roles, corrections (real Postgres 16)', () =>
   });
 
   describe('corrections of internal transactions, rate origins', () => {
-    it('a CORRECTION of an internal transaction must name a subject; a subject is corrected once; a user transaction never takes one', async () => {
+    it('an internal transaction: each subject corrected once, subject-less once; a user transaction never takes a subject', async () => {
       const [internal] = (
         await superuser.query(
           `INSERT INTO transactions (reference, type, status, value_time, initiated_by) VALUES ($1, 'SETTLEMENT', 'POSTED', now(), 'job:test') RETURNING id`,
@@ -239,7 +239,8 @@ describe('Admin schema: approvals, roles, corrections (real Postgres 16)', () =>
            VALUES ($1, 'CORRECTION', 'POSTED', now(), 'operator:test', $2, $3)`,
           [`schema-correction:${randomUUID()}`, internal!.id, subject],
         );
-      await expect(correction(null)).rejects.toThrow(/must name the subject/);
+      await correction(null);
+      await expect(correction(null)).rejects.toThrow(/transactions_corrects_transaction_subject_unique/);
       await correction('line:one');
       await expect(correction('line:one')).rejects.toThrow(/transactions_corrects_transaction_subject_unique/);
       await correction('line:two');

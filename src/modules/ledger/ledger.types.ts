@@ -111,9 +111,9 @@ export interface TransactionDraft {
   readonly correctsTransactionId?: string;
   /**
    * Which part of an INTERNAL original (`user_id` NULL, e.g. a SETTLEMENT) a CORRECTION corrects, e.g.
-   * `line:{settlementBatchLineId}` (Phase 10 plan §A.1). Required for a CORRECTION of an internal original,
-   * refused otherwise. Each subject is corrected at most once; the original's `corrected_by` link stays unset
-   * (the reverse link lives on the corrected subject).
+   * `line:{settlementBatchLineId}` (Phase 10 plan §A.1). Only for a CORRECTION of an internal original (refused
+   * otherwise); without one, the original is corrected at most once, as always. Each subject is corrected at most
+   * once; the original's `corrected_by` link stays unset (the reverse link lives on the corrected subject).
    */
   readonly correctionSubject?: string;
   readonly idempotencyKey?: string;

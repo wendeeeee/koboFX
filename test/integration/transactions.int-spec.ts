@@ -141,8 +141,11 @@ describe('Transaction history (integration)', () => {
         });
       }
 
-      // Every reason code on the wire is one of the pinned public codes (Phase 8 decision 11) — and all five occur here.
-      expect(new Set(response.body.items.map((item: any) => item.reasonCode))).toEqual(new Set(PUBLIC_REASON_CODES));
+      // Every reason code on the wire is one of the pinned public codes (Phase 8 decision 11) — and the five Phase 8
+      // codes all occur here (the Phase 10 correction codes are exercised by the admin suites).
+      const onTheWire = new Set<string>(response.body.items.map((item: any) => item.reasonCode as string));
+      expect([...onTheWire].every((code) => (PUBLIC_REASON_CODES as readonly string[]).includes(code))).toBe(true);
+      expect(onTheWire).toEqual(new Set(['CARD_DEPOSIT', 'CHARGEBACK', 'MARKET_CONVERSION', 'QUOTED_TRADE', 'SIGNUP_DEMO_CREDIT']));
 
       // The rate history shows is the one the conversion response showed (stored, not recomputed).
       const byReference = new Map(response.body.items.map((item: any) => [item.reference, item]));

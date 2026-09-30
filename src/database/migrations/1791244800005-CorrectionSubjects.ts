@@ -8,9 +8,8 @@ import { MigrationInterface, QueryRunner } from 'typeorm';
  * link one user's correction to another user's. Instead:
  *
  * - `transactions.correction_subject`: which part of an INTERNAL original (`user_id IS NULL`) a CORRECTION
- *   corrects, e.g. `line:{settlementBatchLineId}`. Required for a CORRECTION of an internal original, refused
- *   otherwise (trigger). User transactions are still corrected at most once: the unique index is now on
- *   `(corrects_transaction_id, COALESCE(correction_subject, ''))`.
+ *   corrects, e.g. `line:{settlementBatchLineId}`. Only on internal originals (trigger); without one, an original is
+ *   corrected at most once, as always — the unique index is now on `(corrects_transaction_id, COALESCE(subject, ''))`.
  * - A subject-scoped correction leaves the original's `corrected_by_transaction_id` unset (it holds one id);
  *   the reverse link lives on what was corrected: `settlement_line_corrections` (append-only evidence — the
  *   line itself is immutable), one row per corrected line, naming the correction and its approval.
@@ -43,10 +42,6 @@ export class CorrectionSubjects1791244800005 implements MigrationInterface {
         SELECT user_id IS NULL INTO original_is_internal FROM transactions WHERE id = NEW.corrects_transaction_id;
         IF NEW.correction_subject IS NOT NULL AND NOT original_is_internal THEN
           RAISE EXCEPTION 'only a correction of an internal transaction names a subject'
-            USING ERRCODE = 'integrity_constraint_violation';
-        END IF;
-        IF NEW.type = 'CORRECTION' AND original_is_internal AND NEW.correction_subject IS NULL THEN
-          RAISE EXCEPTION 'a correction of an internal transaction must name the subject it corrects'
             USING ERRCODE = 'integrity_constraint_violation';
         END IF;
         RETURN NEW;

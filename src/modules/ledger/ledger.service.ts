@@ -293,11 +293,6 @@ export class LedgerService {
         });
       }
     } else {
-      if (draft.type === TransactionType.CORRECTION && original.user_id === null) {
-        throw new InvalidPostingError('A correction of an internal transaction must name the subject it corrects.', {
-          transactionId: originalId,
-        });
-      }
       if (original.corrected_by_transaction_id !== null) {
         throw new AlreadyCorrectedError('This transaction is already corrected; correct the correction instead.', {
           transactionId: originalId,

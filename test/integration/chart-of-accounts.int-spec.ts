@@ -25,6 +25,8 @@ const TEMPLATES: ReadonlyArray<[string, AccountType, NormalSide]> = [
   ['EXPENSE:PROMOTIONAL', AccountType.EXPENSE, NormalSide.DEBIT],
   ['EQUITY:ROUNDING', AccountType.EQUITY, NormalSide.CREDIT],
   ['EXPENSE:WRITE_OFF', AccountType.EXPENSE, NormalSide.DEBIT],
+  // Phase 10: money the PSP paid us twice, owed back (a duplicate settlement line).
+  ['PSP_PAYABLE', AccountType.LIABILITY, NormalSide.CREDIT],
 ];
 
 describe('Chart of accounts (design §5.1, §6.6)', () => {

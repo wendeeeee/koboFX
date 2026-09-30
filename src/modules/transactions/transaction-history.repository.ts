@@ -170,7 +170,9 @@ export class TransactionHistoryRepository {
    * (a boolean — never its reference or content); the admin view sees its reference.
    */
   private select(parameters: Parameters, user: string, page: string, view: HistoryView): HistoryStatement {
-    const linkScope = (alias: string) => (view === 'ADMIN' ? `(${alias}.user_id = ${user} OR ${alias}.user_id IS NULL)` : `${alias}.user_id = ${user}`);
+    // The corrected original may be internal (a settlement): joined in both views (the same primary-key lookup), but
+    // the user view reads only THAT it is internal — its reference and type stay hidden (CASE below).
+    const linkScope = (alias: string) => (view === 'ADMIN' || alias === 'corrects' ? `(${alias}.user_id = ${user} OR ${alias}.user_id IS NULL)` : `${alias}.user_id = ${user}`);
     const adminColumns =
       view === 'ADMIN'
         ? `,
@@ -228,13 +230,11 @@ export class TransactionHistoryRepository {
              transactions.quote_id::text AS quote_id,
              transactions.corrects_transaction_id::text AS corrects_transaction_id,
              transactions.corrected_by_transaction_id::text AS corrected_by_transaction_id,
-             corrects.reference AS corrects_reference,
-             corrects.type::text AS corrects_type,
+             ${view === 'ADMIN' ? 'corrects.reference' : `CASE WHEN corrects.user_id = ${user} THEN corrects.reference END`} AS corrects_reference,
+             ${view === 'ADMIN' ? 'corrects.type::text' : `CASE WHEN corrects.user_id = ${user} THEN corrects.type::text END`} AS corrects_type,
              corrected_by.reference AS corrected_by_reference,
              corrected_by.type::text AS corrected_by_type,
-             EXISTS (SELECT 1 FROM transactions AS internal_original
-                      WHERE internal_original.id = transactions.corrects_transaction_id AND internal_original.user_id IS NULL)
-               AS corrects_internal,
+             (corrects.id IS NOT NULL AND corrects.user_id IS NULL) AS corrects_internal,
              legs.legs,
              funding_payments.currency_code AS requested_currency,
              requested_currency.minor_unit AS requested_minor_unit,
