@@ -13,6 +13,8 @@ import {
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const INITIATED_BY_PATTERN = /^(user|operator|job):.+$/;
 const SYSTEM_ACCOUNT_PATTERN = /^[A-Z_]+(:[A-Z_]+)*$/;
+/** Mirrors `transactions_correction_subject_format`. */
+const CORRECTION_SUBJECT = /^[a-z][a-z-]*:.+$/;
 const TYPES_THAT_CORRECT = new Set<TransactionType>([TransactionType.REVERSAL, TransactionType.CORRECTION]);
 
 export function isUuid(value: unknown): value is string {
@@ -134,6 +136,15 @@ export function validatePostingRequest(request: PostingRequest): void {
       'REVERSAL and CORRECTION postings must link the transaction they correct; other types must not.',
       { type: transaction.type },
     );
+  }
+
+  if (transaction.correctionSubject !== undefined) {
+    if (transaction.type !== TransactionType.CORRECTION) {
+      throw new InvalidPostingError('Only a CORRECTION names a correction subject.', { type: transaction.type });
+    }
+    if (typeof transaction.correctionSubject !== 'string' || !CORRECTION_SUBJECT.test(transaction.correctionSubject)) {
+      throw new InvalidPostingError('correctionSubject must look like "line:{id}".');
+    }
   }
 
   if ((transaction.type === TransactionType.CONVERSION) !== (transaction.conversion !== undefined)) {

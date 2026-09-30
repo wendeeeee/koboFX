@@ -1,3 +1,5 @@
+import { existsSync, readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { KeyObject, createPrivateKey, createPublicKey } from 'node:crypto';
 import Joi from 'joi';
 import { RoundingConfig, RoundingPurpose, RoundingStrategy } from '../common/money/rounding-policy';
@@ -179,6 +181,22 @@ export interface TimeOfDay {
   readonly minute: number;
 }
 
+/** Controls (Phase 10; design §9.2–§9.4). */
+export interface AdminConfig {
+  /** A PENDING approval nobody decided within this is refused and swept to EXPIRED. */
+  readonly approvalTimeToLiveHours: number;
+  /** A break-glass use must be reviewed by SECURITY within this, or it pages. */
+  readonly breakGlassReviewHours: number;
+  /** A four-eyes manual rate is executable at most this long. */
+  readonly manualRateMaximumValiditySeconds: number;
+  /** A break-glass (single-actor) manual rate: shorter. */
+  readonly breakGlassManualRateMaximumValiditySeconds: number;
+  /** How often the worker's monitor sweeps expired approvals and overdue break-glass reviews. */
+  readonly monitorTickMilliseconds: number;
+  /** The build's git SHA (design §9.4), injected at build time; `unknown` only outside production. */
+  readonly buildGitSha: string;
+}
+
 export interface ReconciliationConfig {
   /** Run the scheduler loop in the worker. */
   readonly enabled: boolean;
@@ -219,6 +237,7 @@ export interface AppConfig {
   readonly flows: FlowConfig;
   readonly fx: FxConfig;
   readonly reconciliation: ReconciliationConfig;
+  readonly admin: AdminConfig;
   /** Reverse proxies in front of the API; `req.ip` is taken from X-Forwarded-For only this deep. */
   readonly trustProxyHops: number;
 }
@@ -339,6 +358,12 @@ const envSchema = Joi.object({
   RESERVATION_SWEEP_INTERVAL_MILLISECONDS: Joi.number().integer().min(100).default(30_000),
 
   // Reconciliation (Phase 9; design §8). Times are UTC.
+  APPROVAL_TTL_HOURS: Joi.number().integer().min(1).max(24 * 30).default(72),
+  BREAK_GLASS_REVIEW_HOURS: Joi.number().integer().min(1).max(24 * 7).default(24),
+  MANUAL_RATE_MAXIMUM_VALIDITY_SECONDS: Joi.number().integer().min(60).max(86_400).default(3_600),
+  BREAK_GLASS_MANUAL_RATE_MAXIMUM_VALIDITY_SECONDS: Joi.number().integer().min(60).max(86_400).default(900),
+  ADMIN_MONITOR_TICK_MILLISECONDS: Joi.number().integer().min(50).default(60_000),
+  BUILD_GIT_SHA: Joi.string().pattern(/^[0-9a-f]{7,40}$/).optional(),
   RECONCILIATION_ENABLED: Joi.boolean().default(true),
   RECONCILIATION_TICK_MILLISECONDS: Joi.number().integer().min(50).default(60_000),
   RECONCILIATION_INTERNAL_AT: Joi.string().pattern(/^([01]\d|2[0-3]):[0-5]\d$/).default('01:00'),
@@ -415,6 +440,7 @@ export function loadConfig(raw: NodeJS.ProcessEnv | Record<string, string | unde
   const conversion = parseConversion(env.CONVERSION_LIMITS, problems);
   const fx = error ? undefined : parseFx(env, problems);
   const reconciliation = error ? undefined : parseReconciliation(env, funding?.currencies ?? [], problems);
+  const buildGitSha = resolveBuildGitSha(env.BUILD_GIT_SHA, env.NODE_ENV === 'production', problems);
   if (problems.length > 0 || !keys || !pepper || !webhookSecrets || !funding || !conversion || !fx || !reconciliation) {
     throw new ConfigValidationError(problems);
   }
@@ -491,8 +517,39 @@ export function loadConfig(raw: NodeJS.ProcessEnv | Record<string, string | unde
     },
     fx,
     reconciliation,
+    admin: {
+      approvalTimeToLiveHours: env.APPROVAL_TTL_HOURS,
+      breakGlassReviewHours: env.BREAK_GLASS_REVIEW_HOURS,
+      manualRateMaximumValiditySeconds: env.MANUAL_RATE_MAXIMUM_VALIDITY_SECONDS,
+      breakGlassManualRateMaximumValiditySeconds: env.BREAK_GLASS_MANUAL_RATE_MAXIMUM_VALIDITY_SECONDS,
+      monitorTickMilliseconds: env.ADMIN_MONITOR_TICK_MILLISECONDS,
+      buildGitSha: buildGitSha as string,
+    },
     trustProxyHops: env.TRUST_PROXY_HOPS,
   };
+}
+
+/** Written by `npm run build` (`scripts/stamp-build.js`) next to the compiled code: `dist/build-info.json`. */
+export const BUILD_INFO_PATH = join(__dirname, '..', 'build-info.json');
+
+/**
+ * The running version (design §9.4: "the build stamps a git SHA into /health"): `BUILD_GIT_SHA` (CI) wins, else
+ * the file the build wrote. No runtime git. Production refuses to boot without one; elsewhere it is `unknown`.
+ */
+export function resolveBuildGitSha(fromEnvironment: string | undefined, production: boolean, problems: string[]): string {
+  if (fromEnvironment) return fromEnvironment;
+  if (existsSync(BUILD_INFO_PATH)) {
+    try {
+      const { gitSha } = JSON.parse(readFileSync(BUILD_INFO_PATH, 'utf8')) as { gitSha?: unknown };
+      if (typeof gitSha === 'string' && /^[0-9a-f]{7,40}$/.test(gitSha)) return gitSha;
+    } catch {
+      // reported below
+    }
+    problems.push(`${BUILD_INFO_PATH} does not hold a git SHA`);
+    return 'unknown';
+  }
+  if (production) problems.push('BUILD_GIT_SHA (or dist/build-info.json from `npm run build`) is required in production');
+  return 'unknown';
 }
 
 const API_KEY_PLACEHOLDER = '{apiKey}';

@@ -118,7 +118,7 @@ describe('loadConfig', () => {
       );
       // A production config also needs a production-grade FX plan (Phase 6 §5.2: daily rates are refused).
       const productionFx = { FX_RATE_BASE_URL: 'https://v6.exchangerate-api.com/v6/{apiKey}/latest', FX_PROVIDER_PLAN: 'BUSINESS', EXCHANGE_RATE_API_KEY: 'abcdef0123456789abcdef01' };
-      expect(() => loadConfig({ ...VALID, ...productionFx, NODE_ENV: 'production', DEMO_CREDIT_NGN_MINOR: '0' })).not.toThrow();
+      expect(() => loadConfig({ ...VALID, ...productionFx, NODE_ENV: 'production', DEMO_CREDIT_NGN_MINOR: '0', BUILD_GIT_SHA: 'abc1234' })).not.toThrow();
       expect(problemsOf({ ...VALID, DEMO_CREDIT_NGN_MINOR: '100.5' }).join()).toContain('DEMO_CREDIT_NGN_MINOR');
     });
 
@@ -243,7 +243,7 @@ describe('loadConfig: FX rates (Phase 6)', () => {
   });
 
   it('production refuses daily-cadence plans (Phase 6 §5.2) and plain HTTP', () => {
-    const production = { ...VALID, NODE_ENV: 'production' };
+    const production = { ...VALID, NODE_ENV: 'production', BUILD_GIT_SHA: 'abc1234' };
     expect(problemsOf(production).join()).toMatch(/FX_PROVIDER_PLAN=OPEN publishes once a day/);
     expect(problemsOf({ ...production, FX_RATE_BASE_URL: KEYED, FX_PROVIDER_PLAN: 'FREE', EXCHANGE_RATE_API_KEY: KEY }).join()).toMatch(/FREE publishes once a day/);
     expect(
@@ -272,5 +272,14 @@ describe('loadConfig: FX rates (Phase 6)', () => {
     expect(problemsOf({ ...VALID, FX_RATE_BOUNDS: '{"NGN":{"minimum":100,"maximum":"5000"}}' }).join()).toMatch(/FX_RATE_BOUNDS.NGN/);
     expect(problemsOf({ ...VALID, FX_RATE_BOUNDS: '{"NGN":{"minimum":"0","maximum":"5000"}}' }).join()).toMatch(/FX_RATE_BOUNDS.NGN/);
     expect(problemsOf({ ...VALID, FX_RATE_BOUNDS: 'nope' }).join()).toMatch(/FX_RATE_BOUNDS must be a JSON object/);
+  });
+});
+
+describe('loadConfig: the build git SHA (Phase 10, design §9.4)', () => {
+  it('BUILD_GIT_SHA wins; production refuses to boot without one; elsewhere it is `unknown`', () => {
+    expect(loadConfig({ ...VALID, BUILD_GIT_SHA: '0b05ca7a7dc00c3f2d059d5bbf5a11239bf384b5' }).admin.buildGitSha).toBe('0b05ca7a7dc00c3f2d059d5bbf5a11239bf384b5');
+    expect(loadConfig({ ...VALID }).admin.buildGitSha).toBe('unknown');
+    expect(problemsOf({ ...VALID, BUILD_GIT_SHA: 'not-a-sha' }).join()).toMatch(/BUILD_GIT_SHA/);
+    expect(problemsOf({ ...VALID, NODE_ENV: 'production' }).join()).toMatch(/BUILD_GIT_SHA .* is required in production/);
   });
 });

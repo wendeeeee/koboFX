@@ -6,12 +6,12 @@ import { TransactionsController } from './transactions.controller';
 /**
  * Transaction history — read models (design §7.8, §14 `transactions/`). Depends on tables only:
  * no ledger service, no FX, no trading, no Redis (the rate-limit guard aside), so history stays
- * up when FX and trading are down (design §16). The repository is exported for Phase 10's admin
- * views.
+ * up when FX and trading are down (design §16). The repository and service are exported for the
+ * admin history (Phase 10).
  */
 @Module({
   controllers: [TransactionsController],
   providers: [TransactionHistoryRepository, TransactionHistoryService],
-  exports: [TransactionHistoryRepository],
+  exports: [TransactionHistoryRepository, TransactionHistoryService],
 })
 export class TransactionsModule {}

@@ -125,7 +125,7 @@ export class LedgerService {
       const { reference, bookingTime } = await this.insertTransaction(manager, transactionId, draft);
       const postedEntries = await this.applyEntries(manager, transactionId, draft.valueTime, entries);
 
-      if (draft.correctsTransactionId !== undefined) {
+      if (draft.correctsTransactionId !== undefined && draft.correctionSubject === undefined) {
         await this.linkOriginal(manager, draft.correctsTransactionId, transactionId, draft.type);
       }
 
@@ -270,17 +270,40 @@ export class LedgerService {
   ): Promise<void> {
     const originalId = draft.correctsTransactionId as string;
     const [original] = (await manager.query(
-      `SELECT id, status, corrected_by_transaction_id FROM transactions WHERE id = $1 FOR UPDATE`,
+      `SELECT id, status, user_id, corrected_by_transaction_id FROM transactions WHERE id = $1 FOR UPDATE`,
       [originalId],
-    )) as { id: string; status: TransactionStatus; corrected_by_transaction_id: string | null }[];
+    )) as { id: string; status: TransactionStatus; user_id: string | null; corrected_by_transaction_id: string | null }[];
     if (!original) {
       throw new NotFoundError('The transaction being corrected does not exist.', { transactionId: originalId });
     }
-    if (original.corrected_by_transaction_id !== null) {
-      throw new AlreadyCorrectedError('This transaction is already corrected; correct the correction instead.', {
-        transactionId: originalId,
-        correctedByTransactionId: original.corrected_by_transaction_id,
-      });
+    if (draft.correctionSubject !== undefined) {
+      // A part of an internal original (Phase 10 plan §A.1): each subject once, decided under the original's lock.
+      if (original.user_id !== null) {
+        throw new InvalidPostingError('Only a correction of an internal transaction names a subject.', { transactionId: originalId });
+      }
+      const [existing] = (await manager.query(
+        `SELECT id FROM transactions WHERE corrects_transaction_id = $1 AND correction_subject = $2`,
+        [originalId, draft.correctionSubject],
+      )) as { id: string }[];
+      if (existing) {
+        throw new AlreadyCorrectedError('This part of the transaction is already corrected.', {
+          transactionId: originalId,
+          correctionSubject: draft.correctionSubject,
+          correctedByTransactionId: existing.id,
+        });
+      }
+    } else {
+      if (draft.type === TransactionType.CORRECTION && original.user_id === null) {
+        throw new InvalidPostingError('A correction of an internal transaction must name the subject it corrects.', {
+          transactionId: originalId,
+        });
+      }
+      if (original.corrected_by_transaction_id !== null) {
+        throw new AlreadyCorrectedError('This transaction is already corrected; correct the correction instead.', {
+          transactionId: originalId,
+          correctedByTransactionId: original.corrected_by_transaction_id,
+        });
+      }
     }
     if (original.status !== TransactionStatus.POSTED) {
       throw new InvalidPostingError('Only a POSTED transaction can be corrected.', {
@@ -353,9 +376,9 @@ export class LedgerService {
             reason_code, corrects_transaction_id, idempotency_key, external_reference, metadata,
             source_currency, source_amount_minor, target_currency, target_amount_minor, rate_display,
             reference_rate, rate_provider, rate_fetched_at, rate_provider_updated_at, rate_snapshot_id,
-            spread_basis_points, quote_id)
+            spread_basis_points, quote_id, correction_subject)
          VALUES ($1, $2, $3, $4, 'POSTED', $5, $6, $7, $8, $9, $10, $11, $12,
-                 $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24)
+                 $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25)
          RETURNING booking_time`,
         [
           transactionId,
@@ -382,6 +405,7 @@ export class LedgerService {
           conversion?.rateSnapshotId ?? null,
           conversion?.spreadBasisPoints ?? null,
           conversion?.quoteId ?? null,
+          draft.correctionSubject ?? null,
         ],
       )) as { booking_time: Date }[];
       return { reference, bookingTime: row.booking_time };

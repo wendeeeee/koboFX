@@ -14,6 +14,12 @@ export interface KnownDeposit {
   readonly amountMinor: bigint;
   /** The funding is in the ledger (`funding_transaction_id` set). */
   readonly posted: boolean;
+  /**
+   * What our chargeback posting took from `PSP_RECEIVABLE` (Phase 10): the full amount for a reversal, the
+   * disputed part for an approved partial-chargeback CORRECTION. Absent = no chargeback booked against the
+   * receivable — a deduction line is then expected to equal the deposit (a full chargeback).
+   */
+  readonly bookedChargebackMinor?: bigint;
 }
 
 /** What the PSP's own API says about a payment id we have no deposit for. */
@@ -224,7 +230,10 @@ export function matchSettlementBatch(input: MatchInput): MatchResult {
         details: { ...depositFacts, source: 'SETTLEMENT_LINE', settledIntoClearing: true },
       });
     }
-    if (line.amountMinor !== deposit.amountMinor) {
+    // A deduction is attributed when it equals what we booked for the chargeback (a partial one, once its approved
+    // CORRECTION posted it against the receivable) — else the deposit's amount, a full chargeback.
+    const expectedMinor = line.type === ProviderSettlementLineType.CHARGEBACK ? (deposit.bookedChargebackMinor ?? deposit.amountMinor) : deposit.amountMinor;
+    if (line.amountMinor !== expectedMinor) {
       // A chargeback for less than the deposit is a PARTIAL chargeback (Phase 5: parked for a
       // Phase 10 CORRECTION). Its break is the flow's — the same one the payment check raises.
       if (line.type === ProviderSettlementLineType.CHARGEBACK) {

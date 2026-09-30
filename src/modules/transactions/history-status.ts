@@ -63,4 +63,15 @@ export const HISTORY_TYPES = [
  * Public, stable reason codes (Phase 8 decision 11). Clients may branch on them; renaming one is
  * a breaking API change (pinned by `transaction.view.spec.ts`).
  */
-export const PUBLIC_REASON_CODES = ['CARD_DEPOSIT', 'CHARGEBACK', 'MARKET_CONVERSION', 'QUOTED_TRADE', 'SIGNUP_DEMO_CREDIT'] as const;
+export const PUBLIC_REASON_CODES = [
+  'CARD_DEPOSIT',
+  'CHARGEBACK',
+  'MARKET_CONVERSION',
+  'QUOTED_TRADE',
+  'SIGNUP_DEMO_CREDIT',
+  // Phase 10: approved corrections and write-offs a user can see in their own history.
+  'CLEARING_REATTRIBUTION',
+  'SETTLEMENT_AMOUNT_CORRECTION',
+  'PARTIAL_CHARGEBACK',
+  'WRITE_OFF',
+] as const;

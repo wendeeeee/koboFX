@@ -15,11 +15,12 @@ import { ReservationsModule } from './modules/reservations/reservations.module';
 import { WebhooksModule } from './modules/payments/webhooks/webhooks.module';
 import { ReconciliationModule } from './modules/reconciliation/reconciliation.module';
 import { RedisModule } from './redis/redis.module';
+import { AdminModule } from './modules/admin/admin.module';
 
 /**
  * The worker process (design §3, §14): no HTTP. It runs the outbox dispatcher, the flow
  * resumer, the webhook processor, the reservation sweeper, the FX poller and the
- * reconciliation scheduler (Phase 9).
+ * reconciliation scheduler (Phase 9) and the control monitor (Phase 10: expiry, break-glass review).
  */
 @Module({})
 export class WorkerModule {
@@ -43,6 +44,7 @@ export class WorkerModule {
         MoneyModule,
         FxModule,
         ReconciliationModule,
+        AdminModule,
       ],
     };
   }

@@ -145,7 +145,7 @@ export class FxRateService {
     }
     if (!snapshot) {
       source = 'DATABASE';
-      snapshot = await this.snapshots.latestAccepted(this.providerName);
+      snapshot = await this.snapshots.latestServable(this.providerName);
     }
     if (!snapshot) return undefined;
     this.local = { snapshot, source, readAt: Date.now() };

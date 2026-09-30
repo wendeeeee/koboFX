@@ -189,7 +189,17 @@ describe('history status and initiator', () => {
   });
 
   it('pins the public reason codes and filterable types (renaming one is a breaking change)', () => {
-    expect(PUBLIC_REASON_CODES).toEqual(['CARD_DEPOSIT', 'CHARGEBACK', 'MARKET_CONVERSION', 'QUOTED_TRADE', 'SIGNUP_DEMO_CREDIT']);
+    expect(PUBLIC_REASON_CODES).toEqual([
+      'CARD_DEPOSIT',
+      'CHARGEBACK',
+      'MARKET_CONVERSION',
+      'QUOTED_TRADE',
+      'SIGNUP_DEMO_CREDIT',
+      'CLEARING_REATTRIBUTION',
+      'SETTLEMENT_AMOUNT_CORRECTION',
+      'PARTIAL_CHARGEBACK',
+      'WRITE_OFF',
+    ]);
     expect(HISTORY_TYPES).toEqual(['FUNDING', 'CONVERSION', 'REVERSAL', 'CORRECTION', 'PROMOTIONAL', 'WRITE_OFF']);
   });
 });

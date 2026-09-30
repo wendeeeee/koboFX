@@ -32,10 +32,11 @@ export interface AmountView {
   readonly amount: string;
 }
 
-export interface LinkView {
-  readonly reference: string;
-  readonly type: string;
-}
+/**
+ * A correction link. `{ internal: true }` when the other end is one of our internal transactions (a
+ * settlement a CORRECTION reattributed money from, Phase 10): the user learns that, never its content.
+ */
+export type LinkView = { readonly reference: string; readonly type: string } | { readonly internal: true };
 
 export interface ListRateView {
   /** The effective client rate, derived from the two amounts at posting (display only; the amounts are authoritative). */
@@ -124,6 +125,68 @@ export interface HistoryRow {
   readonly requested_currency: string | null;
   readonly requested_minor_unit: number | null;
   readonly requested_amount: string | null;
+  /** The corrected original is an internal transaction (`user_id` NULL). */
+  readonly corrects_internal?: boolean;
+  // Admin view only (`HistoryScope.view = 'ADMIN'`).
+  readonly metadata?: Record<string, unknown> | null;
+  readonly external_reference?: string | null;
+  readonly correction_subject?: string | null;
+  readonly all_legs?: readonly AdminLegRow[] | null;
+}
+
+/** Every leg of a transaction, as the admin view's aggregate returns it. */
+export interface AdminLegRow extends LegRow {
+  readonly accountCode: string;
+  readonly bucket: number;
+  readonly owner: 'USER' | 'INTERNAL' | 'OTHER_USER';
+}
+
+export interface AdminLegView extends DetailLegView {
+  readonly accountCode: string;
+  readonly bucket: number;
+  readonly owner: 'USER' | 'INTERNAL';
+}
+
+/**
+ * The admin history item (Phase 10 plan §E.9): the detail view plus the internal legs, `metadata`,
+ * `external_reference`, the initiator's identity and the correction subject. User ids only — never an email.
+ */
+export interface AdminTransactionView extends Omit<TransactionDetailView, 'legs'> {
+  readonly legs: readonly AdminLegView[];
+  readonly initiatedByIdentity: string;
+  readonly metadata: Record<string, unknown>;
+  readonly externalReference: string | null;
+  readonly correctionSubject: string | null;
+  readonly approvalId: string | null;
+}
+
+export function adminTransactionView(row: HistoryRow): AdminTransactionView {
+  const detail = detailView(row);
+  const legs = (row.all_legs ?? []).map((leg): AdminLegView => {
+    if (leg.owner === 'OTHER_USER') {
+      throw new InvariantViolationError("A transaction in this user's history has a leg on another user's account.", { reference: row.reference });
+    }
+    return {
+      accountCode: leg.accountCode,
+      bucket: leg.bucket,
+      owner: leg.owner,
+      currency: leg.currency,
+      minorUnit: leg.minorUnit,
+      direction: leg.direction,
+      amount: leg.amount,
+      balanceAfter: leg.balanceAfter,
+    };
+  });
+  const metadata = row.metadata ?? {};
+  return {
+    ...detail,
+    legs,
+    initiatedByIdentity: row.initiated_by,
+    metadata,
+    externalReference: row.external_reference ?? null,
+    correctionSubject: row.correction_subject ?? null,
+    approvalId: typeof metadata.approvalId === 'string' ? metadata.approvalId : null,
+  };
 }
 
 export function listItemView(row: HistoryRow): TransactionListItemView {
@@ -163,8 +226,8 @@ export function detailView(row: HistoryRow): TransactionDetailView {
     failureCode: row.failure_code,
     valueTime: row.value_time.toISOString(),
     bookingTime: row.booking_time.toISOString(),
-    corrects: linkOf(row.corrects_transaction_id, row.corrects_reference, row.corrects_type),
-    correctedBy: linkOf(row.corrected_by_transaction_id, row.corrected_by_reference, row.corrected_by_type),
+    corrects: linkOf(row.corrects_transaction_id, row.corrects_reference, row.corrects_type, row.corrects_internal === true),
+    correctedBy: linkOf(row.corrected_by_transaction_id, row.corrected_by_reference, row.corrected_by_type, false),
     settlementTime: row.settlement_time?.toISOString() ?? null,
     initiatedBy: initiatorOf(row.initiated_by),
   };
@@ -198,9 +261,13 @@ function rateOf(row: HistoryRow): DetailRateView | null {
   };
 }
 
-/** Both ends of a correction belong to the same user (a reversal copies the original's `user_id`); fail loudly if not. */
-function linkOf(transactionId: string | null, reference: string | null, type: string | null): LinkView | null {
+/**
+ * Both ends of a correction belong to the same user (a reversal copies the original's `user_id`) — or the
+ * original is internal (Phase 10). Anything else is a broken assumption: fail loudly, never "no link".
+ */
+function linkOf(transactionId: string | null, reference: string | null, type: string | null, internal: boolean): LinkView | null {
   if (transactionId === null) return null;
+  if ((reference === null || type === null) && internal) return { internal: true };
   if (reference === null || type === null) {
     throw new InvariantViolationError('A linked transaction is not visible to the same user.', { transactionId });
   }

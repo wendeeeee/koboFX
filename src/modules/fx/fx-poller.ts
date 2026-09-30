@@ -72,7 +72,7 @@ export class FxPoller {
 
   /** Put the latest accepted snapshot back into Redis if Redis lost it or holds an older one. */
   private async reseedCache(): Promise<boolean> {
-    const latest = await this.snapshots.latestAccepted(this.config.fx.providerName);
+    const latest = await this.snapshots.latestServable(this.config.fx.providerName);
     if (!latest) return false;
     try {
       const cached = await this.cache.read();

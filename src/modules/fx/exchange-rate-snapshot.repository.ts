@@ -2,6 +2,18 @@ import { Injectable } from '@nestjs/common';
 import { Dec, dec } from '../../common/money';
 import { UnitOfWork } from '../../database/transaction/unit-of-work';
 
+/** `provider` of a manual rate (Phase 10): reserved by `exchange_rate_snapshots_origin_shape`. */
+export const MANUAL_RATE_PROVIDER = 'manual';
+
+/** Where an ACCEPTED snapshot came from (`exchange_rate_snapshot_origin`). */
+export enum SnapshotOrigin {
+  PROVIDER = 'PROVIDER',
+  /** An approved RATE_OVERRIDE accepting a rejected fetch as-is. */
+  OVERRIDE = 'OVERRIDE',
+  /** An approved (or break-glass) manual rate. */
+  MANUAL = 'MANUAL',
+}
+
 export enum SnapshotStatus {
   ACCEPTED = 'ACCEPTED',
   REJECTED = 'REJECTED',
@@ -28,6 +40,24 @@ export interface NewSnapshot {
   readonly rejectionReasons: readonly string[];
   readonly providerCallId: string | undefined;
   readonly rates: ReadonlyMap<string, Dec>;
+  /** Absent = PROVIDER. OVERRIDE and MANUAL come only from an approval (CHECK). */
+  readonly origin?: SnapshotOrigin;
+  readonly approvalId?: string;
+  readonly overridesSnapshotId?: string;
+}
+
+/** Any snapshot as evidence (a REJECTED one included): what a rate override inspects. */
+export interface SnapshotEvidence {
+  readonly id: string;
+  readonly provider: string;
+  readonly status: SnapshotStatus;
+  readonly origin: SnapshotOrigin;
+  readonly rejectionReasons: readonly string[];
+  readonly providerUpdatedAt: Date | null;
+  readonly providerNextUpdateAt: Date | null;
+  readonly fetchedAt: Date;
+  readonly rates: ReadonlyMap<string, Dec>;
+  readonly overridden: boolean;
 }
 
 /** The latest fetch of any status: what the poll schedule is computed from. */
@@ -63,8 +93,8 @@ export class ExchangeRateSnapshotRepository {
       const [row] = (await manager.query(
         `INSERT INTO exchange_rate_snapshots
            (provider, base_currency_code, provider_updated_at, provider_next_update_at, fetched_at, status,
-            rejection_reasons, provider_call_id)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+            rejection_reasons, provider_call_id, origin, approval_id, overrides_snapshot_id)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
          RETURNING id`,
         [
           snapshot.provider,
@@ -75,6 +105,9 @@ export class ExchangeRateSnapshotRepository {
           snapshot.status,
           snapshot.rejectionReasons,
           snapshot.providerCallId ?? null,
+          snapshot.origin ?? SnapshotOrigin.PROVIDER,
+          snapshot.approvalId ?? null,
+          snapshot.overridesSnapshotId ?? null,
         ],
       )) as { id: string }[];
       const entries = [...snapshot.rates];
@@ -104,6 +137,50 @@ export class ExchangeRateSnapshotRepository {
     return row ? toSnapshot(row) : undefined;
   }
 
+  /**
+   * What the read path serves: the latest ACCEPTED snapshot of the provider (overrides included) OR a manual
+   * rate — by the same order as `latestAccepted` and the Redis compare-and-set (fetch time, publication, id).
+   */
+  async latestServable(provider: string): Promise<RateSnapshot | undefined> {
+    const [row] = (await this.unitOfWork.manager.query(
+      `SELECT snapshot.id, snapshot.provider, snapshot.provider_updated_at, snapshot.provider_next_update_at,
+              snapshot.fetched_at,
+              (SELECT json_agg(json_build_object('currency_code', rate.currency_code, 'rate', rate.rate::text))
+                 FROM exchange_rate_snapshot_rates rate WHERE rate.snapshot_id = snapshot.id) AS rates
+         FROM exchange_rate_snapshots snapshot
+        WHERE snapshot.provider IN ($1, '${MANUAL_RATE_PROVIDER}') AND snapshot.status = 'ACCEPTED'
+        ORDER BY snapshot.fetched_at DESC, snapshot.provider_updated_at DESC, snapshot.id DESC
+        LIMIT 1`,
+      [provider],
+    )) as SnapshotRow[];
+    return row ? toSnapshot(row) : undefined;
+  }
+
+  async findEvidence(snapshotId: string): Promise<SnapshotEvidence | undefined> {
+    const [row] = (await this.unitOfWork.manager.query(
+      `SELECT snapshot.id, snapshot.provider, snapshot.status, snapshot.origin, snapshot.rejection_reasons,
+              snapshot.provider_updated_at, snapshot.provider_next_update_at, snapshot.fetched_at,
+              EXISTS (SELECT 1 FROM exchange_rate_snapshots overriding WHERE overriding.overrides_snapshot_id = snapshot.id) AS overridden,
+              (SELECT json_agg(json_build_object('currency_code', rate.currency_code, 'rate', rate.rate::text))
+                 FROM exchange_rate_snapshot_rates rate WHERE rate.snapshot_id = snapshot.id) AS rates
+         FROM exchange_rate_snapshots snapshot WHERE snapshot.id = $1`,
+      [snapshotId],
+    )) as (SnapshotRow & { status: SnapshotStatus; origin: SnapshotOrigin; rejection_reasons: string[]; overridden: boolean })[];
+    if (!row) return undefined;
+    return {
+      id: row.id,
+      provider: row.provider,
+      status: row.status,
+      origin: row.origin,
+      rejectionReasons: row.rejection_reasons,
+      providerUpdatedAt: row.provider_updated_at,
+      providerNextUpdateAt: row.provider_next_update_at,
+      fetchedAt: row.fetched_at,
+      rates: new Map((row.rates ?? []).map((entry) => [entry.currency_code.trim(), dec(entry.rate)])),
+      overridden: row.overridden,
+    };
+  }
+
   async findAccepted(snapshotId: string): Promise<RateSnapshot | undefined> {
     const [row] = (await this.unitOfWork.manager.query(
       `SELECT snapshot.id, snapshot.provider, snapshot.provider_updated_at, snapshot.provider_next_update_at,
@@ -121,7 +198,7 @@ export class ExchangeRateSnapshotRepository {
     const [row] = (await this.unitOfWork.manager.query(
       `SELECT id, fetched_at, provider_updated_at, provider_next_update_at, status
          FROM exchange_rate_snapshots
-        WHERE provider = $1
+        WHERE provider = $1 AND origin = 'PROVIDER'
         ORDER BY fetched_at DESC, provider_updated_at DESC NULLS LAST, id DESC
         LIMIT 1`,
       [provider],

@@ -17,6 +17,28 @@ export enum AuditAction {
   RECONCILIATION_BREAK_DETECTED = 'RECONCILIATION_BREAK_DETECTED',
   RECONCILIATION_BREAK_ESCALATED = 'RECONCILIATION_BREAK_ESCALATED',
   RECONCILIATION_BREAK_RESOLVED = 'RECONCILIATION_BREAK_RESOLVED',
+  // Controls (Phase 10): the approval is part of the trail (design §9.2).
+  APPROVAL_REQUESTED = 'APPROVAL_REQUESTED',
+  APPROVAL_APPROVED = 'APPROVAL_APPROVED',
+  APPROVAL_REJECTED = 'APPROVAL_REJECTED',
+  APPROVAL_CANCELLED = 'APPROVAL_CANCELLED',
+  APPROVAL_EXPIRED = 'APPROVAL_EXPIRED',
+  APPROVAL_EXECUTED = 'APPROVAL_EXECUTED',
+  APPROVAL_EXECUTION_FAILED = 'APPROVAL_EXECUTION_FAILED',
+  BREAK_GLASS_USED = 'BREAK_GLASS_USED',
+  BREAK_GLASS_REVIEWED = 'BREAK_GLASS_REVIEWED',
+  BREAK_GLASS_REVIEW_OVERDUE = 'BREAK_GLASS_REVIEW_OVERDUE',
+  ROLE_GRANTED = 'ROLE_GRANTED',
+  ROLE_REVOKED = 'ROLE_REVOKED',
+  USER_SUSPENDED = 'USER_SUSPENDED',
+  USER_REINSTATED = 'USER_REINSTATED',
+  CURRENCY_PAIR_CHANGED = 'CURRENCY_PAIR_CHANGED',
+  EXCHANGE_RATE_OVERRIDDEN = 'EXCHANGE_RATE_OVERRIDDEN',
+  PERIOD_CLOSED = 'PERIOD_CLOSED',
+  CORRECTION_POSTED = 'CORRECTION_POSTED',
+  WRITE_OFF_POSTED = 'WRITE_OFF_POSTED',
+  /** Written by `bootstrap_first_administrators` itself (SQL), listed here so the vocabulary is complete. */
+  ADMINISTRATORS_BOOTSTRAPPED = 'ADMINISTRATORS_BOOTSTRAPPED',
 }
 
 export enum AuditSubjectType {
@@ -25,6 +47,9 @@ export enum AuditSubjectType {
   FLOW = 'FLOW',
   SETTLEMENT_BATCH = 'SETTLEMENT_BATCH',
   RECONCILIATION_BREAK = 'RECONCILIATION_BREAK',
+  APPROVAL = 'APPROVAL',
+  EXCHANGE_RATE_SNAPSHOT = 'EXCHANGE_RATE_SNAPSHOT',
+  TRANSACTION = 'TRANSACTION',
 }
 
 export type AuditActor =
@@ -56,6 +81,23 @@ export interface AuditState {
   /** A settlement batch's outcome (`POSTED` / `REJECTED`) and why it was refused. */
   readonly settlementStatus?: string;
   readonly rejectionCode?: string;
+  /** Controls (Phase 10): an approval's type, status and links — ids and codes only. */
+  readonly actionType?: string;
+  readonly approvalStatus?: string;
+  readonly approvalId?: string;
+  readonly breakGlass?: boolean;
+  readonly breakId?: string;
+  /** A currency pair's pricing before/after a SPREAD_CHANGE (not personal data). */
+  readonly currencyPair?: string;
+  readonly spreadBasisPoints?: number;
+  readonly minimumSourceAmountMinor?: string;
+  /** A rate override's snapshots. */
+  readonly snapshotId?: string;
+  readonly overriddenSnapshotId?: string;
+  /** A closed period, `[start, end)`. */
+  readonly periodStart?: string;
+  readonly periodEnd?: string;
+  readonly periodLockId?: string;
 }
 
 export interface AuditEntry {

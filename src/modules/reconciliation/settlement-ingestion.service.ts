@@ -358,15 +358,33 @@ export class SettlementIngestionService {
 
   private async deposits(batch: ProviderSettlementBatch): Promise<Map<string, KnownDeposit>> {
     const rows = (await this.unitOfWork.manager.query(
-      `SELECT flow_id, provider_payment_id, currency_code, amount_minor::text AS amount_minor,
-              funding_transaction_id IS NOT NULL AS posted
-         FROM funding_payments WHERE provider = $1 AND provider_payment_id = ANY($2::text[])`,
+      `SELECT funding_payments.flow_id, funding_payments.provider_payment_id, funding_payments.currency_code,
+              funding_payments.amount_minor::text AS amount_minor, funding_payments.funding_transaction_id IS NOT NULL AS posted,
+              (SELECT sum(ledger_entries.amount_minor)::text FROM ledger_entries
+                 JOIN accounts ON accounts.id = ledger_entries.account_id
+                WHERE ledger_entries.transaction_id = funding_payments.chargeback_transaction_id
+                  AND accounts.code LIKE 'PSP_RECEIVABLE:%' AND ledger_entries.direction = 'CREDIT') AS booked_chargeback_minor
+         FROM funding_payments WHERE funding_payments.provider = $1 AND funding_payments.provider_payment_id = ANY($2::text[])`,
       [this.providerName, [...new Set(batch.lines.map((line) => line.paymentId))]],
-    )) as { flow_id: string; provider_payment_id: string; currency_code: string; amount_minor: string; posted: boolean }[];
+    )) as {
+      flow_id: string;
+      provider_payment_id: string;
+      currency_code: string;
+      amount_minor: string;
+      posted: boolean;
+      booked_chargeback_minor: string | null;
+    }[];
     return new Map(
       rows.map((row) => [
         row.provider_payment_id,
-        { flowId: row.flow_id, providerPaymentId: row.provider_payment_id, currency: row.currency_code, amountMinor: BigInt(row.amount_minor), posted: row.posted },
+        {
+          flowId: row.flow_id,
+          providerPaymentId: row.provider_payment_id,
+          currency: row.currency_code,
+          amountMinor: BigInt(row.amount_minor),
+          posted: row.posted,
+          ...(row.booked_chargeback_minor !== null ? { bookedChargebackMinor: BigInt(row.booked_chargeback_minor) } : {}),
+        },
       ]),
     );
   }

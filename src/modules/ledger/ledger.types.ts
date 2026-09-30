@@ -109,6 +109,13 @@ export interface TransactionDraft {
   readonly externalReference?: string;
   /** Required for REVERSAL and CORRECTION, forbidden otherwise. Links both directions. */
   readonly correctsTransactionId?: string;
+  /**
+   * Which part of an INTERNAL original (`user_id` NULL, e.g. a SETTLEMENT) a CORRECTION corrects, e.g.
+   * `line:{settlementBatchLineId}` (Phase 10 plan §A.1). Required for a CORRECTION of an internal original,
+   * refused otherwise. Each subject is corrected at most once; the original's `corrected_by` link stays unset
+   * (the reverse link lives on the corrected subject).
+   */
+  readonly correctionSubject?: string;
   readonly idempotencyKey?: string;
   readonly settlementTime?: Date;
   readonly metadata?: Record<string, unknown>;

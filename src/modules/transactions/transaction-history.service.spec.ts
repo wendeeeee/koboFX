@@ -70,7 +70,7 @@ describe('TransactionHistoryService', () => {
     const rows = [1, 2, 3].map(fundingRow);
     const { service, repository } = setup(rows);
     const page = await service.list(SCOPE, { limit: '2' });
-    expect(repository.page).toHaveBeenCalledWith(SCOPE, expect.objectContaining({ sort: HistorySort.VALUE_TIME }), null, 3);
+    expect(repository.page).toHaveBeenCalledWith({ ...SCOPE, view: 'USER' }, expect.objectContaining({ sort: HistorySort.VALUE_TIME }), null, 3);
     expect(page.items.map((item) => item.reference)).toEqual(['funding:1', 'funding:2']);
     const query = repository.page.mock.calls[0][1];
     expect(decodeCursor(page.nextCursor!, query)).toEqual({ timeMicroseconds: BigInt(rows[1].position_microseconds), id: rows[1].id });
@@ -80,7 +80,7 @@ describe('TransactionHistoryService', () => {
     const { service, repository } = setup([fundingRow(1)]);
     const page = await service.list(SCOPE, {});
     expect(page.nextCursor).toBeNull();
-    expect(repository.page).toHaveBeenCalledWith(SCOPE, expect.anything(), null, DEFAULT_HISTORY_LIMIT + 1);
+    expect(repository.page).toHaveBeenCalledWith({ ...SCOPE, view: 'USER' }, expect.anything(), null, DEFAULT_HISTORY_LIMIT + 1);
   });
 
   it('passes the decoded position, and the normalised query (sort, type, currency, µs bounds)', async () => {

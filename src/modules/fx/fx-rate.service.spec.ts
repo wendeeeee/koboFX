@@ -59,7 +59,7 @@ function setup(options: { localCacheMilliseconds?: number } = {}) {
     },
   } as unknown as RateCache;
   const snapshots = {
-    latestAccepted: async () => {
+    latestServable: async () => {
       calls.databaseReads += 1;
       return state.database;
     },

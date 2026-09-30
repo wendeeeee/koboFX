@@ -10,11 +10,12 @@ import { WebhookProcessor } from './modules/payments/webhooks/webhook-processor'
 import { ReconciliationScheduler } from './modules/reconciliation/reconciliation-scheduler';
 import { ReservationSweeper } from './modules/reservations/reservation-sweeper';
 import { WorkerModule } from './worker.module';
+import { AdminMonitor } from './modules/admin/break-glass/admin-monitor';
 
 async function bootstrap(): Promise<void> {
   const worker = await NestFactory.createApplicationContext(WorkerModule.forRoot(), { bufferLogs: true });
   worker.useLogger(worker.get(Logger));
-  const loops = [worker.get(OutboxPoller), worker.get(FlowResumer), worker.get(WebhookProcessor), worker.get(ReservationSweeper), worker.get(FxPoller), worker.get(ReconciliationScheduler)];
+  const loops = [worker.get(OutboxPoller), worker.get(FlowResumer), worker.get(WebhookProcessor), worker.get(ReservationSweeper), worker.get(FxPoller), worker.get(ReconciliationScheduler), worker.get(AdminMonitor)];
   for (const loop of loops) loop.start();
 
   const shutdown = async () => {

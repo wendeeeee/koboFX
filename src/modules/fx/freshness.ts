@@ -33,6 +33,8 @@ export interface FreshnessPolicy {
 export interface SnapshotTimes {
   readonly providerUpdatedAt: Date;
   readonly providerNextUpdateAt: Date;
+  /** `manual` (Phase 10): valid until its next-update time exactly — an approved validity gets no grace. */
+  readonly provider?: string;
 }
 
 export interface Freshness {
@@ -45,8 +47,8 @@ export interface Freshness {
 
 export function freshnessOf(snapshot: SnapshotTimes, now: Date, policy: FreshnessPolicy): Freshness {
   const ageMilliseconds = Math.max(0, now.getTime() - snapshot.providerUpdatedAt.getTime());
-  const isCurrentPublication =
-    now.getTime() < snapshot.providerNextUpdateAt.getTime() + policy.publicationGraceSeconds * 1000;
+  const graceSeconds = snapshot.provider === 'manual' ? 0 : policy.publicationGraceSeconds;
+  const isCurrentPublication = now.getTime() < snapshot.providerNextUpdateAt.getTime() + graceSeconds * 1000;
   let tier: RateTier;
   if (isCurrentPublication && ageMilliseconds <= policy.executableMaximumAgeSeconds * 1000) tier = RateTier.EXECUTABLE;
   else if (ageMilliseconds <= policy.displayMaximumAgeSeconds * 1000) tier = RateTier.DISPLAY_ONLY;

@@ -215,6 +215,9 @@ export class FundingFlow implements FlowDefinition, OnModuleInit {
     await runtime.checkpoint(FlowCheckpoint.AFTER_EXTERNAL_CALL);
 
     const chargeback = result.status === ProviderPaymentStatus.CHARGED_BACK ? result.chargeback : null;
+    // Already booked — by an approved partial-chargeback CORRECTION (Phase 10): nothing left for the flow to do.
+    // (A full chargeback moves the flow to REVERSED and never gets here again.)
+    if (chargeback && payment.chargebackTransactionId) return { kind: 'IDLE', state };
     if (!chargeback) {
       if (flow.completedAt) return { kind: 'IDLE', state };
       return this.progress(flow, runtime, state, { providerStatus: result.status }, 0, true);

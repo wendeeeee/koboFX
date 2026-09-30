@@ -138,6 +138,21 @@ export class RefreshTokenService {
     });
   }
 
+  /**
+   * Revoke every live session of a user (an approved suspension, Phase 10). Access tokens already die on
+   * the next request (status is re-read); this ends the refresh side too. Returns how many were revoked.
+   */
+  async revokeAllForUser(userId: string, reason: RefreshTokenRevocationReason, actor: AuditActor): Promise<number> {
+    return this.unitOfWork.run(async (manager) => {
+      const families = (await manager.query(
+        `SELECT id FROM refresh_token_families WHERE user_id = $1 AND revoked_at IS NULL ORDER BY id FOR UPDATE`,
+        [userId],
+      )) as { id: string }[];
+      for (const family of families) await this.revokeLocked(manager, family.id, reason, actor);
+      return families.length;
+    });
+  }
+
   private async revokeLocked(
     manager: EntityManager,
     familyId: string,

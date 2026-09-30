@@ -8,7 +8,8 @@
     "node": ">=20"
   },
   "scripts": {
-    "build": "tsc -p tsconfig.build.json",
+    "build": "tsc -p tsconfig.build.json && node scripts/stamp-build.js",
+    "admin:bootstrap": "ts-node scripts/bootstrap-administrators.ts",
     "start": "node dist/main.js",
     "start:dev": "ts-node src/main.ts",
     "start:worker": "node dist/worker.js",

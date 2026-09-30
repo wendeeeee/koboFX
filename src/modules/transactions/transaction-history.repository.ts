@@ -8,11 +8,19 @@ import { HistoryRow } from './transaction.view';
 
 /**
  * Whose history, and how much of it (design §7.8, §14 `transactions/`). Every query filters by
- * `userId` in SQL. Phase 10's admin views reuse this repository with another scope; the user
- * scope is the only one today.
+ * `userId` in SQL, in both views.
+ *
+ * - `USER` (the default): the user's own legs only, no internal fields (Phase 8 decisions 5, 11).
+ * - `ADMIN` (Phase 10, `/admin/users/:userId/transactions`): the SAME user's rows, plus every leg of each
+ *   (internal accounts by code and bucket), `metadata`, `external_reference`, the correction subject and
+ *   links to internal transactions by reference. Never another user's data: a leg on another user's account
+ *   fails loudly (`INVARIANT_VIOLATION`), as does a link to another user's transaction.
  */
+export type HistoryView = 'USER' | 'ADMIN';
+
 export interface HistoryScope {
   readonly userId: string;
+  readonly view?: HistoryView;
 }
 
 export interface HistoryStatement {
@@ -75,7 +83,7 @@ export class TransactionHistoryRepository {
     // Each branch is ordered and limited on its own index; the merge only ever sees ≤ 2·size rows.
     const page = `SELECT * FROM (${branches.map((branch) => `(${branch})`).join('\nUNION ALL\n')}) AS candidates
       ORDER BY sort_time DESC, id DESC LIMIT ${size}`;
-    return this.select(parameters, user, page);
+    return this.select(parameters, user, page, scope.view ?? 'USER');
   }
 
   /** The exact statement `find()` runs. */
@@ -99,7 +107,7 @@ export class TransactionHistoryRepository {
       branches.push(`SELECT 'TRANSACTION'::text AS source, transactions.id, transactions.value_time AS sort_time
                        FROM transactions WHERE transactions.id = ${id}::uuid AND transactions.user_id = ${user}`);
     }
-    return this.select(parameters, user, branches.join('\nUNION ALL\n'));
+    return this.select(parameters, user, branches.join('\nUNION ALL\n'), scope.view ?? 'USER');
   }
 
   private async run(statement: HistoryStatement): Promise<HistoryRow[]> {
@@ -156,8 +164,44 @@ export class TransactionHistoryRepository {
              LIMIT ${size}`;
   }
 
-  /** The one projection, list and detail alike. Every join is scoped by the caller again. */
-  private select(parameters: Parameters, user: string, page: string): HistoryStatement {
+  /**
+   * The one projection, list and detail alike. Every join is scoped by the caller again. A correction may link
+   * an INTERNAL transaction (a settlement, Phase 10 plan §A.2): the user view learns only that it is internal
+   * (a boolean — never its reference or content); the admin view sees its reference.
+   */
+  private select(parameters: Parameters, user: string, page: string, view: HistoryView): HistoryStatement {
+    const linkScope = (alias: string) => (view === 'ADMIN' ? `(${alias}.user_id = ${user} OR ${alias}.user_id IS NULL)` : `${alias}.user_id = ${user}`);
+    const adminColumns =
+      view === 'ADMIN'
+        ? `,
+             transactions.metadata,
+             transactions.external_reference,
+             transactions.correction_subject,
+             all_legs.legs AS all_legs`
+        : '';
+    const adminJoins =
+      view === 'ADMIN'
+        ? `
+        LEFT JOIN LATERAL (
+          -- Every leg (admin only): internal accounts by code and bucket; a user leg says whose it is.
+          SELECT json_agg(json_build_object(
+                   'accountCode', accounts.code,
+                   'bucket', accounts.bucket,
+                   'owner', CASE WHEN accounts.wallet_id IS NULL THEN 'INTERNAL'
+                                 WHEN wallets.user_id = ${user} THEN 'USER' ELSE 'OTHER_USER' END,
+                   'currency', ledger_entries.currency_code,
+                   'minorUnit', currencies.minor_unit,
+                   'direction', ledger_entries.direction,
+                   'amount', ledger_entries.amount_minor::text,
+                   'balanceAfter', ledger_entries.balance_after_minor::text
+                 ) ORDER BY ledger_entries.id) AS legs
+            FROM ledger_entries
+            JOIN accounts ON accounts.id = ledger_entries.account_id
+            LEFT JOIN wallets ON wallets.id = accounts.wallet_id
+            JOIN currencies ON currencies.code = ledger_entries.currency_code
+           WHERE ledger_entries.transaction_id = transactions.id
+        ) AS all_legs ON TRUE`
+        : '';
     const sql = `
       WITH page AS (${page})
       SELECT page.source,
@@ -188,17 +232,20 @@ export class TransactionHistoryRepository {
              corrects.type::text AS corrects_type,
              corrected_by.reference AS corrected_by_reference,
              corrected_by.type::text AS corrected_by_type,
+             EXISTS (SELECT 1 FROM transactions AS internal_original
+                      WHERE internal_original.id = transactions.corrects_transaction_id AND internal_original.user_id IS NULL)
+               AS corrects_internal,
              legs.legs,
              funding_payments.currency_code AS requested_currency,
              requested_currency.minor_unit AS requested_minor_unit,
-             funding_payments.amount_minor::text AS requested_amount
+             funding_payments.amount_minor::text AS requested_amount${adminColumns}
         FROM page
         LEFT JOIN transactions
           ON page.source = 'TRANSACTION' AND transactions.id = page.id AND transactions.user_id = ${user}
         LEFT JOIN transactions AS corrects
-          ON corrects.id = transactions.corrects_transaction_id AND corrects.user_id = ${user}
+          ON corrects.id = transactions.corrects_transaction_id AND ${linkScope('corrects')}
         LEFT JOIN transactions AS corrected_by
-          ON corrected_by.id = transactions.corrected_by_transaction_id AND corrected_by.user_id = ${user}
+          ON corrected_by.id = transactions.corrected_by_transaction_id AND ${linkScope('corrected_by')}
         LEFT JOIN funding_payments AS settled_funding
           ON transactions.type = 'FUNDING' AND settled_funding.funding_transaction_id = transactions.id
          AND settled_funding.user_id = ${user}
@@ -221,7 +268,7 @@ export class TransactionHistoryRepository {
             JOIN wallets ON wallets.id = accounts.wallet_id AND wallets.user_id = ${user}
             JOIN currencies ON currencies.code = ledger_entries.currency_code
            WHERE ledger_entries.transaction_id = transactions.id
-        ) AS legs ON TRUE
+        ) AS legs ON TRUE${adminJoins}
        ORDER BY page.sort_time DESC, page.id DESC`;
     return { sql, parameters: parameters.values };
   }

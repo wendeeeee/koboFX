@@ -1,7 +1,9 @@
-import { Controller, Get, HttpStatus, Res } from '@nestjs/common';
+import { Controller, Get, HttpStatus, Inject, Res } from '@nestjs/common';
 import type { Response } from 'express';
 import { DataSource } from 'typeorm';
 import { Public, SkipRateLimit } from '../../common/decorators';
+import { APP_CONFIG } from '../../config/config.module';
+import { AppConfig } from '../../config/configuration';
 import { RedisService } from '../../redis/redis.service';
 import { RateTier, ageSeconds } from '../fx/freshness';
 import { FxRateService } from '../fx/fx-rate.service';
@@ -21,8 +23,14 @@ export interface FxReadiness {
   readonly asOf: string | null;
 }
 
+/** The running build (design §9.4 "the build stamps a git SHA into /health"): no runtime git. */
+export interface VersionReport {
+  readonly gitSha: string;
+}
+
 export interface ReadinessReport {
   readonly status: 'ok' | 'unavailable';
+  readonly version: VersionReport;
   readonly checks: { readonly postgres: ComponentStatus; readonly redis: ComponentStatus };
   readonly fx: FxReadiness;
 }
@@ -46,8 +54,8 @@ async function probe(check: () => Promise<unknown>): Promise<ComponentStatus> {
 
 /**
  * Liveness and readiness (design §12, §16). Public and never rate-limited: probes
- * poll them. Rate freshness is reported (never failing); the build revision joins
- * readiness in its own phase.
+ * poll them. Rate freshness is reported (never failing); so is the build's git SHA (Phase 10,
+ * design §9.4), on both probes.
  */
 @Public()
 @SkipRateLimit()
@@ -57,11 +65,12 @@ export class HealthController {
     private readonly dataSource: DataSource,
     private readonly redis: RedisService,
     private readonly rates: FxRateService,
+    @Inject(APP_CONFIG) private readonly config: AppConfig,
   ) {}
 
   @Get('live')
-  live(): { status: 'ok' } {
-    return { status: 'ok' };
+  live(): { status: 'ok'; version: VersionReport } {
+    return { status: 'ok', version: this.version() };
   }
 
   @Get('ready')
@@ -72,7 +81,11 @@ export class HealthController {
     ]);
     const healthy = postgres === 'up' && redis === 'up';
     response.status(healthy ? HttpStatus.OK : HttpStatus.SERVICE_UNAVAILABLE);
-    return { status: healthy ? 'ok' : 'unavailable', checks: { postgres, redis }, fx: await this.fxReadiness() };
+    return { status: healthy ? 'ok' : 'unavailable', version: this.version(), checks: { postgres, redis }, fx: await this.fxReadiness() };
+  }
+
+  private version(): VersionReport {
+    return { gitSha: this.config.admin.buildGitSha };
   }
 
   private async fxReadiness(): Promise<FxReadiness> {

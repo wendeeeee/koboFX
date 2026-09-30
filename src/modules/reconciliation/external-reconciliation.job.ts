@@ -544,24 +544,29 @@ export class ExternalReconciliationJob {
 
   /**
    * `PSP_RECEIVABLE` per currency (every bucket) must equal what the deposits' own facts say is
-   * owed to us: + each booked deposit, − each settled, − each reversed, + each chargeback the PSP
-   * deducted. Measured in ONE read-only snapshot, so a concurrent posting cannot fake a gap.
+   * owed to us: + each booked deposit, − each settled, − what each booked chargeback took from the receivable
+   * (all of it for a reversal, the disputed part for a partial CORRECTION), + each deduction the PSP made. Measured in ONE read-only snapshot, so a concurrent posting cannot fake a gap.
    */
   private async proveReceivables(run: ClaimedRun, seen: RunLedger): Promise<void> {
     const rows = await this.unitOfWork.runReadOnlySnapshot(
       async (manager) =>
         (await manager.query(
           `WITH expected AS (
+             -- Each term is what the ledger actually moved on the receivable for that fact (Phase 10: a partial
+             -- chargeback moves only its disputed part; a full one, and every settlement, the whole amount).
              SELECT funding_payments.currency_code AS currency,
-                    sum(funding_payments.amount_minor * (
-                      1
-                      - CASE WHEN funding_payments.settlement_batch_line_id IS NOT NULL THEN 1 ELSE 0 END
-                      - CASE WHEN funding_payments.chargeback_transaction_id IS NOT NULL THEN 1 ELSE 0 END
-                      + CASE WHEN EXISTS (SELECT 1 FROM settlement_batch_lines
-                                           WHERE settlement_batch_lines.flow_id = funding_payments.flow_id
-                                             AND settlement_batch_lines.line_type = 'CHARGEBACK'
-                                             AND settlement_batch_lines.attribution = 'ATTRIBUTED') THEN 1 ELSE 0 END
-                    )) AS minor
+                    sum(
+                      funding_payments.amount_minor
+                      - CASE WHEN funding_payments.settlement_batch_line_id IS NOT NULL THEN funding_payments.amount_minor ELSE 0 END
+                      - COALESCE((SELECT sum(ledger_entries.amount_minor) FROM ledger_entries
+                                   JOIN accounts ON accounts.id = ledger_entries.account_id
+                                  WHERE ledger_entries.transaction_id = funding_payments.chargeback_transaction_id
+                                    AND accounts.code LIKE 'PSP_RECEIVABLE:%' AND ledger_entries.direction = 'CREDIT'), 0)
+                      + COALESCE((SELECT sum(settlement_batch_lines.amount_minor) FROM settlement_batch_lines
+                                  WHERE settlement_batch_lines.flow_id = funding_payments.flow_id
+                                    AND settlement_batch_lines.line_type = 'CHARGEBACK'
+                                    AND settlement_batch_lines.attribution = 'ATTRIBUTED'), 0)
+                    ) AS minor
                FROM funding_payments
               WHERE funding_payments.funding_transaction_id IS NOT NULL
               GROUP BY funding_payments.currency_code

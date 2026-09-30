@@ -186,8 +186,14 @@ describe('Ledger schema: immutability and guards (real Postgres 16)', () => {
   });
 
   describe('period_locks and templates', () => {
-    it('fx_app can add a period lock but never edit or remove one', async () => {
-      await app.query(
+    it('fx_app can neither add, edit nor remove a period lock (Phase 10: closing a period is four-eyes)', async () => {
+      await expect(
+        app.query(
+          `INSERT INTO period_locks (period_start, period_end, locked_by, reason)
+           VALUES ('2020-01-01', '2020-02-01', 'operator:auditor', 'January 2020 reported')`,
+        ),
+      ).rejects.toThrow(/permission denied/);
+      await owner.query(
         `INSERT INTO period_locks (period_start, period_end, locked_by, reason)
          VALUES ('2020-01-01', '2020-02-01', 'operator:auditor', 'January 2020 reported')`,
       );
@@ -197,7 +203,7 @@ describe('Ledger schema: immutability and guards (real Postgres 16)', () => {
 
     it('a period lock must be a non-empty interval', async () => {
       await expect(
-        app.query(
+        owner.query(
           `INSERT INTO period_locks (period_start, period_end, locked_by, reason) VALUES ('2020-02-01', '2020-02-01', 'operator:a', 'x')`,
         ),
       ).rejects.toThrow(/period_locks_period_ordered/);

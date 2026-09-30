@@ -26,6 +26,7 @@ import { TradingModule } from './modules/trading/trading.module';
 import { TransactionsModule } from './modules/transactions/transactions.module';
 import { WalletsModule } from './modules/wallets/wallets.module';
 import { ReconciliationModule } from './modules/reconciliation/reconciliation.module';
+import { AdminModule } from './modules/admin/admin.module';
 import { RedisModule } from './redis/redis.module';
 
 /** Log hygiene (design §9.1): secrets and OTPs never reach the log. */
@@ -98,9 +99,10 @@ export class AppModule {
         FxModule,
         TradingModule,
         TransactionsModule,
-        // No HTTP surface (admin endpoints are Phase 10); present so one process wiring serves the
-        // worker, the tests and Phase 10's admin controller alike. Its loop runs only in the worker.
+        // No HTTP surface of its own; its loop runs only in the worker. The admin module reads it.
         ReconciliationModule,
+        // Controls (Phase 10): `/admin/*`, approvals and four-eyes, positions, recertification.
+        AdminModule,
         HealthModule,
       ],
       // Order matters: throttle first (before any token work), then authenticate,

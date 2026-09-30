@@ -53,6 +53,10 @@ import { ReconciliationRun, ReconciliationRunRepository } from '../../src/module
 import { ReconciliationRunKind } from '../../src/modules/reconciliation/reconciliation-schedule';
 import { ReconciliationScheduler, RunResult } from '../../src/modules/reconciliation/reconciliation-scheduler';
 import { SettlementIngestionService } from '../../src/modules/reconciliation/settlement-ingestion.service';
+import { AdminMetrics } from '../../src/modules/admin/admin-metrics';
+import { ApprovalRepository } from '../../src/modules/admin/approvals/approval.repository';
+import { ApprovalService } from '../../src/modules/admin/approvals/approval.service';
+import { AdminMonitor } from '../../src/modules/admin/break-glass/admin-monitor';
 import { CapturingEmailSender, TestClock } from './auth-test-doubles';
 import { paymentProviderTestSecrets } from './authentication-secrets';
 import { ScriptedFlowCheckpoints } from './flow-test-doubles';
@@ -175,6 +179,35 @@ export interface ReconciliationHarness {
   runRow(kind: ReconciliationRunKind, periodKey: string): Promise<ReconciliationRun | null>;
 }
 
+/** The first administrators (bootstrap) and more admins granted through real approvals. */
+export interface Administrators {
+  readonly admin: SignedUpUser;
+  readonly security: SignedUpUser;
+}
+
+/**
+ * Controls (Phase 10), present with `{ payments }`: `/admin/*` through the real HTTP pipeline (guards, barrier,
+ * rate limits), the one-time bootstrap over the OWNER's connection, and the services for property tests.
+ */
+export interface AdminHarness {
+  readonly approvals: ApprovalService;
+  readonly repository: ApprovalRepository;
+  readonly metrics: AdminMetrics;
+  readonly monitor: AdminMonitor;
+  /** Two fresh verified users → the first ADMIN and SECURITY officer (`bootstrap_first_administrators`, once per database). */
+  bootstrap(): Promise<Administrators>;
+  /** A fresh verified user made `role` by a real ROLE_CHANGE: `requester` (an ADMIN) asks, `approver` (SECURITY) approves. */
+  grant(role: 'ADMIN' | 'SECURITY', requester: SignedUpUser, approver: SignedUpUser): Promise<SignedUpUser>;
+  /** `POST /admin/approvals`. */
+  request(user: SignedUpUser, body: Record<string, unknown>, idempotencyKey?: string): request.Test;
+  /** `POST /admin/approvals/:id/{approve|reject|cancel|review}`. */
+  decide(user: SignedUpUser, approvalId: string, decision: 'approve' | 'reject' | 'cancel' | 'review', body?: Record<string, unknown>, idempotencyKey?: string): request.Test;
+  /** `GET /admin/...` (path after `/admin/`). */
+  get(user: SignedUpUser, path: string): request.Test;
+  /** Request, then approve by another admin: the executed (or refused) approval. Fails the test on any non-2xx. */
+  requestAndApprove(requester: SignedUpUser, approver: SignedUpUser, body: Record<string, unknown>): Promise<Record<string, unknown>>;
+}
+
 /** Present when the harness was started with `{ payments }`. */
 export interface PaymentsHarness {
   readonly psp: MockPsp;
@@ -200,6 +233,7 @@ export interface PaymentsHarness {
    */
   drive(options?: { rounds?: number; deliverWebhooks?: boolean }): Promise<void>;
   readonly reconciliation: ReconciliationHarness;
+  readonly admin: AdminHarness;
 }
 
 export interface LedgerHarness {
@@ -394,18 +428,66 @@ export async function startLedgerHarness(
         liveBreaks: () => breaks.live(),
         runRow: (kind, periodKey) => runs.find(kind, periodKey),
       };
+      const adminPath = (path: string) => `/${API_PREFIX}/admin/${path}`;
+      const signUp = () => {
+        const next = signUpQueue.then(signUpOne, signUpOne);
+        signUpQueue = next.catch(() => undefined);
+        return next;
+      };
+      const adminRequest = (user: SignedUpUser, body: Record<string, unknown>, idempotencyKey = randomUUID()) =>
+        http().post(adminPath('approvals')).set('Authorization', `Bearer ${user.accessToken}`).set('Idempotency-Key', idempotencyKey).send(body);
+      const decide: AdminHarness['decide'] = (user, approvalId, decision, body = {}, idempotencyKey = randomUUID()) =>
+        http()
+          .post(adminPath(`approvals/${approvalId}/${decision}`))
+          .set('Authorization', `Bearer ${user.accessToken}`)
+          .set('Idempotency-Key', idempotencyKey)
+          .send(body);
+      const requestAndApprove: AdminHarness['requestAndApprove'] = async (requester, approver, body) => {
+        const requested = await adminRequest(requester, body);
+        if (requested.status !== 201) throw new Error(`request: ${requested.status} ${JSON.stringify(requested.body)}`);
+        const approved = await decide(approver, (requested.body as { approvalId: string }).approvalId, 'approve');
+        if (approved.status !== 200) throw new Error(`approve: ${approved.status} ${JSON.stringify(approved.body)}`);
+        return approved.body as Record<string, unknown>;
+      };
+      const admin: AdminHarness = {
+        approvals: moduleRef.get(ApprovalService),
+        repository: moduleRef.get(ApprovalRepository),
+        metrics: moduleRef.get(AdminMetrics),
+        monitor: moduleRef.get(AdminMonitor),
+        async bootstrap() {
+          const [first, second] = [await signUp(), await signUp()];
+          const owner = await db.ownerClient();
+          try {
+            await owner.query(`SELECT bootstrap_first_administrators($1, $2)`, [first.userId, second.userId]);
+          } finally {
+            await owner.end();
+          }
+          return { admin: first, security: second };
+        },
+        async grant(role, requester, approver) {
+          const user = await signUp();
+          const approval = await requestAndApprove(requester, approver, {
+            actionType: 'ROLE_CHANGE',
+            payload: { userId: user.userId, role, operation: 'GRANT' },
+            reason: `grant ${role} (test)`,
+          });
+          if (approval.status !== 'EXECUTED') throw new Error(`grant(): ${JSON.stringify(approval)}`);
+          return user;
+        },
+        request: adminRequest,
+        decide,
+        get: (user, path) => http().get(adminPath(path)).set('Authorization', `Bearer ${user.accessToken}`),
+        requestAndApprove,
+      };
       payments = {
         reconciliation,
+        admin,
         psp,
         runner,
         resumer,
         processor,
         checkpoints,
-        signUp() {
-          const next = signUpQueue.then(signUpOne, signUpOne);
-          signUpQueue = next.catch(() => undefined);
-          return next;
-        },
+        signUp,
         fund(user, body, idempotencyKey = randomUUID()) {
           return http()
             .post(`/${API_PREFIX}/wallet/fund`)

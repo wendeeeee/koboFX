@@ -6,7 +6,7 @@ import { HistoryQuery, HistorySort, decodeCursor, encodeCursor } from './history
 import { parseInstantMicroseconds } from './history-time';
 import { parseTransactionLookup } from './reference';
 import { HistoryScope, TransactionHistoryRepository } from './transaction-history.repository';
-import { TransactionDetailView, TransactionListItemView, detailView, listItemView } from './transaction.view';
+import { AdminTransactionView, TransactionDetailView, TransactionListItemView, adminTransactionView, detailView, listItemView } from './transaction.view';
 import { TransactionNotFoundError } from './transactions.errors';
 
 export const DEFAULT_HISTORY_LIMIT = 50;
@@ -30,6 +30,24 @@ export class TransactionHistoryService {
   ) {}
 
   async list(scope: HistoryScope, parameters: ListTransactionsQuery): Promise<TransactionPage> {
+    const { rows, nextCursor } = await this.rows({ ...scope, view: 'USER' }, parameters);
+    return { items: rows.map(listItemView), nextCursor };
+  }
+
+  /** A user's history as an administrator sees it (Phase 10): the same rows, every leg, the internal fields. */
+  async listForAdmin(userId: string, parameters: ListTransactionsQuery): Promise<{ items: AdminTransactionView[]; nextCursor: string | null }> {
+    const { rows, nextCursor } = await this.rows({ userId, view: 'ADMIN' }, parameters);
+    return { items: rows.map(adminTransactionView), nextCursor };
+  }
+
+  async findForAdmin(userId: string, rawReference: string): Promise<AdminTransactionView> {
+    const lookup = parseTransactionLookup(rawReference);
+    const row = await this.repository.find({ userId, view: 'ADMIN' }, lookup);
+    if (!row) throw new TransactionNotFoundError(rawReference);
+    return adminTransactionView(row);
+  }
+
+  private async rows(scope: HistoryScope, parameters: ListTransactionsQuery) {
     const query = this.normalise(parameters);
     // Strict: digits only (parseInt would read "1e2" as 1). The DTO says the same at the edge.
     const limit = parameters.limit === undefined ? DEFAULT_HISTORY_LIMIT : /^[1-9]\d{0,2}$/.test(parameters.limit) ? Number(parameters.limit) : Number.NaN;
@@ -45,12 +63,12 @@ export class TransactionHistoryService {
     const last = pageRows[pageRows.length - 1];
     const nextCursor =
       rows.length > limit && last ? encodeCursor({ timeMicroseconds: BigInt(last.position_microseconds), id: last.id }, query) : null;
-    return { items: pageRows.map(listItemView), nextCursor };
+    return { rows: pageRows, nextCursor };
   }
 
   async find(scope: HistoryScope, rawReference: string): Promise<TransactionDetailView> {
     const lookup = parseTransactionLookup(rawReference);
-    const row = await this.repository.find(scope, lookup);
+    const row = await this.repository.find({ ...scope, view: 'USER' }, lookup);
     if (!row) throw new TransactionNotFoundError(rawReference);
     return detailView(row);
   }

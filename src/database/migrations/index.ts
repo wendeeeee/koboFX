@@ -28,6 +28,14 @@ import { FundingPaymentsSettlement1791158400002 } from './1791158400002-FundingP
 import { CreateReconciliationRuns1791158400003 } from './1791158400003-CreateReconciliationRuns';
 import { CreateReconciliationBreaks1791158400004 } from './1791158400004-CreateReconciliationBreaks';
 import { ReconciliationIndexes1791158400005 } from './1791158400005-ReconciliationIndexes';
+import { AddSecurityRole1791244800000 } from './1791244800000-AddSecurityRole';
+import { CreateApprovals1791244800001 } from './1791244800001-CreateApprovals';
+import { CreateRoleAssignments1791244800002 } from './1791244800002-CreateRoleAssignments';
+import { CurrencyPairChanges1791244800003 } from './1791244800003-CurrencyPairChanges';
+import { ExchangeRateSnapshotOrigin1791244800004 } from './1791244800004-ExchangeRateSnapshotOrigin';
+import { CorrectionSubjects1791244800005 } from './1791244800005-CorrectionSubjects';
+import { PeriodLocksApproval1791244800006 } from './1791244800006-PeriodLocksApproval';
+import { AdminReadIndexes1791244800007 } from './1791244800007-AdminReadIndexes';
 
 /** Explicit, ordered list — no globbing, so the CLI and the test harness run the same set. */
 export const MIGRATIONS = [
@@ -61,4 +69,12 @@ export const MIGRATIONS = [
   CreateReconciliationRuns1791158400003,
   CreateReconciliationBreaks1791158400004,
   ReconciliationIndexes1791158400005,
+  AddSecurityRole1791244800000,
+  CreateApprovals1791244800001,
+  CreateRoleAssignments1791244800002,
+  CurrencyPairChanges1791244800003,
+  ExchangeRateSnapshotOrigin1791244800004,
+  CorrectionSubjects1791244800005,
+  PeriodLocksApproval1791244800006,
+  AdminReadIndexes1791244800007,
 ];
