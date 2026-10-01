@@ -36,6 +36,10 @@ import { ExchangeRateSnapshotOrigin1791244800004 } from './1791244800004-Exchang
 import { CorrectionSubjects1791244800005 } from './1791244800005-CorrectionSubjects';
 import { PeriodLocksApproval1791244800006 } from './1791244800006-PeriodLocksApproval';
 import { AdminReadIndexes1791244800007 } from './1791244800007-AdminReadIndexes';
+import { AddPaystackEnumValues1791331200000 } from './1791331200000-AddPaystackEnumValues';
+import { PaystackFunding1791331200001 } from './1791331200001-PaystackFunding';
+import { PaystackAccountTemplates1791331200002 } from './1791331200002-PaystackAccountTemplates';
+import { ReconciliationRunsProvider1791331200003 } from './1791331200003-ReconciliationRunsProvider';
 
 /** Explicit, ordered list — no globbing, so the CLI and the test harness run the same set. */
 export const MIGRATIONS = [
@@ -77,4 +81,8 @@ export const MIGRATIONS = [
   CorrectionSubjects1791244800005,
   PeriodLocksApproval1791244800006,
   AdminReadIndexes1791244800007,
+  AddPaystackEnumValues1791331200000,
+  PaystackFunding1791331200001,
+  PaystackAccountTemplates1791331200002,
+  ReconciliationRunsProvider1791331200003,
 ];

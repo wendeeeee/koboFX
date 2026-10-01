@@ -2,7 +2,7 @@ import { Logger } from '@nestjs/common';
 import { RandomSource, fullJitterDelayMilliseconds } from '../polling/backoff';
 import { ProviderCallDirection, ProviderCallRecorder, unparsedBody } from './provider-call-recorder';
 import { ProviderRequestRejectedError, ProviderResponseInvalidError, ProviderUnavailableError } from './provider.errors';
-import { REDACTED } from './redaction';
+import { REDACTED, redactJsonTextLosslessly } from './redaction';
 
 /**
  * What a provider's response means, decided by the adapter that knows the provider
@@ -22,6 +22,8 @@ export type ResponseClassification<T> =
   | { readonly outcome: 'DEFINITIVE'; readonly error: string; readonly providerErrorCode: string | null };
 
 export type ResponseClassifier<T> = (status: number, text: string) => ResponseClassification<T>;
+
+export type RecordResponseAs = 'redacted-json' | 'raw-json-text' | 'redacted-lossless-json';
 
 export interface ProviderHttpClientOptions {
   /** Name recorded on every `provider_calls` row. */
@@ -44,9 +46,12 @@ export interface ProviderHttpClientOptions {
   /**
    * How response bodies are recorded: parsed and key-redacted (`redacted-json`, for bodies
    * that may carry sensitive fields), or the raw text as JSONB (`raw-json-text`, for bodies
-   * that carry none and whose numbers must keep every digit — a rate feed).
+   * that carry none and whose numbers must keep every digit — a rate feed), or both
+   * (`redacted-lossless-json`: key-redacted AND every digit kept — a provider sending money as JSON numbers).
    */
-  readonly recordResponseAs?: 'redacted-json' | 'raw-json-text';
+  readonly recordResponseAs?: RecordResponseAs;
+  /** With `redacted-lossless-json`: keys redacted beyond the shared rule (e.g. a customer object). */
+  readonly extraRedactedKeys?: RegExp;
   readonly random?: RandomSource;
   readonly sleep?: (milliseconds: number) => Promise<void>;
   readonly fetch?: typeof fetch;
@@ -73,7 +78,7 @@ export interface ProviderHttpRequest<T> {
   readonly beforeAttempt?: (attempt: number) => Promise<void>;
   readonly classify: ResponseClassifier<T>;
   /** Overrides the client's `recordResponseAs` for this request (e.g. a settlement report's raw text). */
-  readonly recordResponseAs?: 'redacted-json' | 'raw-json-text';
+  readonly recordResponseAs?: RecordResponseAs;
 }
 
 export interface ProviderHttpResponse<T> {
@@ -221,6 +226,10 @@ export class ProviderHttpClient {
     }
     if (recordResponseAs === 'raw-json-text' && text.length > 0) {
       return { responseBodyText: this.scrub(text) };
+    }
+    if (recordResponseAs === 'redacted-lossless-json' && text.length > 0) {
+      const redacted = redactJsonTextLosslessly(text, this.options.extraRedactedKeys);
+      if (redacted !== undefined) return { responseBodyText: this.scrub(redacted) };
     }
     return { responseBody: parsed };
   }

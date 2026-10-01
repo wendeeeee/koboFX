@@ -76,7 +76,7 @@ export class ReconciliationRunRepository {
     const [inserted] = (await manager.query(
       `INSERT INTO reconciliation_runs (kind, period_key, status, attempts, leased_until, lease_token)
        VALUES ($1, $2, 'RUNNING', 1, now() + make_interval(secs => $3), gen_random_uuid())
-       ON CONFLICT (kind, period_key) DO NOTHING
+       ON CONFLICT (kind, (COALESCE(provider, '')), period_key) DO NOTHING
        RETURNING ${COLUMNS}`,
       [kind, periodKey, leaseSeconds],
     )) as RunRow[];
@@ -158,7 +158,7 @@ export class ReconciliationRunRepository {
     await this.unitOfWork.manager.query(
       `INSERT INTO reconciliation_runs (kind, period_key, status, finished_at, summary)
        VALUES ($1, $2, 'MISSED', now(), '{"reason":"no run in this period"}')
-       ON CONFLICT (kind, period_key) DO NOTHING`,
+       ON CONFLICT (kind, (COALESCE(provider, '')), period_key) DO NOTHING`,
       [kind, periodKey],
     );
   }

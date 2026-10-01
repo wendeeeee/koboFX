@@ -275,6 +275,69 @@ describe('loadConfig: FX rates (Phase 6)', () => {
   });
 });
 
+describe('loadConfig: Paystack (PAYSTACK_PLAN.md C5)', () => {
+  // Synthetic keys: the shape of a Paystack key, never a real one.
+  const TEST_KEY = `sk_test_${'0'.repeat(40)}`;
+  const LIVE_KEY = `sk_live_${'0'.repeat(40)}`;
+  const ENABLED = { ...VALID, PAYSTACK_ENABLED: 'true', PAYSTACK_SECRET_KEY: TEST_KEY, PAYSTACK_CALLBACK_URL: 'http://localhost:5173/funding/return' };
+  const production = { ...VALID, NODE_ENV: 'production', BUILD_GIT_SHA: 'abc1234' };
+
+  it('is off by default, with the documented defaults', () => {
+    expect(loadConfig(VALID).paystack).toEqual({
+      enabled: false,
+      name: 'paystack',
+      secretKey: '',
+      baseUrl: 'https://api.paystack.co',
+      callbackUrl: '',
+      currencies: ['NGN'],
+      checkoutWindowMinutes: 30,
+      webhookIpAllowlist: null,
+      requestTimeoutMilliseconds: 5000,
+      initializeTimeoutMilliseconds: 10_000,
+      readRetries: 3,
+    });
+  });
+
+  it('enabled needs a key and a callback URL', () => {
+    expect(loadConfig(ENABLED).paystack).toMatchObject({ enabled: true, secretKey: TEST_KEY });
+    expect(problemsOf({ ...ENABLED, PAYSTACK_SECRET_KEY: undefined }).join()).toMatch(/PAYSTACK_SECRET_KEY is required/);
+    expect(problemsOf({ ...ENABLED, PAYSTACK_CALLBACK_URL: undefined }).join()).toMatch(/PAYSTACK_CALLBACK_URL is required/);
+    expect(problemsOf({ ...ENABLED, PAYSTACK_SECRET_KEY: 'pk_test_abcdefgh12345678' }).join()).toMatch(/PAYSTACK_SECRET_KEY/);
+  });
+
+  it('a live key is refused outside production, a test key in production', () => {
+    expect(problemsOf({ ...ENABLED, PAYSTACK_SECRET_KEY: LIVE_KEY }).join()).toMatch(/live key .* refused outside production/);
+    expect(problemsOf({ ...VALID, PAYSTACK_SECRET_KEY: LIVE_KEY }).join()).toMatch(/live key/);
+    expect(problemsOf({ ...production, PAYSTACK_SECRET_KEY: TEST_KEY }).join()).toMatch(/test key .* refused in production/);
+    expect(
+      problemsOf({ ...production, PAYSTACK_ENABLED: 'true', PAYSTACK_SECRET_KEY: LIVE_KEY, PAYSTACK_CALLBACK_URL: 'http://shop.example.com/r' }).join(),
+    ).toMatch(/PAYSTACK_CALLBACK_URL must be https/);
+  });
+
+  it('the old PAYSTACK_WEBHOOK_URL is refused with the rename, never silently ignored', () => {
+    expect(problemsOf({ ...VALID, PAYSTACK_WEBHOOK_URL: 'https://example.com/x' }).join()).toMatch(/renamed PAYSTACK_CALLBACK_URL/);
+  });
+
+  it('PSP_NAME cannot take the Paystack name; no problem text echoes the key', () => {
+    const problems = problemsOf({ ...ENABLED, PSP_NAME: 'paystack', PAYSTACK_SECRET_KEY: LIVE_KEY }).join();
+    expect(problems).toMatch(/PSP_NAME must not be "paystack"/);
+    expect(problems).not.toContain(LIVE_KEY);
+  });
+
+  it('shares FUNDING_LIMITS: an enabled Paystack currency needs limits; the allowlist is parsed', () => {
+    expect(problemsOf({ ...ENABLED, PAYSTACK_FUNDING_CURRENCIES: 'NGN,USD' }).join()).toMatch(/FUNDING_LIMITS.USD/);
+    const config = loadConfig({
+      ...ENABLED,
+      PAYSTACK_FUNDING_CURRENCIES: 'NGN,USD',
+      FUNDING_LIMITS: '{"NGN":{"minimum":"10000","maximum":"100000000"},"USD":{"minimum":"100","maximum":"100000"}}',
+      PAYSTACK_WEBHOOK_IP_ALLOWLIST: '52.31.139.75,52.49.173.169,52.214.14.220',
+    });
+    expect(config.funding.currencies).toEqual(['NGN']);
+    expect(config.funding.limits.get('USD')).toEqual({ minimumMinor: 100n, maximumMinor: 100000n });
+    expect(config.paystack.webhookIpAllowlist).toEqual(['52.31.139.75', '52.49.173.169', '52.214.14.220']);
+  });
+});
+
 describe('loadConfig: the build git SHA (Phase 10, design §9.4)', () => {
   it('BUILD_GIT_SHA wins; production refuses to boot without one; elsewhere it is `unknown`', () => {
     expect(loadConfig({ ...VALID, BUILD_GIT_SHA: '0b05ca7a7dc00c3f2d059d5bbf5a11239bf384b5' }).admin.buildGitSha).toBe('0b05ca7a7dc00c3f2d059d5bbf5a11239bf384b5');

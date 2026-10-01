@@ -91,14 +91,43 @@ export interface PaymentProviderConfig {
   readonly readRetries: number;
 }
 
+/**
+ * Paystack, the second funding provider (test mode; `PAYSTACK_PLAN.md`). One account, one key: a second account
+ * would be another provider instance, explicitly configured, never guessed.
+ */
+export interface PaystackConfig {
+  /** Off: the routes are not registered (404), the worker never calls Paystack, the spec leaves them out. */
+  readonly enabled: boolean;
+  /** Recorded on every row (`funding_payments.provider`, `webhook_events`, `provider_calls`, runs). */
+  readonly name: 'paystack';
+  /** `sk_test_…` / `sk_live_…`. Sent only as a bearer token; never stored, logged or put in an error. Empty when off. */
+  readonly secretKey: string;
+  readonly baseUrl: string;
+  /** Where the customer's BROWSER returns after paying (a client page, not this API). Carries no authority. */
+  readonly callbackUrl: string;
+  readonly currencies: readonly string[];
+  /** Inside it, a non-success verify answer means "not yet"; after it, `abandoned` / `failed` / not found are final. */
+  readonly checkoutWindowMinutes: number;
+  /** When set, a webhook from any other `req.ip` is stored and refused (fail-closed). */
+  readonly webhookIpAllowlist: readonly string[] | null;
+  /** Per attempt, for reads. */
+  readonly requestTimeoutMilliseconds: number;
+  /** Initialize is sent once: a longer budget makes "accepted but the answer was lost" rarer. */
+  readonly initializeTimeoutMilliseconds: number;
+  readonly readRetries: number;
+}
+
+export const PAYSTACK_PROVIDER_NAME = 'paystack';
+
 export interface FundingLimit {
   readonly minimumMinor: bigint;
   readonly maximumMinor: bigint;
 }
 
 export interface FundingConfig {
-  /** Currencies a user may fund; each must be active and have limits. */
+  /** Currencies a user may fund through the simulated PSP; each must be active and have limits. */
   readonly currencies: readonly string[];
+  /** One limit set for every provider: covers these AND Paystack's currencies. */
   readonly limits: ReadonlyMap<string, FundingLimit>;
 }
 
@@ -232,6 +261,7 @@ export interface AppConfig {
   readonly mail: MailConfig;
   readonly outbox: OutboxConfig;
   readonly paymentProvider: PaymentProviderConfig;
+  readonly paystack: PaystackConfig;
   readonly funding: FundingConfig;
   readonly conversion: ConversionConfig;
   readonly flows: FlowConfig;
@@ -334,6 +364,22 @@ const envSchema = Joi.object({
   PSP_WEBHOOK_TOLERANCE_SECONDS: Joi.number().integer().min(30).max(900).default(300),
   PSP_REQUEST_TIMEOUT_MILLISECONDS: Joi.number().integer().min(100).max(30_000).default(2000),
   PSP_READ_RETRIES: Joi.number().integer().min(0).max(5).default(3),
+
+  // Paystack (PAYSTACK_PLAN.md). The key is required only when enabled; its prefix is checked against NODE_ENV.
+  PAYSTACK_ENABLED: Joi.boolean().default(false),
+  PAYSTACK_SECRET_KEY: Joi.string().pattern(/^sk_(test|live)_[A-Za-z0-9]{8,128}$/, 'a Paystack secret key (sk_test_… or sk_live_…)'),
+  PAYSTACK_BASE_URL: Joi.string()
+    .uri({ scheme: ['http', 'https'] })
+    .default('https://api.paystack.co'),
+  PAYSTACK_CALLBACK_URL: Joi.string().uri({ scheme: ['http', 'https'] }),
+  PAYSTACK_FUNDING_CURRENCIES: Joi.string()
+    .pattern(/^[A-Z]{3}(,[A-Z]{3})*$/)
+    .default('NGN'),
+  PAYSTACK_CHECKOUT_WINDOW_MINUTES: Joi.number().integer().min(5).max(24 * 60).default(30),
+  PAYSTACK_WEBHOOK_IP_ALLOWLIST: Joi.string().pattern(/^[0-9a-fA-F.:]+(,[0-9a-fA-F.:]+)*$/),
+  PAYSTACK_REQUEST_TIMEOUT_MILLISECONDS: Joi.number().integer().min(100).max(30_000).default(5000),
+  PAYSTACK_INITIALIZE_TIMEOUT_MILLISECONDS: Joi.number().integer().min(1000).max(60_000).default(10_000),
+  PAYSTACK_READ_RETRIES: Joi.number().integer().min(0).max(5).default(3),
 
   PSP_FUNDING_CURRENCIES: Joi.string()
     .pattern(/^[A-Z]{3}(,[A-Z]{3})*$/)
@@ -439,12 +485,13 @@ export function loadConfig(raw: NodeJS.ProcessEnv | Record<string, string | unde
     problems.push('DEMO_CREDIT_NGN_MINOR must be 0 in production (design §15 item 6: non-production only)');
   }
   const webhookSecrets = parseWebhookSecrets(raw.PSP_WEBHOOK_SECRETS, problems);
-  const funding = parseFunding(env.PSP_FUNDING_CURRENCIES, env.FUNDING_LIMITS, problems);
+  const paystack = error ? undefined : parsePaystack(raw, env, problems);
+  const funding = parseFunding(env.PSP_FUNDING_CURRENCIES, env.FUNDING_LIMITS, paystack?.enabled ? paystack.currencies : [], problems);
   const conversion = parseConversion(env.CONVERSION_LIMITS, problems);
   const fx = error ? undefined : parseFx(env, problems);
   const reconciliation = error ? undefined : parseReconciliation(env, funding?.currencies ?? [], problems);
   const buildGitSha = resolveBuildGitSha(env.BUILD_GIT_SHA, env.NODE_ENV === 'production', problems);
-  if (problems.length > 0 || !keys || !pepper || !webhookSecrets || !funding || !conversion || !fx || !reconciliation) {
+  if (problems.length > 0 || !keys || !pepper || !webhookSecrets || !funding || !conversion || !fx || !reconciliation || !paystack) {
     throw new ConfigValidationError(problems);
   }
   return {
@@ -507,6 +554,7 @@ export function loadConfig(raw: NodeJS.ProcessEnv | Record<string, string | unde
       requestTimeoutMilliseconds: env.PSP_REQUEST_TIMEOUT_MILLISECONDS,
       readRetries: env.PSP_READ_RETRIES,
     },
+    paystack,
     funding,
     conversion,
     flows: {
@@ -678,10 +726,64 @@ function parseWebhookSecrets(value: string | undefined, problems: string[]): Buf
   return secrets;
 }
 
-/** Funding currencies and their bounds: strings of minor units, every currency covered, min ≤ max. */
-function parseFunding(currencyList: string | undefined, limitsJson: string | undefined, problems: string[]): FundingConfig | undefined {
+/**
+ * Paystack settings. Refused: enabled without a key or a callback URL; a live key outside production, a test key in
+ * production (no fall-through "try the other key"); `PSP_NAME=paystack` (two providers under one name); the old
+ * `PAYSTACK_WEBHOOK_URL` (renamed: it was the browser's callback — Paystack's webhook URL is set in its dashboard).
+ */
+function parsePaystack(raw: Record<string, string | undefined>, env: Record<string, never>, problems: string[]): PaystackConfig | undefined {
+  const before = problems.length;
+  const enabled = env.PAYSTACK_ENABLED as boolean;
+  const secretKey = (env.PAYSTACK_SECRET_KEY as string | undefined) ?? '';
+  const callbackUrl = (env.PAYSTACK_CALLBACK_URL as string | undefined) ?? '';
+  const production = env.NODE_ENV === 'production';
+  if (raw.PAYSTACK_WEBHOOK_URL !== undefined) {
+    problems.push(
+      'PAYSTACK_WEBHOOK_URL was renamed PAYSTACK_CALLBACK_URL (where the customer\'s browser returns); ' +
+        'Paystack\'s webhook URL is set in the Paystack dashboard, not here',
+    );
+  }
+  if (env.PSP_NAME === PAYSTACK_PROVIDER_NAME) problems.push('PSP_NAME must not be "paystack": that name belongs to the Paystack provider');
+  if (secretKey) {
+    if (production && secretKey.startsWith('sk_test_')) problems.push('PAYSTACK_SECRET_KEY is a test key (sk_test_): refused in production');
+    if (!production && secretKey.startsWith('sk_live_')) problems.push('PAYSTACK_SECRET_KEY is a live key (sk_live_): refused outside production');
+  }
+  if (enabled) {
+    if (!secretKey) problems.push('PAYSTACK_SECRET_KEY is required when PAYSTACK_ENABLED=true');
+    if (!callbackUrl) problems.push('PAYSTACK_CALLBACK_URL is required when PAYSTACK_ENABLED=true');
+    if (production && callbackUrl && !callbackUrl.startsWith('https://')) problems.push('PAYSTACK_CALLBACK_URL must be https in production');
+    if (production && !String(env.PAYSTACK_BASE_URL).startsWith('https://')) problems.push('PAYSTACK_BASE_URL must be https in production');
+  }
+  if (problems.length > before) return undefined;
+  const allowlist = env.PAYSTACK_WEBHOOK_IP_ALLOWLIST as string | undefined;
+  return {
+    enabled,
+    name: PAYSTACK_PROVIDER_NAME,
+    secretKey,
+    baseUrl: String(env.PAYSTACK_BASE_URL).replace(/\/+$/, ''),
+    callbackUrl,
+    currencies: [...new Set(String(env.PAYSTACK_FUNDING_CURRENCIES).split(','))],
+    checkoutWindowMinutes: env.PAYSTACK_CHECKOUT_WINDOW_MINUTES,
+    webhookIpAllowlist: allowlist ? [...new Set(allowlist.split(','))] : null,
+    requestTimeoutMilliseconds: env.PAYSTACK_REQUEST_TIMEOUT_MILLISECONDS,
+    initializeTimeoutMilliseconds: env.PAYSTACK_INITIALIZE_TIMEOUT_MILLISECONDS,
+    readRetries: env.PAYSTACK_READ_RETRIES,
+  };
+}
+
+/**
+ * Funding currencies and their bounds: strings of minor units, every currency covered, min ≤ max. One limit set for
+ * every provider: `extraCurrencies` (Paystack's, when enabled) must have limits too.
+ */
+function parseFunding(
+  currencyList: string | undefined,
+  limitsJson: string | undefined,
+  extraCurrencies: readonly string[],
+  problems: string[],
+): FundingConfig | undefined {
   if (!currencyList || !limitsJson) return undefined;
   const currencies = [...new Set(currencyList.split(','))];
+  const limited = [...new Set([...currencies, ...extraCurrencies])];
   let parsed: unknown;
   try {
     parsed = JSON.parse(limitsJson);
@@ -694,7 +796,7 @@ function parseFunding(currencyList: string | undefined, limitsJson: string | und
     return undefined;
   }
   const limits = new Map<string, FundingLimit>();
-  for (const currency of currencies) {
+  for (const currency of limited) {
     const entry = (parsed as Record<string, unknown>)[currency] as { minimum?: unknown; maximum?: unknown } | undefined;
     const { minimum, maximum } = entry ?? {};
     if (
@@ -710,7 +812,7 @@ function parseFunding(currencyList: string | undefined, limitsJson: string | und
     }
     limits.set(currency, { minimumMinor: BigInt(minimum), maximumMinor: BigInt(maximum) });
   }
-  return limits.size === currencies.length ? { currencies, limits } : undefined;
+  return limits.size === limited.length ? { currencies, limits } : undefined;
 }
 
 /** Conversion limits per source currency: strings of minor units, maximum ≤ daily maximum. */
