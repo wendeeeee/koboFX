@@ -1,4 +1,5 @@
 import { Controller, Get, HttpStatus, Inject, Res } from '@nestjs/common';
+import { ApiOkResponse, ApiOperation, ApiServiceUnavailableResponse, ApiTags } from '@nestjs/swagger';
 import type { Response } from 'express';
 import { DataSource } from 'typeorm';
 import { Public, SkipRateLimit } from '../../common/decorators';
@@ -7,6 +8,7 @@ import { AppConfig } from '../../config/configuration';
 import { RedisService } from '../../redis/redis.service';
 import { RateTier, ageSeconds } from '../fx/freshness';
 import { FxRateService } from '../fx/fx-rate.service';
+import { LivenessDocument, ReadinessDocument } from './health.responses';
 
 export type ComponentStatus = 'up' | 'down';
 
@@ -57,6 +59,7 @@ async function probe(check: () => Promise<unknown>): Promise<ComponentStatus> {
  * poll them. Rate freshness is reported (never failing); so is the build's git SHA (Phase 10,
  * design §9.4), on both probes.
  */
+@ApiTags('health')
 @Public()
 @SkipRateLimit()
 @Controller('health')
@@ -69,11 +72,19 @@ export class HealthController {
   ) {}
 
   @Get('live')
+  @ApiOperation({ summary: 'Liveness', description: 'The process is up. Reports the build\'s git SHA.' })
+  @ApiOkResponse({ type: LivenessDocument })
   live(): { status: 'ok'; version: VersionReport } {
     return { status: 'ok', version: this.version() };
   }
 
   @Get('ready')
+  @ApiOperation({
+    summary: 'Readiness',
+    description: 'Postgres and Redis reachable. Rate freshness and the git SHA are reported but never fail it. The 503 body is this report, not an error body.',
+  })
+  @ApiOkResponse({ type: ReadinessDocument, description: 'Ready.' })
+  @ApiServiceUnavailableResponse({ type: ReadinessDocument, description: 'Not ready (Postgres or Redis down): the same report, `status: unavailable`.' })
   async ready(@Res({ passthrough: true }) response: Response): Promise<ReadinessReport> {
     const [postgres, redis] = await Promise.all([
       probe(() => this.dataSource.query('SELECT 1')),

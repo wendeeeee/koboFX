@@ -19,6 +19,9 @@ const UUID = '[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-
 const PREFIXED_PATTERN = new RegExp(`^([a-z][a-z-]{0,30}):(${UUID})$`);
 const BARE_PATTERN = new RegExp(`^(${UUID})$`);
 
+/** The accepted shapes, as one pattern (the OpenAPI parameter's). */
+export const TRANSACTION_REFERENCE_PATTERN = `^(([a-z][a-z-]{0,30}):)?${UUID}$`;
+
 export function parseTransactionLookup(raw: string): TransactionLookup {
   const prefixed = PREFIXED_PATTERN.exec(raw);
   if (prefixed) {

@@ -211,7 +211,21 @@ describe('authentication (e2e: real pipeline, Postgres, Redis, MailHog)', () => 
       // Nest's own not-found fallback (registered for every method) is not an application route.
       .filter((route) => route.path !== `/${API_PREFIX}$` && route.path !== `/${API_PREFIX}/{*path}`)
       .flatMap((route) => Object.keys(route.methods).map((method) => `${method} ${route.path}`));
-    expect(served.sort()).toEqual(routes.map((route) => `${route.method} ${route.path}`).sort());
+    // The OpenAPI docs (Phase 11) are plain Express routes, public by design: they serve the contract, never data. Pinned
+    // exactly, so any OTHER route outside the guard chain still fails here.
+    const isDocs = (route: string) => route.split(' ')[1]!.startsWith(`/${API_PREFIX}/docs`);
+    expect(served.filter(isDocs).sort()).toEqual(
+      [
+        `get /${API_PREFIX}/docs`,
+        `get /${API_PREFIX}/docs/`,
+        `get /${API_PREFIX}/docs/LICENSE`,
+        `get /${API_PREFIX}/docs/docs/swagger-ui-init.js`,
+        `get /${API_PREFIX}/docs/index.html`,
+        `get /${API_PREFIX}/docs/swagger-ui-init.js`,
+        `get /${API_PREFIX}/docs-json`,
+      ].sort(),
+    );
+    expect(served.filter((route) => !isDocs(route)).sort()).toEqual(routes.map((route) => `${route.method} ${route.path}`).sort());
 
     expect(routes.filter((route) => route.isPublic).map((route) => `${route.method} ${route.path}`).sort()).toEqual([
       'get /api/v1/health/live',

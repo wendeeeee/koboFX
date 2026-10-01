@@ -7,6 +7,7 @@ import { correlationIdMiddleware } from './common/context';
 import { AllExceptionsFilter } from './common/filters/all-exceptions.filter';
 import { APP_CONFIG } from './config/config.module';
 import { AppConfig } from './config/configuration';
+import { configureSwagger } from './openapi/swagger.setup';
 
 export const API_PREFIX = 'api/v1';
 
@@ -37,4 +38,6 @@ export function configureApp(app: NestExpressApplication): void {
   );
   app.useGlobalFilters(new AllExceptionsFilter());
   app.enableShutdownHooks();
+  // The OpenAPI contract (Phase 11): docs UI + JSON under the prefix, when enabled. Documents, never changes, the API.
+  configureSwagger(app, API_PREFIX);
 }

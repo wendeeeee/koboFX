@@ -240,6 +240,8 @@ export interface AppConfig {
   readonly admin: AdminConfig;
   /** Reverse proxies in front of the API; `req.ip` is taken from X-Forwarded-For only this deep. */
   readonly trustProxyHops: number;
+  /** Serve the OpenAPI document and Swagger UI (`/api/v1/docs`). Off by default in production (Phase 11). */
+  readonly apiDocsEnabled: boolean;
 }
 
 const strategies = Object.values(RoundingStrategy);
@@ -317,6 +319,7 @@ const envSchema = Joi.object({
   OUTBOX_BATCH_SIZE: Joi.number().integer().min(1).max(500).default(20),
 
   TRUST_PROXY_HOPS: Joi.number().integer().min(0).max(10).default(0),
+  API_DOCS_ENABLED: Joi.boolean().optional(),
 
   // The payment service provider (design §7.2, §7.3). Secrets have no defaults.
   PSP_NAME: Joi.string()
@@ -526,6 +529,7 @@ export function loadConfig(raw: NodeJS.ProcessEnv | Record<string, string | unde
       buildGitSha: buildGitSha as string,
     },
     trustProxyHops: env.TRUST_PROXY_HOPS,
+    apiDocsEnabled: env.API_DOCS_ENABLED ?? env.NODE_ENV !== 'production',
   };
 }
 
