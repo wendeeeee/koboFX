@@ -82,6 +82,8 @@ describe('Redis down', () => {
     // Since Phase 6 readiness also REPORTS rate freshness (never failing on it); no snapshot here.
     expect(response.body).toEqual({
       status: 'unavailable',
+      // Since Phase 10 both probes report the build (design §9.4); `unknown` outside a stamped build.
+      version: { gitSha: 'unknown' },
       checks: { postgres: 'up', redis: 'down' },
       fx: { tier: 'NONE', rateAgeSeconds: null, provider: null, asOf: null },
     });

@@ -1,6 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { InvariantViolationError } from '../../common/errors';
-import { DependencyUnavailableError } from '../../common/errors';
 import { ExchangeRateSnapshotRepository } from '../fx/exchange-rate-snapshot.repository';
 import { FxRateFetcher } from '../fx/fx-rate-fetcher';
 import { RateCache } from '../fx/rate-cache';
@@ -84,12 +83,8 @@ export class ExchangeRateOverriddenHandler implements OutboxEventHandler {
     const snapshotId = requireId(event, payload.snapshotId);
     const snapshot = await this.snapshots.findAccepted(snapshotId);
     if (!snapshot) throw new InvariantViolationError(`Overridden snapshot ${snapshotId} is not an ACCEPTED snapshot.`);
-    try {
-      const written = await this.cache.offer(snapshot, this.fetcher.cacheTimeToLiveSeconds);
-      this.logger.log({ eventId: event.id, snapshotId, cached: written }, 'Overridden rate offered to the cache');
-    } catch (error) {
-      if (error instanceof DependencyUnavailableError) throw error; // retried by the outbox
-      throw error;
-    }
+    // Redis down throws `DependencyUnavailableError`: the outbox retries the event (the read path uses the DB meanwhile).
+    const written = await this.cache.offer(snapshot, this.fetcher.cacheTimeToLiveSeconds);
+    this.logger.log({ eventId: event.id, snapshotId, cached: written }, 'Overridden rate offered to the cache');
   }
 }

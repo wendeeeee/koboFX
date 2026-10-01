@@ -1,4 +1,5 @@
 import { Injectable } from '@nestjs/common';
+import { InvariantViolationError } from '../../../common/errors';
 import { UnitOfWork } from '../../../database/transaction/unit-of-work';
 import { RateTier, ageSeconds } from '../../fx/freshness';
 import { FxRateService } from '../../fx/fx-rate.service';
@@ -101,17 +102,18 @@ export class PositionsService {
       totalMarkedUsd: book.totalMarkedUsdMinor?.toString() ?? null,
       trialBalance: trial.map((line) => {
         const accounting = equationByCurrency.get(line.currency);
+        if (!accounting) throw new InvariantViolationError('A currency in the trial balance has no accounting equation line.', { currency: line.currency });
         return {
           currency: line.currency,
           debits: line.debitTotalMinor.toString(),
           credits: line.creditTotalMinor.toString(),
           balanced: line.balanced,
-          assets: (accounting?.assetsMinor ?? 0n).toString(),
-          liabilities: (accounting?.liabilitiesMinor ?? 0n).toString(),
-          equity: (accounting?.equityMinor ?? 0n).toString(),
-          revenue: (accounting?.revenueMinor ?? 0n).toString(),
-          expenses: (accounting?.expensesMinor ?? 0n).toString(),
-          equationHolds: accounting?.holds ?? true,
+          assets: accounting.assetsMinor.toString(),
+          liabilities: accounting.liabilitiesMinor.toString(),
+          equity: accounting.equityMinor.toString(),
+          revenue: accounting.revenueMinor.toString(),
+          expenses: accounting.expensesMinor.toString(),
+          equationHolds: accounting.holds,
         };
       }),
     };
