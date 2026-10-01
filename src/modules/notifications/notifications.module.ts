@@ -4,12 +4,17 @@ import { OutboxDispatcher } from '../outbox/outbox-dispatcher';
 import { OutboxModule } from '../outbox/outbox.module';
 import { UsersModule } from '../users/users.module';
 import { EmailModule } from './email/email.module';
-import { ConversionPostedHandler, EmailVerificationRequestedHandler, ExistingAccountRegistrationAttemptedHandler } from './outbox-handlers';
+import {
+  ConversionPostedHandler,
+  EmailVerificationRequestedHandler,
+  ExistingAccountRegistrationAttemptedHandler,
+  FundingPostedHandler,
+} from './outbox-handlers';
 
 /** Outbox consumers that notify people (design §14 `notifications/`). */
 @Module({
   imports: [OutboxModule, OneTimePasswordsModule, UsersModule, EmailModule],
-  providers: [EmailVerificationRequestedHandler, ExistingAccountRegistrationAttemptedHandler, ConversionPostedHandler],
+  providers: [EmailVerificationRequestedHandler, ExistingAccountRegistrationAttemptedHandler, ConversionPostedHandler, FundingPostedHandler],
 })
 export class NotificationsModule implements OnModuleInit {
   constructor(
@@ -17,11 +22,13 @@ export class NotificationsModule implements OnModuleInit {
     private readonly emailVerification: EmailVerificationRequestedHandler,
     private readonly existingAccount: ExistingAccountRegistrationAttemptedHandler,
     private readonly conversionPosted: ConversionPostedHandler,
+    private readonly fundingPosted: FundingPostedHandler,
   ) {}
 
   onModuleInit(): void {
     this.dispatcher.register(this.emailVerification);
     this.dispatcher.register(this.existingAccount);
     this.dispatcher.register(this.conversionPosted);
+    this.dispatcher.register(this.fundingPosted);
   }
 }

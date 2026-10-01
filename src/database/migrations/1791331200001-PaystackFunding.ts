@@ -11,7 +11,7 @@ const FUNDING_TRANSITIONS = `
 
 const PAYSTACK_FUNDING_TRANSITIONS = `
           WHEN 'PAYSTACK_FUNDING' THEN (from_state, to_state) IN (
-            ('INITIATED', 'CHECKOUT_READY'), ('INITIATED', 'POSTED'), ('INITIATED', 'FAILED'),
+            ('INITIATED', 'CHECKOUT_READY'), ('INITIATED', 'POSTED'), ('INITIATED', 'FAILED'), ('INITIATED', 'HELD'),
             ('CHECKOUT_READY', 'POSTED'), ('CHECKOUT_READY', 'FAILED'), ('CHECKOUT_READY', 'HELD'),
             ('POSTED', 'SETTLED'), ('POSTED', 'REVERSED'),
             ('SETTLED', 'REVERSED'))`;
@@ -69,7 +69,7 @@ const FLOW_GUARD = (completionStates: string) => `
  * - `PAYSTACK_FUNDING`: `INITIATED → CHECKOUT_READY → POSTED`, failures to `FAILED`, a verified success whose amount or
  *   currency differs from ours to `HELD` (no credit; completion state — a human resolves it), chargebacks
  *   `POSTED | SETTLED → REVERSED`. `paystack-funding-transitions.ts` is the TypeScript mirror (tested pair for pair).
- *   `INITIATED → POSTED` is only the "initialize accepted, answer lost, and the read-back shows it paid" path.
+ *   `INITIATED → POSTED | HELD` is only the "initialize accepted, answer lost, and the read-back shows it paid" path.
  * - `HELD` joins the completion states (the resumer has no more work); FUNDING's and CONVERSION's rules are unchanged.
  * - `funding_payments` + the checkout Paystack returned (`checkout_authorization_url`, `checkout_access_code`) and OUR
  *   window end (`checkout_expires_at`): set once, together, by a trigger of their own (the Phase 9 guard is untouched).

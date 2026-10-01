@@ -4,6 +4,8 @@ export enum FlowType {
   FUNDING = 'FUNDING',
   /** Synchronous: created and completed in one transaction, so the resumer never sees one (Phase 7). */
   CONVERSION = 'CONVERSION',
+  /** Card funding through Paystack's hosted checkout (PAYSTACK_PLAN.md C2): no authorize/capture split. */
+  PAYSTACK_FUNDING = 'PAYSTACK_FUNDING',
 }
 
 /** A `flow_instances` row (design §7.5). */

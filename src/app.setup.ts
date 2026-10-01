@@ -16,6 +16,8 @@ export const BODY_LIMIT = '100kb';
 
 /** The one route that needs the verbatim request bytes (design §7.3: HMAC over the raw body). */
 export const PSP_WEBHOOK_PATH = `/${API_PREFIX}/webhooks/psp`;
+/** Paystack's webhook: HMAC-SHA512 over the raw body (PAYSTACK_PLAN.md A6). Mounted always; the route exists only when enabled. */
+export const PAYSTACK_WEBHOOK_PATH = `/${API_PREFIX}/webhooks/paystack`;
 
 /**
  * HTTP pipeline shared by `main.ts` and the e2e harness, so tests exercise the real
@@ -31,6 +33,7 @@ export function configureApp(app: NestExpressApplication): void {
   // The webhook's bytes are read raw (a Buffer, same cap) BEFORE the JSON parser, which
   // then skips the already-consumed stream. Every other route parses JSON exactly as before.
   app.use(PSP_WEBHOOK_PATH, raw({ type: () => true, limit: BODY_LIMIT }));
+  app.use(PAYSTACK_WEBHOOK_PATH, raw({ type: () => true, limit: BODY_LIMIT }));
   app.useBodyParser('json', { limit: BODY_LIMIT });
   app.setGlobalPrefix(API_PREFIX);
   app.useGlobalPipes(

@@ -2,7 +2,14 @@ import { Injectable, Logger } from '@nestjs/common';
 import { InvariantViolationError } from '../../common/errors';
 import { RedisService } from '../../redis/redis.service';
 import { GenerateAndDispatchOneTimePasswordService } from '../auth/one-time-passwords/generate-and-dispatch-one-time-password.service';
-import { ClaimedOutboxEvent, ConversionPostedPayload, OutboxEventHandler, OutboxEventType, UserEventPayload } from '../outbox/outbox.types';
+import {
+  ClaimedOutboxEvent,
+  ConversionPostedPayload,
+  FundingPostedPayload,
+  OutboxEventHandler,
+  OutboxEventType,
+  UserEventPayload,
+} from '../outbox/outbox.types';
 import { UserRepository } from '../users/user.repository';
 import { EmailSender } from './email/email-sender';
 import { existingAccountEmail } from './email/email-templates';
@@ -95,5 +102,34 @@ export class ConversionPostedHandler implements OutboxEventHandler {
   async handle(event: ClaimedOutboxEvent): Promise<void> {
     const payload = conversionPostedOf(event);
     this.logger.log({ eventId: event.id, ...payload }, 'Conversion posted: acknowledged');
+  }
+}
+
+/** Don't trust the payload's shape: ids only, the aggregate is the funding transaction. */
+export function fundingPostedOf(event: ClaimedOutboxEvent): FundingPostedPayload {
+  const payload = (event.payload ?? {}) as Partial<FundingPostedPayload>;
+  const isId = (value: unknown): value is string => typeof value === 'string' && UUID.test(value);
+  if (
+    !isId(payload.transactionId) || payload.transactionId !== event.aggregateId ||
+    !isId(payload.userId) || !isId(payload.flowId) ||
+    typeof payload.provider !== 'string' || !/^[a-z0-9-]{1,32}$/.test(payload.provider)
+  ) {
+    throw new InvariantViolationError(`Outbox event ${event.id} has a malformed payload.`);
+  }
+  return { transactionId: payload.transactionId, userId: payload.userId, flowId: payload.flowId, provider: payload.provider };
+}
+
+/**
+ * `FundingPosted.v1` → acknowledged (Paystack funding; no deposit notification is in scope yet). Registered so the
+ * dispatcher never dead-letters a known type; a receipt email would be added here. Idempotent.
+ */
+@Injectable()
+export class FundingPostedHandler implements OutboxEventHandler {
+  readonly eventType = OutboxEventType.FUNDING_POSTED;
+  private readonly logger = new Logger(FundingPostedHandler.name);
+
+  async handle(event: ClaimedOutboxEvent): Promise<void> {
+    const payload = fundingPostedOf(event);
+    this.logger.log({ eventId: event.id, ...payload }, 'Funding posted: acknowledged');
   }
 }

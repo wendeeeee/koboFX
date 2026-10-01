@@ -18,6 +18,9 @@ import { RouteDescriptor, collectRoutes } from './route-metadata';
 
 export const BEARER_SCHEME = 'bearer';
 export const PSP_SIGNATURE_SCHEME = 'pspSignature';
+/** Paystack's webhook signature (PAYSTACK_PLAN.md A6). */
+export const PAYSTACK_SIGNATURE_SCHEME = 'paystackSignature';
+const SIGNATURE_SCHEMES = [PSP_SIGNATURE_SCHEME, PAYSTACK_SIGNATURE_SCHEME];
 export const IDEMPOTENCY_KEY_PARAMETER = 'IdempotencyKey';
 
 /** One tag per module (Phase 11 plan §B). */
@@ -159,7 +162,9 @@ function accessDescription(route: RouteDescriptor): string {
 function decorate(operation: OperationObject, route: RouteDescriptor): void {
   // Security: what JwtAuthGuard enforces. Public routes say so explicitly; the webhook keeps its signature scheme.
   if (route.isPublic) {
-    operation.security = operation.security?.some((requirement) => PSP_SIGNATURE_SCHEME in requirement) ? operation.security : [];
+    operation.security = operation.security?.some((requirement) => SIGNATURE_SCHEMES.some((scheme) => scheme in requirement))
+      ? operation.security
+      : [];
   } else {
     operation.security = [{ [BEARER_SCHEME]: [] }];
   }
@@ -232,6 +237,12 @@ export function buildOpenApiDocument(app: INestApplication): OpenAPIObject {
       name: 'X-Psp-Signature',
       description:
         '`t=<unix seconds>,v1=<hex HMAC-SHA256(secret, "t." + raw body bytes)>`, at most 300 seconds old. Up to two secrets are accepted (rotation).',
+    })
+    .addSecurity(PAYSTACK_SIGNATURE_SCHEME, {
+      type: 'apiKey',
+      in: 'header',
+      name: 'X-Paystack-Signature',
+      description: 'Paystack\'s webhook signature: hex HMAC-SHA512 of the raw body bytes, keyed with the Paystack secret key.',
     });
   for (const [name, description] of Object.entries(API_TAGS)) builder.addTag(name, description);
 

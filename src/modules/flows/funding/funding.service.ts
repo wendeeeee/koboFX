@@ -13,6 +13,8 @@ import { FundWalletDto } from './dto/fund-wallet.dto';
 import { FundingPaymentRepository } from './funding-payment.repository';
 import { fundingAmount } from './funding-limits';
 import { FundingState, FundingStatus, fundingStatusOf, isFundingState } from './funding-transitions';
+import { isPaystackFundingState, paystackFundingStatusOf } from '../paystack-funding/paystack-funding-transitions';
+import { Clock } from '../../../common/clock';
 import { FundingNotFoundError } from './funding.errors';
 
 /** `202` body of `POST /wallet/fund`: stored and replayed byte for byte by the idempotency barrier. */
@@ -23,12 +25,21 @@ export interface FundingAccepted {
   readonly currency: string;
 }
 
-/** `GET /wallet/fund/:fundingId`. */
+/** The hosted checkout of a Paystack funding, while the customer can still pay on it. */
+export interface FundingCheckoutView {
+  readonly authorizationUrl: string;
+  /** OUR checkout window's end (a policy, not Paystack's). */
+  readonly expiresAt: string;
+}
+
+/** `GET /wallet/fund/:fundingId`. `provider` and `checkout` are additive (PAYSTACK_PLAN.md C10). */
 export interface FundingView {
   readonly fundingId: string;
   readonly status: FundingStatus;
   readonly amount: string;
   readonly currency: string;
+  readonly provider: 'simulated' | 'paystack';
+  readonly checkout: FundingCheckoutView | null;
   readonly failureCode: string | null;
   readonly transactionReference: string | null;
   readonly createdAt: string;
@@ -51,6 +62,7 @@ export class FundingService {
     private readonly audit: AuditLogService,
     private readonly provider: PaymentProvider,
     @Inject(APP_CONFIG) private readonly config: AppConfig,
+    private readonly clock: Clock,
   ) {}
 
   async start(userId: string, request: FundWalletDto): Promise<FundingAccepted> {
@@ -84,17 +96,22 @@ export class FundingService {
   /** Scoped by the caller in the WHERE clause: another user's funding is simply not found. */
   async find(userId: string, fundingId: string): Promise<FundingView> {
     const [row] = (await this.unitOfWork.manager.query(
-      `SELECT flow_instances.id, flow_instances.state, funding_payments.amount_minor::text AS amount_minor,
-              funding_payments.currency_code, funding_payments.failure_code, transactions.reference,
-              flow_instances.created_at, flow_instances.updated_at
+      `SELECT flow_instances.id, flow_instances.flow_type, flow_instances.state,
+              funding_payments.amount_minor::text AS amount_minor, funding_payments.currency_code,
+              funding_payments.failure_code, transactions.reference, funding_payments.checkout_authorization_url,
+              funding_payments.checkout_expires_at, flow_instances.created_at, flow_instances.updated_at
          FROM flow_instances
          JOIN funding_payments ON funding_payments.flow_id = flow_instances.id
          LEFT JOIN transactions ON transactions.id = funding_payments.funding_transaction_id
-        WHERE flow_instances.id = $1 AND flow_instances.user_id = $2 AND flow_instances.flow_type = 'FUNDING'`,
+        WHERE flow_instances.id = $1 AND flow_instances.user_id = $2
+          AND flow_instances.flow_type IN ('FUNDING', 'PAYSTACK_FUNDING')`,
       [fundingId, userId],
     )) as {
       id: string;
+      flow_type: string;
       state: string;
+      checkout_authorization_url: string | null;
+      checkout_expires_at: Date | null;
       amount_minor: string;
       currency_code: string;
       failure_code: string | null;
@@ -103,12 +120,24 @@ export class FundingService {
       updated_at: Date;
     }[];
     if (!row) throw new FundingNotFoundError(fundingId);
-    if (!isFundingState(row.state)) throw new InvariantViolationError(`Unknown funding state ${row.state}.`);
+    const paystack = row.flow_type === 'PAYSTACK_FUNDING';
+    let status: FundingStatus;
+    if (paystack && isPaystackFundingState(row.state)) status = paystackFundingStatusOf(row.state);
+    else if (!paystack && isFundingState(row.state)) status = fundingStatusOf(row.state);
+    else throw new InvariantViolationError(`Unknown funding state ${row.state}.`);
+    // The URL only while the customer can still pay on it: ready, and inside OUR window.
+    const checkoutOpen =
+      paystack && row.state === 'CHECKOUT_READY' && row.checkout_authorization_url !== null && row.checkout_expires_at !== null &&
+      row.checkout_expires_at.getTime() > this.clock.now().getTime();
     return {
       fundingId: row.id,
-      status: fundingStatusOf(row.state),
+      status,
       amount: row.amount_minor,
       currency: row.currency_code,
+      provider: paystack ? 'paystack' : 'simulated',
+      checkout: checkoutOpen
+        ? { authorizationUrl: row.checkout_authorization_url as string, expiresAt: (row.checkout_expires_at as Date).toISOString() }
+        : null,
       failureCode: row.failure_code,
       transactionReference: row.reference,
       createdAt: row.created_at.toISOString(),

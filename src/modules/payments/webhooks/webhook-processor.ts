@@ -10,6 +10,7 @@ import { FlowRunner } from '../../flows/flow-runner';
 import { FlowRepository } from '../../flows/flow.repository';
 import { FundingPaymentRepository } from '../../flows/funding/funding-payment.repository';
 import { WebhookHint, parseWebhookHint } from './webhook-payload';
+import { ResolvedWebhook, WebhookResolverRegistry } from './webhook-resolvers';
 
 export enum WebhookEventOutcome {
   ADVANCED = 'ADVANCED',
@@ -21,6 +22,7 @@ export enum WebhookEventOutcome {
 
 interface ClaimedWebhookEvent {
   readonly id: string;
+  readonly provider: string;
   readonly rawPayload: Buffer;
   /** Including this one. */
   readonly attempts: number;
@@ -61,6 +63,7 @@ export class WebhookProcessor {
     private readonly flows: FlowRepository,
     private readonly fundingPayments: FundingPaymentRepository,
     @Inject(APP_CONFIG) private readonly config: AppConfig,
+    private readonly resolvers: WebhookResolverRegistry,
   ) {
     this.loop = new PollingLoop(
       WebhookProcessor.name,
@@ -90,9 +93,11 @@ export class WebhookProcessor {
   /** Returns true when the event reached a final outcome. */
   private async process(event: ClaimedWebhookEvent): Promise<boolean> {
     try {
-      const hint = parseWebhookHint(event.rawPayload);
-      if (!hint) return await this.finish(event, WebhookEventOutcome.MALFORMED, null);
-      const flowId = await this.findFlowId(hint);
+      const resolved = await this.resolve(event);
+      if (resolved === 'NO_RESOLVER') return await this.retryOrGiveUp(event, `no webhook resolver for provider ${event.provider}`);
+      if (!resolved) return await this.finish(event, WebhookEventOutcome.MALFORMED, null);
+      const hint = resolved;
+      const flowId = resolved.flowId;
       const flow = flowId ? await this.flows.findById(flowId) : null;
       if (!flow) {
         this.logger.warn({ webhookEventId: event.id, eventType: hint.eventType }, 'Webhook for a payment we do not know');
@@ -118,6 +123,18 @@ export class WebhookProcessor {
       this.logger.error({ webhookEventId: event.id, err: error }, 'Webhook processing failed; will retry');
       return this.retryOrGiveUp(event, error instanceof Error ? `${error.name}: ${error.message}` : String(error));
     }
+  }
+
+  /** The configured PSP's events are read exactly as before; any other provider's by its registered resolver. */
+  private async resolve(event: ClaimedWebhookEvent): Promise<ResolvedWebhook | undefined | 'NO_RESOLVER'> {
+    if (event.provider === this.config.paymentProvider.name) {
+      const hint = parseWebhookHint(event.rawPayload);
+      if (!hint) return undefined;
+      return { eventType: hint.eventType, flowId: await this.findFlowId(hint) };
+    }
+    const resolver = this.resolvers.find(event.provider);
+    if (!resolver) return 'NO_RESOLVER';
+    return resolver.resolve(event.rawPayload);
   }
 
   private async findFlowId(hint: WebhookHint): Promise<string | null> {
@@ -162,11 +179,12 @@ export class WebhookProcessor {
             SET attempts = webhook_events.attempts + 1, next_attempt_at = now() + make_interval(secs => $2)
            FROM due
           WHERE webhook_events.id = due.id
-         RETURNING webhook_events.id, webhook_events.raw_payload, webhook_events.attempts, webhook_events.received_at
+         RETURNING webhook_events.id, webhook_events.provider, webhook_events.raw_payload, webhook_events.attempts,
+                   webhook_events.received_at
        )
        SELECT * FROM claimed ORDER BY received_at, id`,
       [batchSize, this.config.flows.leaseSeconds],
-    )) as { id: string; raw_payload: Buffer; attempts: number }[];
-    return rows.map((row) => ({ id: row.id, rawPayload: row.raw_payload, attempts: row.attempts }));
+    )) as { id: string; provider: string; raw_payload: Buffer; attempts: number }[];
+    return rows.map((row) => ({ id: row.id, provider: row.provider, rawPayload: row.raw_payload, attempts: row.attempts }));
   }
 }

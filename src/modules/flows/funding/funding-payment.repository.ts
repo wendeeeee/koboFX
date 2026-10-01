@@ -18,6 +18,16 @@ export interface FundingPayment {
   readonly failureCode: string | null;
   readonly fundingTransactionId: string | null;
   readonly chargebackTransactionId: string | null;
+  /** Paystack only: the hosted checkout, and OUR window end (null until initialize answered). */
+  /** Always set by this repository; optional only so pre-Paystack fixtures need not name it. */
+  readonly checkout?: FundingCheckout | null;
+  readonly createdAt?: Date;
+}
+
+export interface FundingCheckout {
+  readonly authorizationUrl: string;
+  readonly accessCode: string;
+  readonly expiresAt: Date;
 }
 
 interface FundingPaymentRow {
@@ -36,11 +46,16 @@ interface FundingPaymentRow {
   failure_code: string | null;
   funding_transaction_id: string | null;
   chargeback_transaction_id: string | null;
+  checkout_authorization_url: string | null;
+  checkout_access_code: string | null;
+  checkout_expires_at: Date | null;
+  created_at: Date;
 }
 
 const COLUMNS = `flow_id, user_id, account_id, currency_code, amount_minor::text AS amount_minor, provider,
   payment_method_token, provider_payment_id, provider_status, authorized_at, capture_requested_at, captured_at,
-  failure_code, funding_transaction_id, chargeback_transaction_id`;
+  failure_code, funding_transaction_id, chargeback_transaction_id, checkout_authorization_url, checkout_access_code,
+  checkout_expires_at, created_at`;
 
 function toPayment(row: FundingPaymentRow): FundingPayment {
   return {
@@ -58,6 +73,11 @@ function toPayment(row: FundingPaymentRow): FundingPayment {
     failureCode: row.failure_code,
     fundingTransactionId: row.funding_transaction_id,
     chargebackTransactionId: row.chargeback_transaction_id,
+    checkout:
+      row.checkout_authorization_url && row.checkout_access_code && row.checkout_expires_at
+        ? { authorizationUrl: row.checkout_authorization_url, accessCode: row.checkout_access_code, expiresAt: row.checkout_expires_at }
+        : null,
+    createdAt: row.created_at,
   };
 }
 
@@ -85,7 +105,8 @@ export class FundingPaymentRepository {
     accountId: string;
     amount: Money;
     provider: string;
-    paymentMethodToken: string;
+    /** The simulated PSP's single-use token; null for Paystack (the customer pays on Paystack's checkout). */
+    paymentMethodToken: string | null;
   }): Promise<void> {
     await this.unitOfWork.requireTransaction().query(
       `INSERT INTO funding_payments (flow_id, user_id, account_id, currency_code, amount_minor, provider, payment_method_token)
@@ -137,6 +158,16 @@ export class FundingPaymentRepository {
       [flowId, settlement.settledAt, settlement.settlementBatchLineId, settlement.feeMinor.toString()],
     )) as { flow_id: string }[];
     return rows.length === 1;
+  }
+
+  /** Paystack's checkout, set once (trigger-enforced), with OUR window end. */
+  async recordCheckout(manager: EntityManager, flowId: string, checkout: FundingCheckout): Promise<void> {
+    await manager.query(
+      `UPDATE funding_payments
+          SET checkout_authorization_url = $2, checkout_access_code = $3, checkout_expires_at = $4, updated_at = now()
+        WHERE flow_id = $1`,
+      [flowId, checkout.authorizationUrl, checkout.accessCode, checkout.expiresAt],
+    );
   }
 
   /** Set-once facts use `coalesce`, so re-running a step never tries to change one. */

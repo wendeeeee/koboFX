@@ -28,6 +28,7 @@ import { WalletsModule } from './modules/wallets/wallets.module';
 import { ReconciliationModule } from './modules/reconciliation/reconciliation.module';
 import { AdminModule } from './modules/admin/admin.module';
 import { RedisModule } from './redis/redis.module';
+import { PaystackFundingModule, isPaystackEnabled } from './modules/flows/paystack-funding/paystack-funding.module';
 
 /** Log hygiene (design §9.1): secrets and OTPs never reach the log. */
 const REDACT_PATHS = [
@@ -35,6 +36,8 @@ const REDACT_PATHS = [
   'req.headers.cookie',
   'req.headers["x-webhook-signature"]',
   'req.headers["x-psp-signature"]',
+  'req.headers["x-paystack-signature"]',
+  '*.email',
   '*.paymentMethodToken',
   '*.payment_method_token',
   '*.secretKey',
@@ -103,6 +106,8 @@ export class AppModule {
         ReconciliationModule,
         // Controls (Phase 10): `/admin/*`, approvals and four-eyes, positions, recertification.
         AdminModule,
+        // Paystack, the second funding provider (PAYSTACK_PLAN.md): only when enabled — off, its routes do not exist.
+        ...(isPaystackEnabled(env) ? [PaystackFundingModule] : []),
         HealthModule,
       ],
       // Order matters: throttle first (before any token work), then authenticate,

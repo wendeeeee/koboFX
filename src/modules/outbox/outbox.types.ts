@@ -3,6 +3,8 @@ export enum OutboxEventType {
   EMAIL_VERIFICATION_REQUESTED = 'EmailVerificationRequested.v1',
   EXISTING_ACCOUNT_REGISTRATION_ATTEMPTED = 'ExistingAccountRegistrationAttempted.v1',
   CONVERSION_POSTED = 'ConversionPosted.v1',
+  /** A Paystack funding was credited (PAYSTACK_PLAN.md): aggregate = the transaction. Acknowledged for now. */
+  FUNDING_POSTED = 'FundingPosted.v1',
   RECONCILIATION_BREAK_CHANGED = 'ReconciliationBreakChanged.v1',
   /** Every approval transition (Phase 10): notify approvers, feed alert routing. Acknowledged for now. */
   APPROVAL_CHANGED = 'ApprovalChanged.v1',
@@ -26,6 +28,14 @@ export interface ConversionPostedPayload {
   readonly flowId: string;
   /** The quote a trade executed; null for a market conversion. */
   readonly quoteId: string | null;
+}
+
+/** `FundingPosted.v1`: aggregate = the funding transaction. Ids and the provider name only. */
+export interface FundingPostedPayload {
+  readonly transactionId: string;
+  readonly userId: string;
+  readonly flowId: string;
+  readonly provider: string;
 }
 
 /** `ReconciliationBreakChanged.v1`: aggregate = the break. Ids and codes only (Phase 10's admin consumes it). */

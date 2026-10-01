@@ -1,6 +1,7 @@
 import { ApiProperty, ApiSchema } from '@nestjs/swagger';
 import { ApiAmount, ApiCurrency, ApiInstant, ApiMinorUnit, ApiUuid } from '../../openapi/properties';
-import type { FundingAccepted, FundingView } from '../flows/funding/funding.service';
+import type { FundingAccepted, FundingCheckoutView, FundingView } from '../flows/funding/funding.service';
+import type { PaystackFundingAccepted } from '../flows/paystack-funding/paystack-funding.service';
 import type { WalletBalance } from './wallet-balances.service';
 
 /** OpenAPI documentation of the wallet bodies (Phase 11). Never instantiated. */
@@ -45,6 +46,38 @@ export class FundingAcceptedDocument implements FundingAccepted {
   currency!: string;
 }
 
+@ApiSchema({ name: 'PaystackFundingAccepted' })
+export class PaystackFundingAcceptedDocument implements PaystackFundingAccepted {
+  @ApiUuid('Poll `GET /wallet/fund/{fundingId}` until `checkout.authorizationUrl` appears (normally within a second or two), then send the customer there.', FUNDING_ID)
+  fundingId!: string;
+
+  @ApiProperty({ enum: ['PENDING'], example: 'PENDING' })
+  status!: 'PENDING';
+
+  @ApiAmount('As requested.', '150000')
+  amount!: string;
+
+  @ApiCurrency()
+  currency!: string;
+
+  @ApiProperty({ enum: ['paystack'], example: 'paystack' })
+  provider!: 'paystack';
+}
+
+@ApiSchema({ name: 'FundingCheckout' })
+export class FundingCheckoutDocument implements FundingCheckoutView {
+  @ApiProperty({
+    type: 'string',
+    format: 'uri',
+    example: 'https://checkout.paystack.com/0peioxfhpn',
+    description: 'Paystack\'s hosted checkout for this funding. Redirect the customer here; the return to your callback page carries no authority — poll this route.',
+  })
+  authorizationUrl!: string;
+
+  @ApiInstant('The end of OUR checkout window: after it, an unpaid funding FAILS (a later payment is caught by reconciliation, never lost).')
+  expiresAt!: string;
+}
+
 @ApiSchema({ name: 'Funding' })
 export class FundingDocument implements FundingView {
   @ApiUuid('The funding id.', FUNDING_ID)
@@ -63,11 +96,22 @@ export class FundingDocument implements FundingView {
   @ApiCurrency()
   currency!: string;
 
+  @ApiProperty({ enum: ['simulated', 'paystack'], example: 'simulated', description: 'Which provider takes the payment (`POST /wallet/fund` = simulated, `POST /wallet/fund/paystack` = paystack).' })
+  provider!: 'simulated' | 'paystack';
+
+  @ApiProperty({
+    type: FundingCheckoutDocument,
+    nullable: true,
+    example: null,
+    description: 'Paystack only, and only while the customer can still pay: ready and inside the checkout window. Otherwise null.',
+  })
+  checkout!: FundingCheckoutDocument | null;
+
   @ApiProperty({
     type: 'string',
     nullable: true,
     example: null,
-    description: 'Why it FAILED: the PSP\'s status, with its decline code when given (e.g. `DECLINED:insufficient_funds`), or `USER_SUSPENDED`. Never card data.',
+    description: 'Why it FAILED: the PSP\'s status, with its decline code when given (e.g. `DECLINED:insufficient_funds`), or `USER_SUSPENDED`; Paystack: `CHECKOUT_EXPIRED:{status}`, `CHECKOUT_UNRECOVERABLE`, `PAYSTACK_REVERSED`. Never card data.',
   })
   failureCode!: string | null;
 
