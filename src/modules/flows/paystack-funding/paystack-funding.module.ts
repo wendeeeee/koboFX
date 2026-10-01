@@ -7,6 +7,8 @@ import { OutboxModule } from '../../outbox/outbox.module';
 import { PaystackModule } from '../../payments/paystack/paystack.module';
 import { WebhooksModule } from '../../payments/webhooks/webhooks.module';
 import { UsersModule } from '../../users/users.module';
+import { ReconciliationModule } from '../../reconciliation/reconciliation.module';
+import { PaystackReconciliationJob } from '../../reconciliation/paystack-reconciliation.job';
 import { FlowsModule } from '../flows.module';
 import { PaystackFundingController } from './paystack-funding.controller';
 import { PaystackFundingFlow } from './paystack-funding-flow';
@@ -20,12 +22,23 @@ export function isPaystackEnabled(env: Record<string, string | undefined>): bool
 
 /**
  * Paystack funding (PAYSTACK_PLAN.md): the flow (registered with the shared runner and resumer), the start service
- * and route, and the webhook resolver. Imported by the API and the worker ONLY when `PAYSTACK_ENABLED=true`.
+ * and route, the webhook resolver, and Paystack's own reconciliation runs (registered with the scheduler). Imported by the API and the worker ONLY when `PAYSTACK_ENABLED=true`.
  */
 @Module({
-  imports: [FlowsModule, PaystackModule, WebhooksModule, LedgerModule, AuditModule, OutboxModule, UsersModule, CurrenciesModule, ClockModule],
+  imports: [
+    FlowsModule,
+    PaystackModule,
+    WebhooksModule,
+    LedgerModule,
+    AuditModule,
+    OutboxModule,
+    UsersModule,
+    CurrenciesModule,
+    ClockModule,
+    ReconciliationModule,
+  ],
   controllers: [PaystackFundingController],
-  providers: [PaystackFundingFlow, PaystackFundingService, PaystackWebhookResolver],
-  exports: [PaystackFundingFlow],
+  providers: [PaystackFundingFlow, PaystackFundingService, PaystackWebhookResolver, PaystackReconciliationJob],
+  exports: [PaystackFundingFlow, PaystackReconciliationJob],
 })
 export class PaystackFundingModule {}

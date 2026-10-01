@@ -16,6 +16,7 @@ import { ReconciliationMetrics } from './reconciliation-metrics';
 import { ReconciliationRunRepository } from './reconciliation-run.repository';
 import { ReconciliationScheduler } from './reconciliation-scheduler';
 import { SettlementIngestionService } from './settlement-ingestion.service';
+import { BreakOwnership, ProviderReconciliationRegistry } from './provider-reconciliation';
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -53,6 +54,8 @@ export class ReconciliationBreakChangedHandler implements OutboxEventHandler {
     ExternalReconciliationJob,
     ReconciliationScheduler,
     ReconciliationBreakChangedHandler,
+    ProviderReconciliationRegistry,
+    BreakOwnership,
   ],
   exports: [
     ReconciliationRunRepository,
@@ -63,6 +66,8 @@ export class ReconciliationBreakChangedHandler implements OutboxEventHandler {
     SettlementIngestionService,
     ExternalReconciliationJob,
     ReconciliationScheduler,
+    ProviderReconciliationRegistry,
+    BreakOwnership,
   ],
 })
 export class ReconciliationModule implements OnModuleInit {

@@ -13,6 +13,8 @@ export enum ReconciliationRunStatus {
 export interface ReconciliationRun {
   readonly id: string;
   readonly kind: ReconciliationRunKind;
+  /** Null: the configured simulated PSP (and INTERNAL). Otherwise the provider an external run reconciles. */
+  readonly provider: string | null;
   readonly periodKey: string;
   readonly status: ReconciliationRunStatus;
   readonly attempts: number;
@@ -30,6 +32,7 @@ export interface ClaimedRun extends ReconciliationRun {
 interface RunRow {
   id: string;
   kind: ReconciliationRunKind;
+  provider: string | null;
   period_key: string;
   status: ReconciliationRunStatus;
   attempts: number;
@@ -40,7 +43,7 @@ interface RunRow {
   lease_token: string | null;
 }
 
-const COLUMNS = `reconciliation_runs.id, reconciliation_runs.kind, reconciliation_runs.period_key, reconciliation_runs.status,
+const COLUMNS = `reconciliation_runs.id, reconciliation_runs.kind, reconciliation_runs.provider, reconciliation_runs.period_key, reconciliation_runs.status,
   reconciliation_runs.attempts, reconciliation_runs.started_at, reconciliation_runs.finished_at, reconciliation_runs.summary,
   reconciliation_runs.last_error, reconciliation_runs.lease_token`;
 const MAXIMUM_ERROR_LENGTH = 500;
@@ -49,6 +52,7 @@ function toRun(row: RunRow): ReconciliationRun {
   return {
     id: row.id,
     kind: row.kind,
+    provider: row.provider,
     periodKey: row.period_key,
     status: row.status,
     attempts: row.attempts,
@@ -71,20 +75,20 @@ function toRun(row: RunRow): ReconciliationRun {
 export class ReconciliationRunRepository {
   constructor(private readonly unitOfWork: UnitOfWork) {}
 
-  async claim(kind: ReconciliationRunKind, periodKey: string, leaseSeconds: number): Promise<ClaimedRun | null> {
+  async claim(kind: ReconciliationRunKind, periodKey: string, leaseSeconds: number, provider: string | null = null): Promise<ClaimedRun | null> {
     const manager = this.unitOfWork.manager;
     const [inserted] = (await manager.query(
-      `INSERT INTO reconciliation_runs (kind, period_key, status, attempts, leased_until, lease_token)
-       VALUES ($1, $2, 'RUNNING', 1, now() + make_interval(secs => $3), gen_random_uuid())
+      `INSERT INTO reconciliation_runs (kind, period_key, status, attempts, leased_until, lease_token, provider)
+       VALUES ($1, $2, 'RUNNING', 1, now() + make_interval(secs => $3), gen_random_uuid(), $4)
        ON CONFLICT (kind, (COALESCE(provider, '')), period_key) DO NOTHING
        RETURNING ${COLUMNS}`,
-      [kind, periodKey, leaseSeconds],
+      [kind, periodKey, leaseSeconds, provider],
     )) as RunRow[];
     if (inserted) return { ...toRun(inserted), leaseToken: inserted.lease_token as string };
     const [resumed] = (await manager.query(
       `WITH target AS (
          SELECT id FROM reconciliation_runs
-          WHERE kind = $1 AND period_key = $2 AND status = 'RUNNING'
+          WHERE kind = $1 AND period_key = $2 AND status = 'RUNNING' AND provider IS NOT DISTINCT FROM $4
             AND (leased_until IS NULL OR leased_until < now())
           FOR UPDATE SKIP LOCKED
        ), claimed AS (
@@ -95,18 +99,18 @@ export class ReconciliationRunRepository {
          RETURNING ${COLUMNS}
        )
        SELECT * FROM claimed`,
-      [kind, periodKey, leaseSeconds],
+      [kind, periodKey, leaseSeconds, provider],
     )) as RunRow[];
     return resumed ? { ...toRun(resumed), leaseToken: resumed.lease_token as string } : null;
   }
 
   /** Periods left RUNNING by a dead worker (lease lapsed), oldest first: resumed before new work. */
-  async abandonedPeriods(kind: ReconciliationRunKind): Promise<string[]> {
+  async abandonedPeriods(kind: ReconciliationRunKind, provider: string | null = null): Promise<string[]> {
     const rows = (await this.unitOfWork.manager.query(
       `SELECT period_key FROM reconciliation_runs
-        WHERE kind = $1 AND status = 'RUNNING' AND (leased_until IS NULL OR leased_until < now())
+        WHERE kind = $1 AND provider IS NOT DISTINCT FROM $2 AND status = 'RUNNING' AND (leased_until IS NULL OR leased_until < now())
         ORDER BY period_key`,
-      [kind],
+      [kind, provider],
     )) as { period_key: string }[];
     return rows.map((row) => row.period_key);
   }
@@ -154,28 +158,28 @@ export class ReconciliationRunRepository {
   }
 
   /** A period nobody ran, recorded so the gap is explicit (never "clean"). */
-  async recordMissed(kind: ReconciliationRunKind, periodKey: string): Promise<void> {
+  async recordMissed(kind: ReconciliationRunKind, periodKey: string, provider: string | null = null): Promise<void> {
     await this.unitOfWork.manager.query(
-      `INSERT INTO reconciliation_runs (kind, period_key, status, finished_at, summary)
-       VALUES ($1, $2, 'MISSED', now(), '{"reason":"no run in this period"}')
+      `INSERT INTO reconciliation_runs (kind, period_key, status, finished_at, summary, provider)
+       VALUES ($1, $2, 'MISSED', now(), '{"reason":"no run in this period"}', $3)
        ON CONFLICT (kind, (COALESCE(provider, '')), period_key) DO NOTHING`,
-      [kind, periodKey],
+      [kind, periodKey, provider],
     );
   }
 
   /** The latest period of this kind that has a row (run, running or missed). */
-  async latestPeriod(kind: ReconciliationRunKind): Promise<string | null> {
+  async latestPeriod(kind: ReconciliationRunKind, provider: string | null = null): Promise<string | null> {
     const [row] = (await this.unitOfWork.manager.query(
-      `SELECT period_key FROM reconciliation_runs WHERE kind = $1 ORDER BY period_key DESC LIMIT 1`,
-      [kind],
+      `SELECT period_key FROM reconciliation_runs WHERE kind = $1 AND provider IS NOT DISTINCT FROM $2 ORDER BY period_key DESC LIMIT 1`,
+      [kind, provider],
     )) as { period_key: string }[];
     return row?.period_key ?? null;
   }
 
-  async find(kind: ReconciliationRunKind, periodKey: string): Promise<ReconciliationRun | null> {
+  async find(kind: ReconciliationRunKind, periodKey: string, provider: string | null = null): Promise<ReconciliationRun | null> {
     const [row] = (await this.unitOfWork.manager.query(
-      `SELECT ${COLUMNS} FROM reconciliation_runs WHERE kind = $1 AND period_key = $2`,
-      [kind, periodKey],
+      `SELECT ${COLUMNS} FROM reconciliation_runs WHERE kind = $1 AND period_key = $2 AND provider IS NOT DISTINCT FROM $3`,
+      [kind, periodKey, provider],
     )) as RunRow[];
     return row ? toRun(row) : null;
   }

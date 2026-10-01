@@ -17,6 +17,7 @@ import { ClaimedRun, ReconciliationRunRepository, ReconciliationRunStatus } from
 import { SettlementIngestionService } from './settlement-ingestion.service';
 import { RECONCILIATION_INITIATED_BY } from './settlement-posting';
 import { isPastSettlementWindow, settlementDeadline } from './settlement-window';
+import { BreakOwnership } from './provider-reconciliation';
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const DAY = 24 * 3600 * 1000;
@@ -131,6 +132,7 @@ export class ExternalReconciliationJob {
     private readonly checkpoints: ReconciliationCheckpoints,
     private readonly clock: Clock,
     @Inject(APP_CONFIG) private readonly config: AppConfig,
+    private readonly ownership: BreakOwnership,
   ) {}
 
   private get providerName(): string {
@@ -501,13 +503,14 @@ export class ExternalReconciliationJob {
     const events = (await this.unitOfWork.manager.query(
       `SELECT webhook_events.id, webhook_events.raw_payload
          FROM webhook_events
-        WHERE webhook_events.outcome = 'UNMATCHED'
+        WHERE webhook_events.outcome = 'UNMATCHED' AND webhook_events.provider = $1
           AND NOT EXISTS (SELECT 1 FROM reconciliation_breaks
                            WHERE reconciliation_breaks.type = 'UNMATCHED_WEBHOOK'
                              AND reconciliation_breaks.webhook_event_id = webhook_events.id
                              AND reconciliation_breaks.status <> 'OPEN')
         ORDER BY webhook_events.received_at, webhook_events.id
         LIMIT 500`,
+      [this.providerName],
     )) as { id: string; raw_payload: Buffer }[];
     for (const event of events) {
       const detection = await this.breaks.detectAndRecord(run.id, {
@@ -603,6 +606,9 @@ export class ExternalReconciliationJob {
     const types = (Object.keys(BREAK_POLICIES) as BreakType[]).filter((type) => BREAK_POLICIES[type].rederivedBy === 'EXTERNAL_DAILY');
     for (const live of await this.breaks.live(types)) {
       if (seen.detected.has(live.id) || seen.resolved.has(live.id)) continue;
+      // Another provider's break is its own run's business (PAYSTACK_PLAN.md C7): never swept from here.
+      const owner = await this.ownership.providerOf(live);
+      if (owner !== null && owner !== this.providerName) continue;
       const note = `No longer detected by external run ${run.id} (${run.periodKey}); not resolved: no cause was named.`;
       if (!(await this.breaks.escalate(live.id, RECONCILIATION_INITIATED_BY, note))) await this.breaks.annotate(live.id, note);
     }

@@ -9,6 +9,7 @@ import { ExternalReconciliationJob, ExternalRunResult } from './external-reconci
 import { InternalReconciliationJob, InternalRunResult } from './internal-reconciliation.job';
 import { ClaimedRun, ReconciliationRunRepository } from './reconciliation-run.repository';
 import { ReconciliationRunKind, missedPeriods, periodDue } from './reconciliation-schedule';
+import { ProviderReconciliationRegistry } from './provider-reconciliation';
 
 export type RunResult = InternalRunResult | ExternalRunResult;
 
@@ -39,6 +40,7 @@ export class ReconciliationScheduler {
     private readonly runs: ReconciliationRunRepository,
     private readonly internal: InternalReconciliationJob,
     private readonly external: ExternalReconciliationJob,
+    private readonly providers: ProviderReconciliationRegistry,
     private readonly clock: Clock,
     @Inject(APP_CONFIG) private readonly config: AppConfig,
   ) {
@@ -70,32 +72,43 @@ export class ReconciliationScheduler {
         // Logged and released by `runPeriod`; the other kinds still run this tick.
       }
     }
+    // Every other provider's external runs (Paystack, when enabled): their own periods, their own leases.
+    for (const provider of this.providers.all()) {
+      for (const kind of [ReconciliationRunKind.EXTERNAL_DAILY, ReconciliationRunKind.EXTERNAL_HOURLY]) {
+        try {
+          results.push(...(await this.runDue(kind, this.clock.now(), provider.provider)));
+        } catch {
+          // Logged and released by `runPeriod`.
+        }
+      }
+    }
     return results;
   }
 
-  async runDue(kind: ReconciliationRunKind, now: Date = this.clock.now()): Promise<RunResult[]> {
+  /** `provider` null: the configured simulated PSP's run (and INTERNAL), exactly as before. */
+  async runDue(kind: ReconciliationRunKind, now: Date = this.clock.now(), provider: string | null = null): Promise<RunResult[]> {
     const current = periodDue(kind, now, this.config.reconciliation);
     const results: RunResult[] = [];
-    for (const period of await this.runs.abandonedPeriods(kind)) {
+    for (const period of await this.runs.abandonedPeriods(kind, provider)) {
       if (period === current) continue;
-      const resumed = await this.runPeriod(kind, period);
+      const resumed = await this.runPeriod(kind, period, provider);
       if (resumed) results.push(resumed);
     }
-    const last = await this.runs.latestPeriod(kind);
+    const last = await this.runs.latestPeriod(kind, provider);
     if (last !== null && last < current) {
       for (const period of missedPeriods(last, current)) {
-        await this.runs.recordMissed(kind, period);
-        this.logger.warn({ kind, periodKey: period }, 'Reconciliation period missed (no run); recorded');
+        await this.runs.recordMissed(kind, period, provider);
+        this.logger.warn({ kind, provider, periodKey: period }, 'Reconciliation period missed (no run); recorded');
       }
     }
-    const result = await this.runPeriod(kind, current);
+    const result = await this.runPeriod(kind, current, provider);
     if (result) results.push(result);
     return results;
   }
 
   /** Claim and run one period (resuming it if a dead worker left it). `null`: not ours to run. */
-  async runPeriod(kind: ReconciliationRunKind, periodKey: string): Promise<RunResult | null> {
-    const run = await this.runs.claim(kind, periodKey, this.config.reconciliation.leaseSeconds);
+  async runPeriod(kind: ReconciliationRunKind, periodKey: string, provider: string | null = null): Promise<RunResult | null> {
+    const run = await this.runs.claim(kind, periodKey, this.config.reconciliation.leaseSeconds, provider);
     if (!run) return null;
     return RequestContext.run({ correlationId: `reconciliation-${randomUUID()}` }, async () => {
       try {
@@ -110,6 +123,13 @@ export class ReconciliationScheduler {
   }
 
   private execute(run: ClaimedRun): Promise<RunResult> {
+    if (run.provider !== null) {
+      const reconciliation = this.providers.find(run.provider);
+      if (!reconciliation) throw new Error(`No reconciliation registered for provider ${run.provider}.`);
+      if (run.kind === ReconciliationRunKind.EXTERNAL_DAILY) return reconciliation.runDaily(run);
+      if (run.kind === ReconciliationRunKind.EXTERNAL_HOURLY) return reconciliation.runHourly(run);
+      throw new Error(`A ${run.kind} run cannot belong to provider ${run.provider}.`);
+    }
     switch (run.kind) {
       case ReconciliationRunKind.INTERNAL:
         return this.internal.run(run);
