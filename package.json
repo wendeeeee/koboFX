@@ -25,7 +25,9 @@
     "test:all": "jest --runInBand",
     "test:cov": "jest --maxWorkers=1 --workerIdleMemoryLimit=1024MB --coverage",
     "start:mock-psp:dev": "ts-node src/mock-psp/main.ts",
-    "start:mock-fx:dev": "ts-node src/mock-exchange-rate-api/main.ts"
+    "start:mock-fx:dev": "ts-node src/mock-exchange-rate-api/main.ts",
+    "start:mock-paystack:dev": "ts-node src/mock-paystack/main.ts",
+    "paystack:smoke": "ts-node scripts/smoke-paystack.ts"
   },
   "dependencies": {
     "@nestjs/common": "^11.2.6",

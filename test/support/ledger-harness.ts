@@ -6,7 +6,9 @@ import { RedisContainer, StartedRedisContainer } from '@testcontainers/redis';
 import type { DestinationStream } from 'pino';
 import { DataSource } from 'typeorm';
 import { AppModule } from '../../src/app.module';
-import { API_PREFIX, PSP_WEBHOOK_PATH, configureApp } from '../../src/app.setup';
+import { API_PREFIX, PAYSTACK_WEBHOOK_PATH, PSP_WEBHOOK_PATH, configureApp } from '../../src/app.setup';
+import { MockPaystack } from '../../src/mock-paystack/mock-paystack';
+import { PaystackGateway } from '../../src/modules/payments/paystack/paystack-gateway.port';
 import { CaptureCompletion, MockPsp } from '../../src/mock-psp/mock-psp';
 import { MockExchangeRateApi, RECORDED_RATES } from '../../src/mock-exchange-rate-api/mock-exchange-rate-api';
 import { FetchCoordination } from '../../src/modules/fx/fetch-coordination';
@@ -118,6 +120,30 @@ export interface HarnessOptions {
    * uses the key-less open-access endpoint (OPEN plan) instead.
    */
   readonly fx?: { readonly open?: boolean } | true;
+  /**
+   * Enable Paystack and run the simulated Paystack on an ephemeral port (implies `payments`). The key is synthetic
+   * (`sk_test_…`, random per harness); webhooks are delivered on command through the real pipeline. Without this,
+   * `PAYSTACK_BASE_URL` points nowhere (`127.0.0.1:9`): no test ever reaches the real Paystack.
+   */
+  readonly paystack?: { readonly hangMilliseconds?: number; readonly checkoutWindowMinutes?: number; readonly webhookIpAllowlist?: string } | true;
+}
+
+/** Present when the harness was started with `{ paystack }`. */
+export interface PaystackHarness {
+  readonly mock: MockPaystack;
+  /** The synthetic secret key: must never appear in a row, a log or a response. */
+  readonly secretKey: string;
+  /** `POST /wallet/fund/paystack` through the real pipeline. */
+  fund(user: SignedUpUser, body: Record<string, unknown>, idempotencyKey?: string): request.Test;
+  /** `GET /wallet/fund/{fundingId}`. */
+  status(user: SignedUpUser, fundingId: string): request.Test;
+  /** POST raw bytes to the Paystack webhook route, with exactly these headers. */
+  postWebhook(body: Buffer, headers: Record<string, string>): request.Test;
+  /**
+   * Every call the app made through the Paystack port, and whether it was made INSIDE a database transaction (the
+   * ambient UnitOfWork's) — which must never happen (CLAUDE.md non-negotiable).
+   */
+  readonly gatewayCalls: { readonly operation: string; readonly insideTransaction: boolean }[];
 }
 
 /** Present when the harness was started with `{ fx }`. */
@@ -234,6 +260,8 @@ export interface PaymentsHarness {
   drive(options?: { rounds?: number; deliverWebhooks?: boolean }): Promise<void>;
   readonly reconciliation: ReconciliationHarness;
   readonly admin: AdminHarness;
+  /** Only with `{ paystack }`. */
+  readonly paystack: PaystackHarness | undefined;
 }
 
 export interface LedgerHarness {
@@ -289,7 +317,11 @@ export async function startLedgerHarness(
   options: HarnessOptions = {},
 ): Promise<LedgerHarness> {
   const withFx = options.fx !== undefined;
-  const withPayments = options.payments !== undefined || withFx;
+  const withPaystack = options.paystack !== undefined;
+  const withPayments = options.payments !== undefined || withFx || withPaystack;
+  const paystackOptions = options.paystack === true ? {} : (options.paystack ?? {});
+  // Synthetic, random per harness: the shape of a Paystack test key, never a real one.
+  const paystackSecretKey = `sk_test_${randomUUID().replace(/-/g, '')}${randomUUID().replace(/-/g, '').slice(0, 8)}`;
   const fxOpen = typeof options.fx === 'object' && options.fx.open === true;
   const fxApiKey = `mockfxkey${randomUUID().replace(/-/g, '').slice(0, 20)}`;
   const fxApi = withFx ? new MockExchangeRateApi({ apiKey: fxApiKey }) : undefined;
@@ -309,6 +341,10 @@ export async function startLedgerHarness(
       })
     : undefined;
   const pspUrl = psp ? await psp.start() : undefined;
+  const paystackMock = withPaystack
+    ? new MockPaystack({ secretKey: paystackSecretKey, now: () => clock.now(), hangMilliseconds: paystackOptions.hangMilliseconds ?? 1300 })
+    : undefined;
+  const paystackUrl = paystackMock ? await paystackMock.start() : undefined;
   const db = await startTestDatabase({
     ...(redis ? { REDIS_URL: redis.getConnectionUrl() } : {}),
     ...(pspUrl
@@ -321,6 +357,20 @@ export async function startLedgerHarness(
           SETTLEMENT_WINDOWS: '{"NGN":{"businessDays":2,"graceHours":24},"USD":{"businessDays":2,"graceHours":24}}',
         }
       : {}),
+    ...(paystackUrl
+      ? {
+          PAYSTACK_ENABLED: 'true',
+          PAYSTACK_SECRET_KEY: paystackSecretKey,
+          PAYSTACK_BASE_URL: paystackUrl,
+          PAYSTACK_CALLBACK_URL: 'http://localhost:5173/funding/return',
+          PAYSTACK_FUNDING_CURRENCIES: 'NGN,USD',
+          // Fast failure in tests; the policy (reads retried, initialize sent once) is unchanged.
+          PAYSTACK_REQUEST_TIMEOUT_MILLISECONDS: '300',
+          PAYSTACK_INITIALIZE_TIMEOUT_MILLISECONDS: '1000',
+          ...(paystackOptions.checkoutWindowMinutes ? { PAYSTACK_CHECKOUT_WINDOW_MINUTES: String(paystackOptions.checkoutWindowMinutes) } : {}),
+          ...(paystackOptions.webhookIpAllowlist ? { PAYSTACK_WEBHOOK_IP_ALLOWLIST: paystackOptions.webhookIpAllowlist } : {}),
+        }
+      : { PAYSTACK_BASE_URL: 'http://127.0.0.1:9' }),
     ...(fxUrl
       ? {
           ...(fxOpen
@@ -375,6 +425,7 @@ export async function startLedgerHarness(
       // Sent as a string: superagent would JSON-serialise a Buffer and change the bytes
       // (the signature is over the raw bytes, so that is refused — correctly).
       psp.setDeliverer(async (body, headers) => (await http().post(PSP_WEBHOOK_PATH).set(headers).send(body.toString('utf8'))).status);
+      paystackMock?.setDeliverer(async (body, headers) => (await http().post(PAYSTACK_WEBHOOK_PATH).set(headers).send(body.toString('utf8'))).status);
       const runner = moduleRef.get(FlowRunner);
       const resumer = moduleRef.get(FlowResumer);
       const processor = moduleRef.get(WebhookProcessor);
@@ -479,9 +530,37 @@ export async function startLedgerHarness(
         get: (user, path) => http().get(adminPath(path)).set('Authorization', `Bearer ${user.accessToken}`),
         requestAndApprove,
       };
+      const gatewayCalls: { operation: string; insideTransaction: boolean }[] = [];
+      if (paystackMock) {
+        const gateway = moduleRef.get(PaystackGateway);
+        const unitOfWork = moduleRef.get(UnitOfWork);
+        for (const operation of ['initialize', 'verify', 'listTransactions', 'listDisputes'] as const) {
+          const original = gateway[operation].bind(gateway) as (...parameters: unknown[]) => Promise<unknown>;
+          (gateway as unknown as Record<string, unknown>)[operation] = (...parameters: unknown[]) => {
+            gatewayCalls.push({ operation, insideTransaction: unitOfWork.inTransaction });
+            return original(...parameters);
+          };
+        }
+      }
+      const paystack: PaystackHarness | undefined = paystackMock
+        ? {
+            gatewayCalls,
+            mock: paystackMock,
+            secretKey: paystackSecretKey,
+            fund: (user, body, idempotencyKey = randomUUID()) =>
+              http()
+                .post(`/${API_PREFIX}/wallet/fund/paystack`)
+                .set('Authorization', `Bearer ${user.accessToken}`)
+                .set('Idempotency-Key', idempotencyKey)
+                .send(body),
+            status: (user, fundingId) => http().get(`/${API_PREFIX}/wallet/fund/${fundingId}`).set('Authorization', `Bearer ${user.accessToken}`),
+            postWebhook: (body, headers) => http().post(PAYSTACK_WEBHOOK_PATH).set(headers).send(body.toString('utf8')),
+          }
+        : undefined;
       payments = {
         reconciliation,
         admin,
+        paystack,
         psp,
         runner,
         resumer,
@@ -515,7 +594,7 @@ export async function startLedgerHarness(
         async drive({ rounds = 12, deliverWebhooks = true } = {}) {
           for (let round = 0; round < rounds; round += 1) {
             let activity = 0;
-            if (deliverWebhooks) activity += (await psp.deliverAll()).length;
+            if (deliverWebhooks) activity += (await psp.deliverAll()).length + (paystackMock ? (await paystackMock.deliverAll()).length : 0);
             activity += (await processor.processDue(100)).claimed;
             activity += await resumer.resumeDue(100);
             await makeAllDue();
@@ -754,6 +833,7 @@ export async function startLedgerHarness(
       if (auth) await auth.app.close();
       else await moduleRef.close();
       await psp?.stop();
+      await paystackMock?.stop();
       await fxApi?.stop();
       await db.stop();
       await redis?.stop().catch(() => undefined);
