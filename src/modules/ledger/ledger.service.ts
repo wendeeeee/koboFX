@@ -27,7 +27,7 @@ import {
   TransactionStatus,
   TransactionType,
 } from './ledger.types';
-import { LockedAccount, lockBalanceAuthorizingAccounts } from './account-locks';
+import { LockedAccount, lockBalanceAuthorizingAccounts, lockInternalAccounts } from './account-locks';
 import { assertReductionAuthorized } from './posting/authorization';
 import { bucketForTransaction, systemAccountCode } from './posting/bucket';
 import { validatePostingRequest } from './posting/posting-validation';
@@ -151,6 +151,14 @@ export class LedgerService {
    */
   async lockUserAccounts(accountIds: readonly string[]): Promise<Map<string, LockedAccount>> {
     return lockBalanceAuthorizingAccounts(this.unitOfWork.requireTransaction(), accountIds);
+  }
+
+  /**
+   * Lock the exact union of internal accounts a multi-posting unit will touch, ascending, after its user accounts and
+   * reservations (see `lockInternalAccounts`). Postings in the unit must then name those accounts by id.
+   */
+  async lockInternalAccounts(accountIds: readonly string[]): Promise<void> {
+    await lockInternalAccounts(this.unitOfWork.requireTransaction(), accountIds);
   }
 
   /**

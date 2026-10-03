@@ -110,8 +110,11 @@ describe('Paystack schema guards', () => {
     const { rows } = await app.query(
       `SELECT name, account_type, normal_side FROM system_account_templates WHERE name LIKE 'PAYSTACK_%' ORDER BY name`,
     );
+    // The payout templates (withdrawals, W1) sit beside the funding ones and never match the receivable proof's codes.
     expect(rows).toEqual([
       { name: 'PAYSTACK_CLEARING', account_type: 'ASSET', normal_side: 'DEBIT' },
+      { name: 'PAYSTACK_PAYOUT_BALANCE', account_type: 'ASSET', normal_side: 'DEBIT' },
+      { name: 'PAYSTACK_PAYOUT_IN_TRANSIT', account_type: 'ASSET', normal_side: 'DEBIT' },
       { name: 'PAYSTACK_RECEIVABLE', account_type: 'ASSET', normal_side: 'DEBIT' },
     ]);
     const codes = await app.query(

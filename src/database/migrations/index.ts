@@ -40,6 +40,11 @@ import { AddPaystackEnumValues1791331200000 } from './1791331200000-AddPaystackE
 import { PaystackFunding1791331200001 } from './1791331200001-PaystackFunding';
 import { PaystackAccountTemplates1791331200002 } from './1791331200002-PaystackAccountTemplates';
 import { ReconciliationRunsProvider1791331200003 } from './1791331200003-ReconciliationRunsProvider';
+import { AddWithdrawalFlowTypes1791417600000 } from './1791417600000-AddWithdrawalFlowTypes';
+import { WithdrawalFlowStates1791417600001 } from './1791417600001-WithdrawalFlowStates';
+import { ProtectedReservationsAndPayoutAccounts1791417600002 } from './1791417600002-ProtectedReservationsAndPayoutAccounts';
+import { CreateProviderEvidence1791417600003 } from './1791417600003-CreateProviderEvidence';
+import { CreateWithdrawals1791417600004 } from './1791417600004-CreateWithdrawals';
 
 /** Explicit, ordered list — no globbing, so the CLI and the test harness run the same set. */
 export const MIGRATIONS = [
@@ -85,4 +90,9 @@ export const MIGRATIONS = [
   PaystackFunding1791331200001,
   PaystackAccountTemplates1791331200002,
   ReconciliationRunsProvider1791331200003,
+  AddWithdrawalFlowTypes1791417600000,
+  WithdrawalFlowStates1791417600001,
+  ProtectedReservationsAndPayoutAccounts1791417600002,
+  CreateProviderEvidence1791417600003,
+  CreateWithdrawals1791417600004,
 ];

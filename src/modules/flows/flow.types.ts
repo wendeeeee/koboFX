@@ -6,6 +6,10 @@ export enum FlowType {
   CONVERSION = 'CONVERSION',
  
   PAYSTACK_FUNDING = 'PAYSTACK_FUNDING',
+
+  PAYSTACK_BENEFICIARY = 'PAYSTACK_BENEFICIARY',
+
+  PAYSTACK_WITHDRAWAL = 'PAYSTACK_WITHDRAWAL',
 }
 
 export interface FlowInstance {
@@ -39,9 +43,23 @@ export interface FlowChange {
   readonly note?: string;
 }
 
+/**
+ * `lockOwnerFirst`: take the flow owner's `users` row `FOR SHARE` BEFORE the flow row (global order: users → flow),
+ * so the step's work reads an eligibility a concurrent suspension cannot change until commit. For a withdrawal's
+ * submission marker and unsent cancellation (WITHDRAWAL_PLAN.md §G.1 step 3); other flows keep the plain commit.
+ */
+export interface FlowCommitOptions {
+  readonly lockOwnerFirst?: boolean;
+}
+
 export interface FlowStepRuntime {
   checkpoint(point: FlowCheckpoint): Promise<void>;
-  commit(expectedState: string, change: FlowChange, work?: (manager: EntityManager) => Promise<void>): Promise<void>;
+  commit(
+    expectedState: string,
+    change: FlowChange,
+    work?: (manager: EntityManager) => Promise<void>,
+    options?: FlowCommitOptions,
+  ): Promise<void>;
 }
 
 export type StepOutcome =

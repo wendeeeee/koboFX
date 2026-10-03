@@ -2,7 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { EntityManager } from 'typeorm';
 import { UnitOfWork } from '../../database/transaction/unit-of-work';
 import { FlowLeaseLostError, StaleFlowStateError } from './flow.errors';
-import { ClaimedFlow, FlowChange, FlowInstance, FlowType } from './flow.types';
+import { ClaimedFlow, FlowChange, FlowCommitOptions, FlowInstance, FlowType } from './flow.types';
 
 interface FlowRow {
   id: string;
@@ -135,8 +135,12 @@ export class FlowRepository {
     change: FlowChange,
     work: ((manager: EntityManager) => Promise<void>) | undefined,
     beforeCommit: () => Promise<void>,
+    options: FlowCommitOptions = {},
   ): Promise<void> {
     await this.unitOfWork.run(async (manager) => {
+      if (options.lockOwnerFirst) {
+        await manager.query(`SELECT id FROM users WHERE id = $1 FOR SHARE`, [flow.userId]);
+      }
       const [row] = (await manager.query(`SELECT state, lease_token FROM flow_instances WHERE id = $1 FOR UPDATE`, [
         flow.id,
       ])) as { state: string; lease_token: string | null }[];

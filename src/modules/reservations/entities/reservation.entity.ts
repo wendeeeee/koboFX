@@ -1,6 +1,6 @@
 import { Column, Entity, PrimaryColumn } from 'typeorm';
 import { bigintTransformer } from '../../../database/bigint.transformer';
-import { ReservationStatus } from '../reservation.types';
+import { ReservationExpiryPolicy, ReservationStatus } from '../reservation.types';
 
 /**
  * Read model of `reservations` (design §6.3). Written ONLY by `ReservationService`,
@@ -31,6 +31,9 @@ export class ReservationEntity {
 
   @Column({ name: 'expires_at', type: 'timestamptz' })
   expiresAt!: Date;
+
+  @Column({ name: 'expiry_policy', type: 'enum', enum: ReservationExpiryPolicy, enumName: 'reservation_expiry_policy' })
+  expiryPolicy!: ReservationExpiryPolicy;
 
   @Column({ name: 'created_at', type: 'timestamptz' })
   createdAt!: Date;

@@ -95,9 +95,14 @@ export class FlowRunner {
       const flowRef = { flowId: flow.id, state: flow.state };
       const runtime: FlowStepRuntime = {
         checkpoint: (point) => this.checkpoints.reached(point, flowRef),
-        commit: (expectedState, change, work) =>
-          this.repository.commit(flow, expectedState, change, work, () =>
-            this.checkpoints.reached(FlowCheckpoint.BEFORE_COMMIT, flowRef),
+        commit: (expectedState, change, work, options) =>
+          this.repository.commit(
+            flow,
+            expectedState,
+            change,
+            work,
+            () => this.checkpoints.reached(FlowCheckpoint.BEFORE_COMMIT, flowRef),
+            options,
           ),
       };
       let outcome: StepOutcome;

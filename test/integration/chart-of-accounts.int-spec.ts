@@ -27,6 +27,12 @@ const TEMPLATES: ReadonlyArray<[string, AccountType, NormalSide]> = [
   ['EXPENSE:WRITE_OFF', AccountType.EXPENSE, NormalSide.DEBIT],
   // Phase 10: money the PSP paid us twice, owed back (a duplicate settlement line).
   ['PSP_PAYABLE', AccountType.LIABILITY, NormalSide.CREDIT],
+  // Paystack funding (PAYSTACK_PLAN.md C6) and withdrawals (WITHDRAWAL_PLAN.md §F.1).
+  ['PAYSTACK_RECEIVABLE', AccountType.ASSET, NormalSide.DEBIT],
+  ['PAYSTACK_CLEARING', AccountType.ASSET, NormalSide.DEBIT],
+  ['PAYSTACK_PAYOUT_BALANCE', AccountType.ASSET, NormalSide.DEBIT],
+  ['PAYSTACK_PAYOUT_IN_TRANSIT', AccountType.ASSET, NormalSide.DEBIT],
+  ['EXPENSE:PAYSTACK_TRANSFER_FEES', AccountType.EXPENSE, NormalSide.DEBIT],
 ];
 
 describe('Chart of accounts (design §5.1, §6.6)', () => {

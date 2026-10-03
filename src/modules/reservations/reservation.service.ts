@@ -15,7 +15,14 @@ import {
   ReservationNotActiveError,
   ReservationNotFoundError,
 } from './reservation.errors';
-import { ExpiryResult, Reservation, ReservationStatus, ReserveRequest, SettlementPosting } from './reservation.types';
+import {
+  ExpiryResult,
+  Reservation,
+  ReservationExpiryPolicy,
+  ReservationStatus,
+  ReserveRequest,
+  SettlementPosting,
+} from './reservation.types';
 import { netUserAccountChanges, settledAmountMinor, settlementArithmetic } from './settlement';
 import { ReservationCommand, decideTransition } from './transitions';
 
@@ -28,6 +35,7 @@ interface ReservationRow {
   settlement_transaction_id: string | null;
   status: ReservationStatus;
   expires_at: Date;
+  expiry_policy: ReservationExpiryPolicy;
   created_at: Date;
   resolved_at: Date | null;
   currency_code: string;
@@ -37,7 +45,7 @@ interface ReservationRow {
 const columns = (source: string) => `
   ${source}.id, ${source}.account_id, ${source}.flow_id,
   ${source}.amount_minor::text AS amount_minor, ${source}.settled_minor::text AS settled_minor,
-  ${source}.settlement_transaction_id, ${source}.status, ${source}.expires_at, ${source}.created_at,
+  ${source}.settlement_transaction_id, ${source}.status, ${source}.expires_at, ${source}.expiry_policy, ${source}.created_at,
   ${source}.resolved_at, accounts.currency_code`;
 
 /**
@@ -66,6 +74,7 @@ export class ReservationService {
     }
     const accountId = request.accountId.toLowerCase();
     const flowId = request.flowId.toLowerCase();
+    const expiryPolicy = request.expiryPolicy ?? ReservationExpiryPolicy.AUTOMATIC;
 
     return this.unitOfWork.run(async (manager) => {
       const account = await this.lockReservableAccount(manager, accountId);
@@ -79,6 +88,15 @@ export class ReservationService {
 
       const existing = await this.findByFlowAndAccount(manager, flowId, accountId);
       if (existing) {
+        if (existing.expiryPolicy !== expiryPolicy) {
+          throw new ReservationConflictError('This flow already holds this account under a different expiry policy.', {
+            reservationId: existing.id,
+            flowId,
+            accountId,
+            heldPolicy: existing.expiryPolicy,
+            requestedPolicy: expiryPolicy,
+          });
+        }
         if (existing.amount.equals(request.amount)) return existing;
         throw new ReservationConflictError('This flow already holds a different amount on this account.', {
           reservationId: existing.id,
@@ -102,12 +120,12 @@ export class ReservationService {
 
       const [inserted] = (await manager.query(
         `WITH inserted AS (
-           INSERT INTO reservations (account_id, flow_id, amount_minor, expires_at)
-           VALUES ($1, $2, $3, $4)
+           INSERT INTO reservations (account_id, flow_id, amount_minor, expires_at, expiry_policy)
+           VALUES ($1, $2, $3, $4, $5)
            RETURNING *
          )
          SELECT ${columns('inserted')} FROM inserted JOIN accounts ON accounts.id = inserted.account_id`,
-        [accountId, flowId, request.amount.toMinorString(), request.expiresAt],
+        [accountId, flowId, request.amount.toMinorString(), request.expiresAt, expiryPolicy],
       )) as ReservationRow[];
       await this.adjustReserved(manager, accountId, request.amount.amountMinor);
       return toReservation(inserted);
@@ -220,7 +238,7 @@ export class ReservationService {
     const expired = await this.unitOfWork.run(async (manager) => {
       const candidates = (await manager.query(
         `SELECT id, account_id FROM reservations
-          WHERE status = 'ACTIVE' AND expires_at <= $1
+          WHERE status = 'ACTIVE' AND expiry_policy = 'AUTOMATIC' AND expires_at <= $1
           ORDER BY expires_at, reservations.id
           LIMIT $2`,
         [now, batchSize],
@@ -238,7 +256,7 @@ export class ReservationService {
       const rows = (await manager.query(
         `WITH due AS (
            SELECT id FROM reservations
-            WHERE id = ANY($1::uuid[]) AND status = 'ACTIVE' AND expires_at <= $2
+            WHERE id = ANY($1::uuid[]) AND status = 'ACTIVE' AND expiry_policy = 'AUTOMATIC' AND expires_at <= $2
             ORDER BY reservations.id
               FOR UPDATE SKIP LOCKED
          ),
@@ -350,6 +368,7 @@ function toReservation(row: ReservationRow): Reservation {
     settledAmount: row.settled_minor === null ? null : Money.fromMinorString(row.settled_minor, row.currency_code),
     settlementTransactionId: row.settlement_transaction_id,
     expiresAt: row.expires_at,
+    expiryPolicy: row.expiry_policy,
     createdAt: row.created_at,
     resolvedAt: row.resolved_at,
   };
