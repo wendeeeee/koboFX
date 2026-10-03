@@ -9,11 +9,7 @@ import { FundingPaymentRepository } from '../funding/funding-payment.repository'
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
-/**
- * Which Paystack funding a stored webhook is about: by Paystack's transaction id once we recorded it, else by OUR
- * reference (the flow id) — but only a reference naming a `PAYSTACK_FUNDING` flow. Anything else is UNMATCHED (kept
- * for reconciliation). Nothing else in the payload is read.
- */
+
 @Injectable()
 export class PaystackWebhookResolver implements WebhookResolver, OnModuleInit {
   readonly provider: string;

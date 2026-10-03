@@ -2,7 +2,6 @@ import { Injectable } from '@nestjs/common';
 import { UnitOfWork } from '../../../database/transaction/unit-of-work';
 import { OneTimePasswordPurpose } from './one-time-password';
 
-/** `one_time_password_challenge_outcome`. */
 export enum OneTimePasswordChallengeOutcome {
   CONSUMED = 'CONSUMED',
   EXHAUSTED = 'EXHAUSTED',
@@ -10,18 +9,14 @@ export enum OneTimePasswordChallengeOutcome {
   EXPIRED = 'EXPIRED',
 }
 
-/**
- * `one_time_password_challenges`: the audit record that a challenge was issued and how
- * it ended. Never the code, never its HMAC.
- */
+
 @Injectable()
 export class OneTimePasswordChallengeRepository {
   constructor(private readonly unitOfWork: UnitOfWork) {}
 
   /**
    * Resolve the open challenge (if any) before issuing a new one: EXPIRED if it ran
-   * out, SUPERSEDED otherwise. At most one open challenge per user and purpose is a
-   * unique index, so this must precede `insertIssued` in the same transaction.
+   * out, SUPERSEDED otherwise.
    */
   async closeOpen(purpose: OneTimePasswordPurpose, userId: string): Promise<void> {
     await this.unitOfWork.requireTransaction().query(
@@ -47,7 +42,6 @@ export class OneTimePasswordChallengeRepository {
     );
   }
 
-  /** Record how a challenge ended. Set once: a challenge already resolved is left as it is. */
   async resolve(challengeId: string, outcome: OneTimePasswordChallengeOutcome): Promise<void> {
     await this.unitOfWork.manager.query(
       `UPDATE one_time_password_challenges SET outcome = $2, resolved_at = now() WHERE id = $1 AND outcome IS NULL`,

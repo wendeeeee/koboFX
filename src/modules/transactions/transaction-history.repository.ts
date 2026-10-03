@@ -6,16 +6,7 @@ import { microsecondsToTimestamp, timestampToMicroseconds } from './history-time
 import { TransactionLookup } from './reference';
 import { HistoryRow } from './transaction.view';
 
-/**
- * Whose history, and how much of it (design §7.8, §14 `transactions/`). Every query filters by
- * `userId` in SQL, in both views.
- *
- * - `USER` (the default): the user's own legs only, no internal fields (Phase 8 decisions 5, 11).
- * - `ADMIN` (Phase 10, `/admin/users/:userId/transactions`): the SAME user's rows, plus every leg of each
- *   (internal accounts by code and bucket), `metadata`, `external_reference`, the correction subject and
- *   links to internal transactions by reference. Never another user's data: a leg on another user's account
- *   fails loudly (`INVARIANT_VIOLATION`), as does a link to another user's transaction.
- */
+
 export type HistoryView = 'USER' | 'ADMIN';
 
 export interface HistoryScope {
@@ -28,7 +19,6 @@ export interface HistoryStatement {
   readonly parameters: readonly unknown[];
 }
 
-/** Collects positional parameters: `bind(value)` returns `$n`. */
 class Parameters {
   readonly values: unknown[] = [];
 
@@ -43,35 +33,22 @@ const TIME_COLUMN: Readonly<Record<HistorySort, 'value_time' | 'booking_time'>> 
   [HistorySort.BOOKING_TIME]: 'booking_time',
 };
 
-/**
- * The read model over the books and the funding flows (Phase 8). It never writes, never touches
- * Redis or the FX path, and never reads a balance: history is derived from `transactions`,
- * `ledger_entries` and `funding_payments` on every request, so it cannot drift from them.
- *
- * Each request is ONE statement — one snapshot — so nothing here assumes read-your-writes beyond
- * it (design §13: a read replica must work unchanged). A funding that posts meanwhile is either
- * unposted (the funding branch) or posted (the transaction branch), never both, never neither:
- * `funding_transaction_id` is set in the posting's own transaction.
- *
- * Shape: a `page` CTE of `(source, id, sort_time)` from index-ordered branches (keyset, never
- * OFFSET), then one projection joining the row, its correction links and the USER's own legs.
- */
+
 @Injectable()
 export class TransactionHistoryRepository {
   constructor(private readonly unitOfWork: UnitOfWork) {}
 
-  /** Up to `limit` rows after `position` (exclusive), newest first in the query's sort. */
   async page(scope: HistoryScope, query: HistoryQuery, position: HistoryPosition | null, limit: number): Promise<HistoryRow[]> {
     return this.run(this.buildPage(scope, query, position, limit));
   }
 
-  /** One transaction (or unposted funding) by reference or id, scoped by the caller; `null` if none. */
+
   async find(scope: HistoryScope, lookup: TransactionLookup): Promise<HistoryRow | null> {
     const [row] = await this.run(this.buildFind(scope, lookup));
     return row ?? null;
   }
 
-  /** The exact statement `page()` runs — public so a test can EXPLAIN it (index use is part of the contract). */
+
   buildPage(scope: HistoryScope, query: HistoryQuery, position: HistoryPosition | null, limit: number): HistoryStatement {
     const parameters = new Parameters();
     const user = parameters.bind(scope.userId);
@@ -80,13 +57,11 @@ export class TransactionHistoryRepository {
     if (query.type === null || query.type === TransactionType.FUNDING) {
       branches.push(this.unpostedFundingBranch(parameters, user, size, query, position));
     }
-    // Each branch is ordered and limited on its own index; the merge only ever sees ≤ 2·size rows.
     const page = `SELECT * FROM (${branches.map((branch) => `(${branch})`).join('\nUNION ALL\n')}) AS candidates
       ORDER BY sort_time DESC, id DESC LIMIT ${size}`;
     return this.select(parameters, user, page, scope.view ?? 'USER');
   }
 
-  /** The exact statement `find()` runs. */
   buildFind(scope: HistoryScope, lookup: TransactionLookup): HistoryStatement {
     const parameters = new Parameters();
     const user = parameters.bind(scope.userId);
@@ -94,7 +69,6 @@ export class TransactionHistoryRepository {
     if (lookup.kind === 'reference') {
       branches.push(`SELECT 'TRANSACTION'::text AS source, transactions.id, transactions.value_time AS sort_time
                        FROM transactions WHERE transactions.reference = ${parameters.bind(lookup.reference)} AND transactions.user_id = ${user}`);
-      // A funding keeps its reference from the moment it is requested (Phase 8 decision 1).
       if (lookup.prefix === 'funding') {
         branches.push(`SELECT 'FUNDING'::text, funding_payments.flow_id, funding_payments.created_at
                          FROM funding_payments
@@ -102,7 +76,6 @@ export class TransactionHistoryRepository {
                           AND funding_payments.funding_transaction_id IS NULL`);
       }
     } else {
-      // A bare UUID is the transaction id — which is also the reference of a transaction posted without one.
       const id = parameters.bind(lookup.id);
       branches.push(`SELECT 'TRANSACTION'::text AS source, transactions.id, transactions.value_time AS sort_time
                        FROM transactions WHERE transactions.id = ${id}::uuid AND transactions.user_id = ${user}`);
@@ -114,13 +87,6 @@ export class TransactionHistoryRepository {
     return (await this.unitOfWork.manager.query(statement.sql, [...statement.parameters])) as HistoryRow[];
   }
 
-  /**
-   * Booked transactions. Without `currency`: `transactions_user_[type_]{value,booking}_time_index`.
-   * With it: the user's ONE account in that currency (`accounts_wallet_currency_unique`), then
-   * `ledger_entries_account_{value,booking}_time_index` — O(limit) for a rare currency too.
-   * `DISTINCT` collapses a transaction with two entries on the same account (adjacent in the
-   * index: a Unique node, not a Sort).
-   */
   private transactionBranch(parameters: Parameters, user: string, size: string, query: HistoryQuery, position: HistoryPosition | null): string {
     const time = TIME_COLUMN[query.sort];
     const typeFilter = query.type === null ? '' : `AND transactions.type = ${parameters.bind(query.type)}::transaction_type`;
@@ -148,10 +114,7 @@ export class TransactionHistoryRepository {
              LIMIT ${size}`;
   }
 
-  /**
-   * Fundings that never posted (PENDING / FAILED): `funding_payments_unposted_user_index`. Their
-   * value and booking time are both the moment the user asked (`created_at`).
-   */
+  
   private unpostedFundingBranch(parameters: Parameters, user: string, size: string, query: HistoryQuery, position: HistoryPosition | null): string {
     const column = 'funding_payments.created_at';
     const currencyFilter = query.currency === null ? '' : `AND funding_payments.currency_code = ${parameters.bind(query.currency)}`;
@@ -164,14 +127,9 @@ export class TransactionHistoryRepository {
              LIMIT ${size}`;
   }
 
-  /**
-   * The one projection, list and detail alike. Every join is scoped by the caller again. A correction may link
-   * an INTERNAL transaction (a settlement, Phase 10 plan §A.2): the user view learns only that it is internal
-   * (a boolean — never its reference or content); the admin view sees its reference.
-   */
+
   private select(parameters: Parameters, user: string, page: string, view: HistoryView): HistoryStatement {
-    // The corrected original may be internal (a settlement): joined in both views (the same primary-key lookup), but
-    // the user view reads only THAT it is internal — its reference and type stay hidden (CASE below).
+
     const linkScope = (alias: string) => (view === 'ADMIN' || alias === 'corrects' ? `(${alias}.user_id = ${user} OR ${alias}.user_id IS NULL)` : `${alias}.user_id = ${user}`);
     const adminColumns =
       view === 'ADMIN'
@@ -286,10 +244,7 @@ function rangeFilter(parameters: Parameters, column: string, query: HistoryQuery
   return conditions.join(' ');
 }
 
-/**
- * Strictly after the cursor in `(time DESC, id DESC)` order: a row comparison, which btree
- * evaluates as an index condition. The id breaks ties between rows sharing a microsecond.
- */
+
 function keysetFilter(parameters: Parameters, timeColumn: string, idColumn: string, position: HistoryPosition | null): string {
   if (position === null) return '';
   const time = microsecondsToTimestamp(parameters.bind(position.timeMicroseconds.toString()));

@@ -21,7 +21,6 @@ export interface UserProfileResponse {
 export class UsersController {
   constructor(private readonly users: UserRepository) {}
 
-  /** The caller's own profile. Verified users only (the global default). */
   @Get('me')
   @ApiOperation({ summary: 'My profile' })
   @ApiOkResponse({ type: UserProfileDocument })

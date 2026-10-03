@@ -29,13 +29,7 @@ export interface RotatedSession {
 type RotationOutcome = { readonly kind: 'ROTATED'; readonly session: RotatedSession } | { readonly kind: 'REFUSED' };
 
 /**
- * Refresh tokens (design §9.1): opaque, stored as SHA-256 only, rotated on every use,
- * and a replayed token revokes its whole family (decision #7: strict, no grace).
- *
- * Concurrency: rotation locks the family row `FOR UPDATE` and re-reads the token
- * under that lock, so two refreshes with one token serialise — the first rotates, the
- * second sees a used token and revokes the family. `refresh_tokens.parent_id` is
- * UNIQUE as a structural backstop: two children of one parent cannot exist.
+ * Refresh tokens are opaque, stored as SHA-256 only, and rotated on every use
  */
 @Injectable()
 export class RefreshTokenService {
@@ -51,7 +45,6 @@ export class RefreshTokenService {
     this.timeToLiveMilliseconds = config.authentication.refreshTokenTimeToLiveSeconds * 1000;
   }
 
-  /** A new login session: a family and its first token. Runs in the caller's transaction. */
   async startFamily(userId: string): Promise<IssuedRefreshToken> {
     const manager = this.unitOfWork.requireTransaction();
     const now = this.clock.now();
@@ -62,7 +55,6 @@ export class RefreshTokenService {
     return this.insertToken(manager, family.id, null, now);
   }
 
-  /** Exchange a live refresh token for a new one. Anything else is a uniform 401. */
   async rotate(presentedToken: string): Promise<RotatedSession> {
     if (!isWellFormedRefreshToken(presentedToken)) throw sessionRefused();
     const tokenHash = hashRefreshToken(presentedToken);
@@ -73,7 +65,6 @@ export class RefreshTokenService {
       ])) as { id: string; family_id: string }[];
       if (!token) return { kind: 'REFUSED' };
 
-      // The family row is the session lock; everything below is read under it.
       const [family] = (await manager.query(
         `SELECT refresh_token_families.user_id, refresh_token_families.revoked_at IS NOT NULL AS revoked, users.status
            FROM refresh_token_families
@@ -98,7 +89,6 @@ export class RefreshTokenService {
         case 'REJECT':
           return { kind: 'REFUSED' };
         case 'REVOKE_FAMILY':
-          // Committed, not rolled back: the revocation must stick even though we refuse.
           await this.revokeLocked(manager, token.family_id, decision.reason, { type: 'SYSTEM' });
           this.logger.warn(
             { userId: family.user_id, refreshTokenFamilyId: token.family_id, reason: decision.reason },
@@ -117,9 +107,7 @@ export class RefreshTokenService {
   }
 
   /**
-   * Revoke a session (logout). Scoped by the owner in the WHERE clause, so a user can
-   * only ever revoke their own. Idempotent: revoking a revoked family is a no-op.
-   * Returns whether this call revoked it.
+   * Revoke a session (logout)
    */
   async revokeFamily(
     familyId: string,
@@ -138,10 +126,7 @@ export class RefreshTokenService {
     });
   }
 
-  /**
-   * Revoke every live session of a user (an approved suspension, Phase 10). Access tokens already die on
-   * the next request (status is re-read); this ends the refresh side too. Returns how many were revoked.
-   */
+
   async revokeAllForUser(userId: string, reason: RefreshTokenRevocationReason, actor: AuditActor): Promise<number> {
     return this.unitOfWork.run(async (manager) => {
       const families = (await manager.query(

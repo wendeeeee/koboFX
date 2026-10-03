@@ -8,7 +8,6 @@ import { BreakStatus, ResolutionKind, assertBreakTransition } from './break-tran
 import { ReconciliationBreakNotFoundError } from './reconciliation.errors';
 import { DetectedDiscrepancy } from './settlement-matcher';
 
-/** A discrepancy plus the rows it points at (ids only). */
 export interface BreakCandidate extends DetectedDiscrepancy {
   readonly settlementBatchId?: string;
   readonly settlementBatchLineId?: string;
@@ -41,7 +40,6 @@ export interface ReconciliationBreak {
 
 export interface Detection {
   readonly breakId: string;
-  /** False: the same live break was already there; only its `last_detected_*` moved. */
   readonly created: boolean;
   readonly status: BreakStatus;
 }
@@ -101,23 +99,11 @@ function toBreak(row: BreakRow): ReconciliationBreak {
   };
 }
 
-/** `job:{name}` → SYSTEM; `operator:{userId}` → that operator (Phase 10). */
 function auditActorOf(by: string): AuditActor {
   return by.startsWith('operator:') ? { type: 'OPERATOR', id: by.slice('operator:'.length) } : { type: 'SYSTEM' };
 }
 
-/**
- * Breaks as first-class records (Phase 9 plan §F; design §8.2 "drift is never fixed by
- * overwriting"). Every change is ONE transaction with its audit row and outbox event.
- *
- * - `detect`: one live break per `(type, subject)`. A new one is OPEN — or ESCALATED at once when
- *   nothing automatic can resolve it (money breaks). Seen again: only `last_detected_*` moves.
- *   Seen again after it was resolved: a NEW break linked to the old one.
- * - `resolve`: only with a named cause (kind + reference + who). "It went away" is not one.
- * - `escalate` / `annotate`: hand to a human, with a note.
- *
- * The actor is a parameter (`job:reconciliation` today, `operator:{id}` from Phase 10's admin).
- */
+
 @Injectable()
 export class BreakService {
   private readonly logger = new Logger(BreakService.name);
@@ -187,10 +173,7 @@ export class BreakService {
     });
   }
 
-  /**
-   * Detect, and record what the run saw as a finding — in ONE transaction (the ambient one when
-   * there is one), so a run's evidence and its breaks commit or roll back together.
-   */
+ 
   async detectAndRecord(runId: string, candidate: BreakCandidate): Promise<Detection> {
     return this.unitOfWork.run(async (manager) => {
       const detection = await this.detect(runId, candidate);
@@ -211,7 +194,6 @@ export class BreakService {
     });
   }
 
-  /** OPEN → ESCALATED. A break already escalated or resolved is left as it is (returns false). */
   async escalate(breakId: string, by: string, note: string): Promise<boolean> {
     return this.unitOfWork.run(async (manager) => {
       const current = await this.lock(breakId);
@@ -230,7 +212,7 @@ export class BreakService {
     });
   }
 
-  /** Record a note on a live break without changing its status (e.g. "no longer detected by run X"). */
+
   async annotate(breakId: string, note: string): Promise<void> {
     await this.unitOfWork.manager.query(
       `UPDATE reconciliation_breaks SET resolution_note = $2, updated_at = now() WHERE id = $1 AND status <> 'RESOLVED'`,
@@ -238,11 +220,6 @@ export class BreakService {
     );
   }
 
-  /**
-   * OPEN | ESCALATED → RESOLVED, with the cause: what (`kind`), which row proves it
-   * (`reference`: a transaction, batch line, webhook event or flow id) and who.
-   * Returns false when the break was already resolved (idempotent under retries).
-   */
   async resolve(breakId: string, by: string, kind: ResolutionKind, reference: string, note: string): Promise<boolean> {
     if (!ACTOR_PATTERN.test(by)) throw new Error(`A break is resolved by 'job:{name}' or 'operator:{id}', not ${JSON.stringify(by)}.`);
     if (reference.length === 0) throw new Error('A resolution needs a reference.');
@@ -280,7 +257,6 @@ export class BreakService {
     return row ? toBreak(row) : null;
   }
 
-  /** Live (OPEN or ESCALATED) breaks, optionally of some types, oldest first. */
   async live(types?: readonly BreakType[]): Promise<ReconciliationBreak[]> {
     const rows = (await this.unitOfWork.manager.query(
       `SELECT ${COLUMNS} FROM reconciliation_breaks

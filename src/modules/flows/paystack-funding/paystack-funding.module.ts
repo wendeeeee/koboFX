@@ -15,15 +15,11 @@ import { PaystackFundingFlow } from './paystack-funding-flow';
 import { PaystackFundingService } from './paystack-funding.service';
 import { PaystackWebhookResolver } from './paystack-webhook-resolver';
 
-/** `PAYSTACK_ENABLED` as the config loader reads it (Joi boolean: case-insensitive "true"). */
 export function isPaystackEnabled(env: Record<string, string | undefined>): boolean {
   return (env.PAYSTACK_ENABLED ?? '').trim().toLowerCase() === 'true';
 }
 
-/**
- * Paystack funding (PAYSTACK_PLAN.md): the flow (registered with the shared runner and resumer), the start service
- * and route, the webhook resolver, and Paystack's own reconciliation runs (registered with the scheduler). Imported by the API and the worker ONLY when `PAYSTACK_ENABLED=true`.
- */
+
 @Module({
   imports: [
     FlowsModule,

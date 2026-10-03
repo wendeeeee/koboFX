@@ -10,16 +10,16 @@ import { systemAccountCode, userAccountCode } from './posting/bucket';
 import { isUuid } from './posting/posting-validation';
 
 /**
- * The chart of accounts (design §5.1).
+ * The chart of accounts:
  *
  * - Internal accounts come from `system_account_templates` rows × currency × bucket,
- *   so adding a currency is data, not code (P8): insert the currency, then
+ *   so adding a currency is data, not code. insert the currency, then
  *   `provisionCurrency(code)`. Provisioning is idempotent and runs for every active
  *   currency at boot.
- * - A user account `USER:{walletId}:{currency}` is a LIABILITY (an IOU from us),
+ * - A user account `USER:{walletId}:{currency}` is a LIABILITY,
  *   CREDIT-normal, balance-authorizing, in bucket 0.
  *
- * Creating an account row is not a balance change: every account starts at zero, and
+ * Creating an account row is not a balance change. Every account starts at zero, and
  * only `LedgerService.post()` moves it.
  */
 @Injectable()
@@ -103,10 +103,7 @@ export class ChartOfAccountsService implements OnApplicationBootstrap {
     if (!row?.is_active) throw new UnsupportedCurrencyError(currency);
   }
 
-  /**
-   * Lowering the bucket count would strand the balances held in the higher buckets:
-   * postings could no longer reach them. Refuse loudly instead.
-   */
+ 
   private async assertBucketCountNotLowered(manager: EntityManager): Promise<void> {
     const [row] = (await manager.query(
       `SELECT max(bucket) AS highest_bucket FROM accounts WHERE wallet_id IS NULL`,

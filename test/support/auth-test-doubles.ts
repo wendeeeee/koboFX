@@ -1,11 +1,7 @@
 import { Clock } from '../../src/common/clock';
 import { EmailMessage, EmailSender } from '../../src/modules/notifications/email/email-sender';
 
-/**
- * A clock tests can move forward (token expiry). Starts at real time. `freeze()` stops it
- * following real time, so it moves ONLY by `advance()` — for boundary tests that must be
- * exact to the millisecond (the FX freshness tiers).
- */
+
 export class TestClock extends Clock {
   private offsetMilliseconds = 0;
   private frozenAt: number | undefined;

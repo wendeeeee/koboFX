@@ -6,7 +6,6 @@ import { UnauthenticatedError } from '../../../common/errors';
 import { APP_CONFIG } from '../../../config/config.module';
 import { AccessTokenConfig, AppConfig } from '../../../config/configuration';
 
-/** The only algorithm we sign with or accept. Pinned: no `none`, no HS256 downgrade. */
 export const ACCESS_TOKEN_ALGORITHM = 'RS256';
 const ACCESS_TOKEN_USE = 'access';
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -30,21 +29,11 @@ interface AccessTokenPayload {
 }
 
 /**
- * Access tokens (design §9.1): JWT, RS256, 15 minutes.
- *
- * The token carries identity only — user id and the session (refresh token family)
- * it belongs to. Role and status are NOT claims: `JwtAuthGuard` re-reads them from
- * the database on every request (decision #8), so suspension and logout take effect
- * immediately.
- *
- * Key rotation: every token names its key (`kid`). Verification accepts any key in
- * the configured public set and refuses unknown ids, so a new signing key can be
- * rolled out while tokens signed by the previous one expire naturally.
+ * Access tokens: JWT, RS256, 15 minutes.
  */
 @Injectable()
 export class AccessTokenService {
   private readonly config: AccessTokenConfig;
-  /** Verification keys as PEM, by key id (the JWT library's verify typing takes PEM). */
   private readonly publicKeyPems: ReadonlyMap<string, string>;
 
   constructor(
@@ -76,7 +65,6 @@ export class AccessTokenService {
     return { token, expiresAt: new Date((issuedAtSeconds + this.config.timeToLiveSeconds) * 1000) };
   }
 
-  /** Verify signature, algorithm, key id, issuer, audience, expiry and claim shape. */
   verify(token: string): AccessTokenClaims {
     const header = this.decodeHeader(token);
     const publicKey = typeof header?.kid === 'string' ? this.publicKeyPems.get(header.kid) : undefined;

@@ -2,15 +2,11 @@ import { Injectable } from '@nestjs/common';
 import { Dec, dec } from '../../common/money';
 import { UnitOfWork } from '../../database/transaction/unit-of-work';
 
-/** `provider` of a manual rate (Phase 10): reserved by `exchange_rate_snapshots_origin_shape`. */
 export const MANUAL_RATE_PROVIDER = 'manual';
 
-/** Where an ACCEPTED snapshot came from (`exchange_rate_snapshot_origin`). */
 export enum SnapshotOrigin {
   PROVIDER = 'PROVIDER',
-  /** An approved RATE_OVERRIDE accepting a rejected fetch as-is. */
   OVERRIDE = 'OVERRIDE',
-  /** An approved (or break-glass) manual rate. */
   MANUAL = 'MANUAL',
 }
 
@@ -19,14 +15,12 @@ export enum SnapshotStatus {
   REJECTED = 'REJECTED',
 }
 
-/** An accepted snapshot: what the serving path, the cache and every quote read. */
 export interface RateSnapshot {
   readonly id: string;
   readonly provider: string;
   readonly providerUpdatedAt: Date;
   readonly providerNextUpdateAt: Date;
   readonly fetchedAt: Date;
-  /** USD-based mids: 1 USD = rate × currency. */
   readonly rates: ReadonlyMap<string, Dec>;
 }
 
@@ -40,13 +34,11 @@ export interface NewSnapshot {
   readonly rejectionReasons: readonly string[];
   readonly providerCallId: string | undefined;
   readonly rates: ReadonlyMap<string, Dec>;
-  /** Absent = PROVIDER. OVERRIDE and MANUAL come only from an approval (CHECK). */
   readonly origin?: SnapshotOrigin;
   readonly approvalId?: string;
   readonly overridesSnapshotId?: string;
 }
 
-/** Any snapshot as evidence (a REJECTED one included): what a rate override inspects. */
 export interface SnapshotEvidence {
   readonly id: string;
   readonly provider: string;
@@ -60,7 +52,6 @@ export interface SnapshotEvidence {
   readonly overridden: boolean;
 }
 
-/** The latest fetch of any status: what the poll schedule is computed from. */
 export interface LatestFetchRow {
   readonly id: string;
   readonly fetchedAt: Date;
@@ -78,12 +69,6 @@ interface SnapshotRow {
   rates: { currency_code: string; rate: string }[] | null;
 }
 
-/**
- * `exchange_rate_snapshots` (Phase 6 §B): the durable record of every fetch — the
- * evidence, and the fallback whenever Redis is empty, flushed or down (design §16).
- * Append-only; the insert is one short transaction of its own, never held across the
- * provider call.
- */
 @Injectable()
 export class ExchangeRateSnapshotRepository {
   constructor(private readonly unitOfWork: UnitOfWork) {}
@@ -137,10 +122,6 @@ export class ExchangeRateSnapshotRepository {
     return row ? toSnapshot(row) : undefined;
   }
 
-  /**
-   * What the read path serves: the latest ACCEPTED snapshot of the provider (overrides included) OR a manual
-   * rate — by the same order as `latestAccepted` and the Redis compare-and-set (fetch time, publication, id).
-   */
   async latestServable(provider: string): Promise<RateSnapshot | undefined> {
     const [row] = (await this.unitOfWork.manager.query(
       `SELECT snapshot.id, snapshot.provider, snapshot.provider_updated_at, snapshot.provider_next_update_at,
@@ -216,7 +197,6 @@ function toSnapshot(row: SnapshotRow): RateSnapshot {
     providerUpdatedAt: row.provider_updated_at,
     providerNextUpdateAt: row.provider_next_update_at,
     fetchedAt: row.fetched_at,
-    // NUMERIC → text → Decimal: never through a JavaScript number.
     rates: new Map((row.rates ?? []).map((entry) => [entry.currency_code.trim(), dec(entry.rate)])),
   };
 }

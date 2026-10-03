@@ -30,7 +30,6 @@ function toPair(row: PairRow): CurrencyPair {
   };
 }
 
-/** `currency_pairs`: directional, read-only to the application (spread changes are four-eyes, §9.2). */
 @Injectable()
 export class CurrencyPairRepository {
   constructor(private readonly unitOfWork: UnitOfWork) {}

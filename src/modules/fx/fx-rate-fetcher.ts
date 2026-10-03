@@ -21,20 +21,6 @@ export type FetchOutcome =
   | { readonly kind: 'FAILED'; readonly failure: FetchFailureKind; readonly detail: string }
   | { readonly kind: 'SKIPPED'; readonly reason: 'LOCKED' | 'BACKING_OFF' | 'REDIS_UNAVAILABLE' };
 
-/**
- * The rate pipeline (design §7.4; Phase 6 §D): lock → breaker → budget → fetch →
- * validate → sanity → store → cache. Used by the poller and by the single-flighted
- * catch-up; nothing else ever calls the provider.
- *
- * - No database transaction is open during the provider call; the snapshot insert is
- *   its own short transaction afterwards.
- * - A response that fails sanity is stored REJECTED (evidence) and alerted, never cached
- *   or served; the last accepted snapshot keeps ageing honestly.
- * - A failure writes nothing but the `provider_calls` evidence, and opens the breaker for
- *   the failure kind's backoff; the kinds that will not heal on their own page.
- * - Without Redis there is no lock and no budget, so there is no call (fail closed on the
- *   quota): rates are then served from the database snapshot (§16).
- */
 @Injectable()
 export class FxRateFetcher {
   private readonly logger = new Logger(FxRateFetcher.name);
@@ -54,7 +40,6 @@ export class FxRateFetcher {
     return this.config.fx.displayMaximumAgeSeconds + 3_600;
   }
 
-  /** `heldLockToken`: the catch-up took the fetch lock atomically with its gate. */
   async fetch(trigger: FetchTrigger, heldLockToken?: string): Promise<FetchOutcome> {
     let token: string | undefined = heldLockToken;
     try {
@@ -144,7 +129,6 @@ export class FxRateFetcher {
     try {
       await this.cache.offer(snapshot, this.cacheTimeToLiveSeconds);
     } catch (error) {
-      // The durable record is written; readers fall back to it, and the poller re-seeds Redis.
       this.logger.warn({ err: error, snapshotId }, 'Could not write the FX snapshot to Redis');
     }
     this.logger.log({ trigger, snapshotId, providerUpdatedAt: rates.providerUpdatedAt.toISOString() }, 'FX rates accepted');

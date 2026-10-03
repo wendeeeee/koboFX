@@ -18,7 +18,6 @@ import { TestDatabase, startTestDatabase } from '../support/test-database';
 
 const PASSWORD = 'an end-to-end password';
 
-/** Everything that must never reach a log line, collected as the flow produces it. */
 const secrets = new Set<string>([PASSWORD]);
 
 describe('authentication (e2e: real pipeline, Postgres, Redis, MailHog)', () => {
@@ -41,6 +40,10 @@ describe('authentication (e2e: real pipeline, Postgres, Redis, MailHog)', () => 
       SMTP_HOST: mailhog.getHost(),
       SMTP_PORT: String(mailhog.getMappedPort(1025)),
       LOG_LEVEL: 'debug',
+      PAYSTACK_ENABLED: 'true',
+      PAYSTACK_SECRET_KEY: `sk_test_${randomUUID().replace(/-/g, '')}`,
+      PAYSTACK_CALLBACK_URL: 'http://localhost/funding/return',
+      PAYSTACK_BASE_URL: 'http://127.0.0.1:9',
     });
     const logStream = new Writable({
       write(chunk: Buffer, _encoding, done) {
@@ -63,7 +66,6 @@ describe('authentication (e2e: real pipeline, Postgres, Redis, MailHog)', () => 
   const http = () => request(app.getHttpServer());
   const newEmail = () => `e2e-${randomUUID().slice(0, 8)}@example.com`;
 
-  /** The worker's job, run in-process, then read the code back out of MailHog's API. */
   async function codeFromMailbox(email: string): Promise<string> {
     await app.get(OutboxDispatcher).dispatchDue(100);
     const url = `http://${mailhog.getHost()}:${mailhog.getMappedPort(8025)}/api/v2/search?kind=to&query=${encodeURIComponent(email)}`;
@@ -92,7 +94,6 @@ describe('authentication (e2e: real pipeline, Postgres, Redis, MailHog)', () => 
     expect(registered.body).toEqual({ message: expect.any(String) });
     expect(JSON.stringify(registered.body)).not.toMatch(/\d{6}/);
 
-    // Unverified: no session yet — the same generic 401 as a wrong password.
     const early = await http().post(`/${API_PREFIX}/auth/login`).send({ email, password: PASSWORD }).expect(401);
     expect(early.body.code).toBe('INVALID_CREDENTIALS');
 
@@ -132,8 +133,7 @@ describe('authentication (e2e: real pipeline, Postgres, Redis, MailHog)', () => 
   describe('enumeration resistance', () => {
     it('register answers byte-identically for an existing and an unknown email', async () => {
       const { email } = await registerAndVerify();
-      // Let the per-email cooldown from that registration lapse (it applies to any
-      // email, existing or not, so it reveals nothing — but it is not what's under test).
+      
       const redisClient = app.get(RedisService).client;
       const cooldowns = await redisClient.keys('rate-limit:verification-email-cooldown:*');
       if (cooldowns.length > 0) await redisClient.del(...cooldowns);
@@ -162,7 +162,6 @@ describe('authentication (e2e: real pipeline, Postgres, Redis, MailHog)', () => 
       for (const outcome of [unknownEmail, wrongPassword, notVerified]) {
         expect(outcome.status).toBe(401);
         expect(outcome.body).toEqual(unknownEmail.body);
-        // Exactly one argon2id verification, with the same parameters, on every path.
         expect(outcome.hashes).toEqual(['$argon2id$v=19$m=19456,p=1,t=2']);
       }
       verify.mockRestore();
@@ -179,7 +178,6 @@ describe('authentication (e2e: real pipeline, Postgres, Redis, MailHog)', () => 
     const retryAfter = Number(limited.header['retry-after']);
     expect(retryAfter).toBeGreaterThan(800);
     expect(retryAfter).toBeLessThanOrEqual(900);
-    // Casing is not a way around it.
     await http().post(`/${API_PREFIX}/auth/login`).send({ email: email.toUpperCase(), password: 'x' }).expect(429);
   });
 
@@ -203,16 +201,13 @@ describe('authentication (e2e: real pipeline, Postgres, Redis, MailHog)', () => 
       }
     }
 
-    // Cross-check: every route Express actually serves was enumerated.
     const expressApp = app.getHttpAdapter().getInstance() as { router?: { stack: unknown[] }; _router?: { stack: unknown[] } };
     const served = (expressApp.router ?? expressApp._router)!.stack
       .map((layer) => (layer as { route?: { path: string; methods: Record<string, boolean> } }).route)
       .filter((route): route is { path: string; methods: Record<string, boolean> } => route !== undefined)
-      // Nest's own not-found fallback (registered for every method) is not an application route.
       .filter((route) => route.path !== `/${API_PREFIX}$` && route.path !== `/${API_PREFIX}/{*path}`)
       .flatMap((route) => Object.keys(route.methods).map((method) => `${method} ${route.path}`));
-    // The OpenAPI docs (Phase 11) are plain Express routes, public by design: they serve the contract, never data. Pinned
-    // exactly, so any OTHER route outside the guard chain still fails here.
+   
     const isDocs = (route: string) => route.split(' ')[1]!.startsWith(`/${API_PREFIX}/docs`);
     expect(served.filter(isDocs).sort()).toEqual(
       [
@@ -235,7 +230,7 @@ describe('authentication (e2e: real pipeline, Postgres, Redis, MailHog)', () => 
       'post /api/v1/auth/register',
       'post /api/v1/auth/resend-otp',
       'post /api/v1/auth/verify',
-      // The only non-auth public route: authenticated by its HMAC signature instead (design §7.3).
+      'post /api/v1/webhooks/paystack',
       'post /api/v1/webhooks/psp',
     ]);
     const protectedRoutes = routes.filter((route) => !route.isPublic);
@@ -252,7 +247,6 @@ describe('authentication (e2e: real pipeline, Postgres, Redis, MailHog)', () => 
   });
 
   it('log hygiene: no password, one-time password, token or Authorization value in any log line of the whole run', async () => {
-    // Also push a bearer header and a body with every sensitive field through the pipeline.
     await http()
       .post(`/${API_PREFIX}/auth/verify`)
       .set('Authorization', 'Bearer header.value.secret')
@@ -262,8 +256,7 @@ describe('authentication (e2e: real pipeline, Postgres, Redis, MailHog)', () => 
     expect(log.length).toBeGreaterThan(1000); // the flow really was logged
     expect(log).toContain('[REDACTED]'); // the authorization header was seen and redacted
     for (const secret of secrets) {
-      // A 6-digit code could occur by chance inside a longer number (a timestamp):
-      // match all-digit secrets only as a standalone number.
+     
       const leaked = /^\d+$/.test(secret) ? new RegExp(`(?<!\\d)${secret}(?!\\d)`).test(log) : log.includes(secret);
       expect({ secret: secret.slice(0, 12), leaked }).toEqual({ secret: secret.slice(0, 12), leaked: false });
     }

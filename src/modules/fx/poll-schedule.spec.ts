@@ -78,11 +78,6 @@ describe('failure pacing: the negative cache (Phase 6 §5.10)', () => {
   });
 });
 
-/**
- * A simulated month (Phase 6 §5.3: "the poll schedule and request budget, as pure logic
- * over a simulated month"): the provider publishes on its cadence, sometimes late; the
- * poller ticks every 15s and fetches only when the schedule says so; failures back off.
- */
 function simulateMonth(profile: ProviderPlanProfile, failureEvery: number) {
   const tickSeconds = 15;
   const start = new Date('2026-09-01T00:00:00.000Z');
@@ -105,7 +100,6 @@ function simulateMonth(profile: ProviderPlanProfile, failureEvery: number) {
       continue;
     }
     consecutiveFailures = 0;
-    // The provider publishes on its cadence, 7 minutes late one time in five.
     const cadence = profile.cadenceSeconds * 1000;
     const published = Math.floor(now / cadence) * cadence;
     const late = snapshotNumber % 5 === 0 ? 7 * 60_000 : 0;

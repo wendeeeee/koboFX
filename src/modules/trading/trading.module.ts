@@ -15,7 +15,7 @@ import { TradeService } from './trade.service';
 import { TradingMetrics } from './trading-metrics';
 import { TradingController } from './trading.controller';
 
-/** Fail loudly at boot: every currency a user can sell needs conversion limits, or its conversions would 500. */
+
 @Injectable()
 export class TradingConfigurationCheck implements OnApplicationBootstrap {
   constructor(
@@ -32,11 +32,7 @@ export class TradingConfigurationCheck implements OnApplicationBootstrap {
   }
 }
 
-/**
- * Conversion and trading (design §7.7, §14 `trading/`): `POST /wallet/convert` and
- * `POST /wallet/trade`, sharing one primitive that reserves and settles through the
- * reservation service and posts through `LedgerService.post()` — the one write path.
- */
+
 @Module({
   imports: [LedgerModule, ReservationsModule, FlowsModule, OutboxModule, AuditModule, FxModule],
   controllers: [TradingController],

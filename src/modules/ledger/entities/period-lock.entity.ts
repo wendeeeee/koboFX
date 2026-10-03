@@ -1,7 +1,7 @@
 import { Column, Entity, PrimaryColumn } from 'typeorm';
 import { bigintTransformer } from '../../../database/bigint.transformer';
 
-/** A closed reporting period `[periodStart, periodEnd)` (design §5.3). */
+/** A closed reporting period `[periodStart, periodEnd)`. */
 @Entity('period_locks')
 export class PeriodLockEntity {
   @PrimaryColumn({ type: 'bigint', transformer: bigintTransformer })

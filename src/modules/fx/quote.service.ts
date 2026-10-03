@@ -16,11 +16,6 @@ import { Quote, QuoteRepository } from './quote.repository';
 
 export type QuoteStatus = 'OPEN' | 'CONSUMED' | 'EXPIRED';
 
-/**
- * A quote on the wire. Amounts are strings of minor units and are authoritative (Phase 7
- * posts exactly these); rates are display strings (12 significant digits, §5.14). The
- * spread's revenue and the mid value are ours and stay internal.
- */
 export interface QuoteView {
   readonly quoteId: string;
   readonly from: string;
@@ -37,16 +32,6 @@ export interface QuoteView {
   readonly status: QuoteStatus;
 }
 
-/**
- * Quotes (design §7.7, §15 item 9; Phase 6 §E): 30s, single-use, non-transferable,
- * directional prices that lock every amount Phase 7 posts.
- *
- * `create` runs INSIDE the idempotency barrier's transaction and is database-only (Phase 5
- * decision 5): the snapshot was prepared before the barrier by `RateSnapshotGuard`, and
- * here it is only judged — not executable ⇒ `503 FX_RATE_STALE` (transient: the key is
- * never stored). No balance check and no reservation: a quote is a price, not a hold.
- * Expiry and consumption are decided on the injectable `Clock`.
- */
 @Injectable()
 export class QuoteService {
   constructor(
@@ -125,15 +110,6 @@ export class QuoteService {
     return this.view(quote);
   }
 
-  /**
-   * THE consumption primitive for Phase 7's trade (call it inside the trade's own
-   * transaction): atomic, single-use, owner-only, strictly before expiry — one statement
-   * with one `now`, so "consumed" and "expired" can never both be true. Not idempotent on
-   * its own: Phase 7's idempotency barrier replays a trade without consuming again.
-   *
-   * Absent or another user's → `404 QUOTE_NOT_FOUND`; already consumed →
-   * `409 QUOTE_ALREADY_USED`; expired → `409 QUOTE_EXPIRED`.
-   */
   async consume(quoteId: string, userId: string): Promise<Quote> {
     return this.unitOfWork.run(async () => {
       const now = this.clock.now();

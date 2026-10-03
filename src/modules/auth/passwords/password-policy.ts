@@ -2,13 +2,8 @@ import { ValidationOptions, registerDecorator } from 'class-validator';
 import { COMMON_PASSWORDS } from './common-passwords';
 
 /**
- * Password policy (decision #12, NIST SP 800-63B): length, not composition rules.
- *
- * - 12 to 128 characters (Unicode code points) after NFKC normalisation. argon2 has no
- *   72-byte truncation; the upper bound only caps hashing cost per request.
- * - Not a well-known password, and not a single character or short pattern repeated.
- *   The list is local and small by design (no third-party call at registration); a
- *   breached-password service can be added behind the same check later.
+ * Password policy:
+ * - 12 to 128 characters (Unicode code points) after NFKC normalisation.
  */
 export const MINIMUM_PASSWORD_LENGTH = 12;
 export const MAXIMUM_PASSWORD_LENGTH = 128;

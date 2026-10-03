@@ -1,9 +1,8 @@
 import { ResourceBusyError } from '../common/errors';
 
 /**
- * SQLSTATEs that mean "try again", not "you're wrong" (design §6.6, §16). They become
- * `503 RESOURCE_BUSY`, and idempotency treats them as transient so a retry with the
- * same key genuinely reprocesses.
+ * SQLSTATEs that mean "try again". They become
+ * `503 RESOURCE_BUSY`, and idempotency treats them as transient so a retry with the same key genuinely reprocesses.
  */
 const TRANSIENT_SQLSTATES: Readonly<Record<string, string>> = {
   '55P03': 'lock_timeout',
@@ -27,7 +26,7 @@ export function constraintName(error: unknown): string | undefined {
   return typeof name === 'string' ? name : undefined;
 }
 
-/** Map transient database failures to domain errors; anything else is returned as-is. */
+/** Map transient database failures to domain errors */
 export function translateDatabaseError(error: unknown): unknown {
   const state = sqlState(error);
   const reason = state ? TRANSIENT_SQLSTATES[state] : undefined;

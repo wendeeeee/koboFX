@@ -70,30 +70,6 @@ class Seen {
   }
 }
 
-/**
- * External reconciliation of Paystack (PAYSTACK_PLAN.md C7) — our books against Paystack's, both ways, on Paystack's
- * own ids and OUR reference, through the same `BreakService` and taxonomy as the simulated PSP's, in runs of its own
- * (`reconciliation_runs.provider = 'paystack'`). Never edits a row to make the two agree.
- *
- * DAILY:
- * 1. Every Paystack transaction in the lookback (`listTransactions`, by creation date): a success old enough that the
- *    flow should have it — with no funding of ours → `PAYMENT_WITHOUT_FLOW`; on a funding we FAILED (paid after the
- *    checkout window — a late success) → `PAYMENT_WITHOUT_FLOW` naming the failed flow; with another amount or
- *    currency (a HELD funding) → `AMOUNT_MISMATCH` / `CURRENCY_MISMATCH`; not yet booked → `MISSING_IN_LEDGER`,
- *    resolved by driving the flow. A booked deposit Paystack now reports `reversed` → `MISSING_AT_PSP`.
- * 2. Our side: deposits we booked in the window that the list did not show are verified one by one.
- * 3. Disputes (by the DISPUTE's date): lost in full against a booked deposit not yet reversed →
- *    `CHARGEBACK_NOT_REVERSED`, resolved by driving the flow; partial → escalated for a human.
- * 4. `UNMATCHED` Paystack webhooks: a break each, the stored payload reprocessed.
- * 5. The receivable proof for `PAYSTACK_RECEIVABLE`, in one read-only snapshot.
- * 6. This provider's live breaks that no run sees any more are escalated "no longer detected" — never resolved.
- *
- * HOURLY: Paystack fundings unresolved past the configured age are verified and driven; HELD ones raise their
- * mismatch break (a flow cannot raise a break itself: breaks belong to runs).
- *
- * Settlement ingestion is NOT done for Paystack (accepted risk, PAYSTACK_PLAN.md A15): `PAYSTACK_RECEIVABLE` is never
- * credited by a settlement, and no settlement-window check runs.
- */
 @Injectable()
 export class PaystackReconciliationJob implements ProviderReconciliation, OnModuleInit {
   readonly provider: string;
@@ -142,13 +118,11 @@ export class PaystackReconciliationJob implements ProviderReconciliation, OnModu
     return this.finish(run, seen, { unresolvedFlowsDriven: driven, heldFlowsChecked: held });
   }
 
-  // ── 1. Paystack's transactions ─────────────────────────────────────────────
 
   private async checkTransactions(run: ClaimedRun, since: Date, now: Date, seen: Seen): Promise<Set<string>> {
     const cutoff = this.cutoff(now);
     const listed = new Set<string>();
     let cursor: string | undefined;
-    // Paystack's from/to inclusivity is undocumented: over-read by a day each side, then filter half-open ourselves.
     for (let page = 0; page < MAXIMUM_PAGES; page += 1) {
       const result = await this.paystack.listTransactions({
         from: new Date(since.getTime() - DAY),
@@ -175,7 +149,6 @@ export class PaystackReconciliationJob implements ProviderReconciliation, OnModu
       return;
     }
     if (transaction.status !== PaystackTransactionStatus.SUCCESS) return;
-    // Still inside the normal webhook/resumer window: the flow's own business, not a break.
     if (!transaction.paidAt || transaction.paidAt.getTime() > cutoff.getTime()) return;
     const base = {
       subjectKey: subjectKeys.payment(this.provider, transaction.transactionId),
@@ -194,7 +167,6 @@ export class PaystackReconciliationJob implements ProviderReconciliation, OnModu
           paystackStatus: transaction.status,
           amountMinor: transaction.amount.toMinorString(),
           paidAt: transaction.paidAt.toISOString(),
-          // Paid after we failed the funding (its checkout window was over): the money is real and owed.
           lateSuccess: deposit !== null,
           failedFlowId: deposit?.flowId ?? null,
           source: 'PAYMENT_LIST',
@@ -238,7 +210,6 @@ export class PaystackReconciliationJob implements ProviderReconciliation, OnModu
     });
   }
 
-  // ── 2. our side ────────────────────────────────────────────────────────────
 
   private async checkBookedDeposits(run: ClaimedRun, since: Date, now: Date, listed: Set<string>, seen: Seen): Promise<void> {
     const booked = (await this.unitOfWork.manager.query(
@@ -275,7 +246,6 @@ export class PaystackReconciliationJob implements ProviderReconciliation, OnModu
     });
   }
 
-  // ── 3. disputes ────────────────────────────────────────────────────────────
 
   private async checkDisputes(run: ClaimedRun, since: Date, now: Date, seen: Seen): Promise<void> {
     const cutoff = this.cutoff(now);
@@ -286,7 +256,6 @@ export class PaystackReconciliationJob implements ProviderReconciliation, OnModu
         if (dispute.status !== 'resolved' || dispute.resolution !== LOST_DISPUTE_RESOLUTION) continue;
         if ((dispute.resolvedAt ?? dispute.createdAt).getTime() > cutoff.getTime()) continue;
         const deposit = await this.depositFor(dispute.transactionId, dispute.transactionReference);
-        // A dispute on a payment we never booked is that payment's own break (completeness).
         if (!deposit?.fundingTransactionId || deposit.chargebackTransactionId) continue;
         await this.chargebackNotReversed(run, deposit, dispute, seen);
       }
@@ -321,7 +290,6 @@ export class PaystackReconciliationJob implements ProviderReconciliation, OnModu
     await this.driveAndResolve(breakId, deposit.flowId, seen);
   }
 
-  // ── 4. unmatched webhooks ──────────────────────────────────────────────────
 
   private async reprocessUnmatchedWebhooks(run: ClaimedRun, seen: Seen): Promise<void> {
     const events = (await this.unitOfWork.manager.query(
@@ -360,12 +328,7 @@ export class PaystackReconciliationJob implements ProviderReconciliation, OnModu
     }
   }
 
-  // ── 5. the receivable proof ────────────────────────────────────────────────
 
-  /**
-   * `PAYSTACK_RECEIVABLE` per currency (every bucket) = + each booked Paystack deposit − what each booked chargeback
-   * took from it. (No settlement ever credits it yet.) One read-only snapshot.
-   */
   private async proveReceivable(run: ClaimedRun, seen: Seen): Promise<void> {
     const rows = await this.unitOfWork.runReadOnlySnapshot(
       async (manager) =>
@@ -408,7 +371,6 @@ export class PaystackReconciliationJob implements ProviderReconciliation, OnModu
     }
   }
 
-  // ── hourly ─────────────────────────────────────────────────────────────────
 
   private async driveUnresolvedFlows(run: ClaimedRun, now: Date, seen: Seen): Promise<number> {
     const cutoff = this.cutoff(now);
@@ -442,7 +404,6 @@ export class PaystackReconciliationJob implements ProviderReconciliation, OnModu
     return rows.length;
   }
 
-  /** HELD fundings (paid, but not what we asked): their mismatch break, from verify (PAYSTACK_PLAN.md B3). */
   private async detectHeldFlows(run: ClaimedRun, seen: Seen): Promise<number> {
     const rows = (await this.unitOfWork.manager.query(
       `SELECT ${DEPOSIT_COLUMNS}
@@ -466,9 +427,7 @@ export class PaystackReconciliationJob implements ProviderReconciliation, OnModu
     return rows.length;
   }
 
-  // ── shared ─────────────────────────────────────────────────────────────────
 
-  /** Our funding for a Paystack transaction: by its id once recorded, else by our reference (a Paystack flow's id). */
   private async depositFor(transactionId: string | null, reference: string | null): Promise<PaystackDeposit | null> {
     const [row] = (await this.unitOfWork.manager.query(
       `SELECT ${DEPOSIT_COLUMNS}
@@ -493,7 +452,6 @@ export class PaystackReconciliationJob implements ProviderReconciliation, OnModu
     return detection.breakId;
   }
 
-  /** Drive the flow; resolve only when the row that proves it exists (the posting, or the reversal). */
   private async driveAndResolve(breakId: string, flowId: string, seen: Seen): Promise<boolean> {
     const current = await this.breaks.findById(breakId);
     if (!current || current.status === BreakStatus.RESOLVED) return false;

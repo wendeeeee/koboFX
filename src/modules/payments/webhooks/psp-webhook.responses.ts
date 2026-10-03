@@ -1,13 +1,12 @@
 import { ApiProperty, ApiSchema } from '@nestjs/swagger';
 
-/** OpenAPI documentation of the webhook acknowledgement (Phase 11). Never instantiated. */
 @ApiSchema({ name: 'WebhookReceived' })
 export class WebhookReceivedDocument {
   @ApiProperty({ enum: [true], example: true, description: 'Durably stored; processed asynchronously.' })
   received!: true;
 }
 
-/** What the route reads of the event: only ids. Anything else in the body is ignored (and kept as evidence). */
+
 export const PSP_WEBHOOK_BODY_SCHEMA = {
   type: 'object' as const,
   additionalProperties: true,

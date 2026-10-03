@@ -7,14 +7,12 @@ import { ChartOfAccountsService } from '../ledger/chart-of-accounts.service';
 import { LedgerService } from '../ledger/ledger.service';
 import { EntryDirection, PostingAuthorization, TransactionType } from '../ledger/ledger.types';
 
-/** Every wallet starts with an NGN account (design §7.1, §15 item 6). */
+/** Every wallet starts with an NGN account  */
 export const HOME_CURRENCY = 'NGN';
 
 /**
  * Creates wallets and their home-currency account, and posts the non-production demo
- * credit. Creating an account is not a balance change: accounts open at zero, and the
- * demo credit is a real posting through `LedgerService.post()` from
- * `EXPENSE:PROMOTIONAL:NGN` — never a raw balance update.
+ * credit.
  */
 @Injectable()
 export class WalletProvisioningService {
@@ -30,7 +28,6 @@ export class WalletProvisioningService {
     this.demoCreditMinor = config.authentication.demoCreditNgnMinor;
   }
 
-  /** Wallet + `USER:{walletId}:NGN`, in the caller's transaction (it must commit with the user). */
   async openWallet(userId: string): Promise<{ walletId: string; accountId: string }> {
     const manager = this.unitOfWork.requireTransaction();
     const [wallet] = (await manager.query(`INSERT INTO wallets (user_id) VALUES ($1) RETURNING id`, [userId])) as {
@@ -40,12 +37,7 @@ export class WalletProvisioningService {
     return { walletId: wallet.id, accountId: account.id };
   }
 
-  /**
-   * The demo credit (decision #4): at verification, config-driven, 0 = off, refused in
-   * production at boot. At most once per user, twice over: it is posted in the same
-   * transaction as the one-time PENDING → ACTIVE transition, and its reference
-   * `demo-credit:{userId}` is UNIQUE in `transactions`.
-   */
+  
   async postDemoCreditIfEnabled(userId: string): Promise<void> {
     if (this.demoCreditMinor === 0n) return;
     const manager = this.unitOfWork.requireTransaction();

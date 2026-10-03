@@ -25,19 +25,8 @@ import { SessionService } from './session.service';
 import { RefreshTokenService } from './tokens/refresh-token.service';
 
 /**
- * Email verification (design §7.1) and code resend.
- *
- * Verify takes the email, the code AND the password (decision #5): activation proves
- * both the mailbox and the password being activated, which closes pre-registration
- * account takeover.
- *
- * 1. Count the attempt atomically in Redis (at most 5 per challenge; the 5th deletes
- *    it). Redis down ⇒ 503 — verification fails closed, never bypassed.
- * 2. Check the code (HMAC, constant time) and the password (argon2). Both are always
- *    evaluated; any failure is the same `VERIFICATION_FAILED`.
- * 3. Consume the challenge — compare-and-delete, so exactly one caller can use a code.
- * 4. One transaction: PENDING → ACTIVE (conditional), challenge CONSUMED, audit row,
- *    demo credit (if enabled), a new session.
+ * Email verification and code resend.
+ * Verify takes the email, the code AND the password
  */
 @Injectable()
 export class VerificationService {
@@ -79,7 +68,6 @@ export class VerificationService {
       this.logger.log({ userId: user.id, attempt: attempt.attempt }, 'Email verification attempt failed');
       throw new VerificationFailedError();
     }
-    // The last permitted attempt already deleted the challenge — and only one caller gets it.
     if (!attempt.lastAttempt && !(await this.challengeStore.consume(purpose, user.id, attempt.challengeId))) {
       throw new VerificationFailedError();
     }
@@ -104,11 +92,7 @@ export class VerificationService {
     return this.sessions.session(session.profile, session.refreshToken);
   }
 
-  /**
-   * Ask for a new code. Same response whatever the email's state; only a pending
-   * account gets an outbox event. The 60s cooldown and 5/hour cap are rate limits on
-   * the route, keyed by the email, so they are uniform too.
-   */
+ 
   async resendVerificationCode(email: string): Promise<void> {
     const user = await this.users.findCredentialsByEmail(email);
     if (user?.status !== UserStatus.PENDING_VERIFICATION) return;

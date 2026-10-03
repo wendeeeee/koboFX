@@ -8,10 +8,7 @@ import { PaystackFundingAcceptedDocument } from '../../wallets/wallet.responses'
 import { PaystackFundWalletDto } from './dto/paystack-fund-wallet.dto';
 import { PaystackFundingAccepted, PaystackFundingService } from './paystack-funding.service';
 
-/**
- * `POST /wallet/fund/paystack` (PAYSTACK_PLAN.md C10). Registered only when `PAYSTACK_ENABLED=true`. The status route
- * stays `GET /wallet/fund/{fundingId}` (one route for every provider).
- */
+
 @ApiTags('wallet')
 @Controller('wallet')
 export class PaystackFundingController {

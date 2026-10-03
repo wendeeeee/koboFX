@@ -14,14 +14,9 @@ export const MAXIMUM_HISTORY_LIMIT = 100;
 
 export interface TransactionPage {
   readonly items: readonly TransactionListItemView[];
-  /** Null on the last page. Valid only with the same sort and filters. */
   readonly nextCursor: string | null;
 }
 
-/**
- * History (design §7.8): the caller's transactions plus the fundings that never posted, newest
- * first, keyset-paginated. Database-only, no idempotency key (reads have no effect to repeat).
- */
 @Injectable()
 export class TransactionHistoryService {
   constructor(
@@ -34,7 +29,6 @@ export class TransactionHistoryService {
     return { items: rows.map(listItemView), nextCursor };
   }
 
-  /** A user's history as an administrator sees it (Phase 10): the same rows, every leg, the internal fields. */
   async listForAdmin(userId: string, parameters: ListTransactionsQuery): Promise<{ items: AdminTransactionView[]; nextCursor: string | null }> {
     const { rows, nextCursor } = await this.rows({ userId, view: 'ADMIN' }, parameters);
     return { items: rows.map(adminTransactionView), nextCursor };
@@ -49,7 +43,6 @@ export class TransactionHistoryService {
 
   private async rows(scope: HistoryScope, parameters: ListTransactionsQuery) {
     const query = this.normalise(parameters);
-    // Strict: digits only (parseInt would read "1e2" as 1). The DTO says the same at the edge.
     const limit = parameters.limit === undefined ? DEFAULT_HISTORY_LIMIT : /^[1-9]\d{0,2}$/.test(parameters.limit) ? Number(parameters.limit) : Number.NaN;
     if (!Number.isSafeInteger(limit) || limit < 1 || limit > MAXIMUM_HISTORY_LIMIT) {
       throw new ValidationError(`limit must be a whole number from 1 to ${MAXIMUM_HISTORY_LIMIT}.`, {
@@ -57,7 +50,6 @@ export class TransactionHistoryService {
       });
     }
     const position = parameters.cursor === undefined ? null : decodeCursor(parameters.cursor, query);
-    // One row beyond the page says whether there is a next one; it is never returned.
     const rows = await this.repository.page(scope, query, position, limit + 1);
     const pageRows = rows.slice(0, limit);
     const last = pageRows[pageRows.length - 1];
@@ -73,10 +65,8 @@ export class TransactionHistoryService {
     return detailView(row);
   }
 
-  /** Parameters → the canonical query a cursor is bound to. */
   private normalise(parameters: ListTransactionsQuery): HistoryQuery {
     const currency = parameters.currency ?? null;
-    // Any KNOWN currency (active or not): a deactivated currency's history is still history.
     if (currency !== null && !this.currencies.lookup(currency)) throw new UnsupportedCurrencyError(currency);
     const fromMicroseconds = parameters.from === undefined ? null : parseInstantMicroseconds('from', parameters.from);
     const toMicroseconds = parameters.to === undefined ? null : parseInstantMicroseconds('to', parameters.to);

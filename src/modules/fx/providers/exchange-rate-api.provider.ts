@@ -8,10 +8,8 @@ import { FetchLatestOptions, RateProvider, RateProviderResult } from './rate-pro
 
 export const API_KEY_PLACEHOLDER = '{apiKey}';
 const BASE_CURRENCY = 'USD';
-/** Our own code for the open endpoint's HTTP 429 (it sends no error body we can rely on). */
 export const RATE_LIMITED_CODE = 'rate-limited';
 
-/** What each `error-type` means for pacing (checked against the docs 2026-09-29). */
 export function failureKindOf(providerErrorCode: string | null): FetchFailureKind {
   switch (providerErrorCode) {
     case ExchangeRateApiErrorType.QUOTA_REACHED:
@@ -22,23 +20,10 @@ export function failureKindOf(providerErrorCode: string | null): FetchFailureKin
     case RATE_LIMITED_CODE:
       return FetchFailureKind.RATE_LIMITED;
     default:
-      // unsupported-code, malformed-request, an undocumented error-type, another 4xx: our bug
-      // or a contract change. Never retried in a loop.
       return FetchFailureKind.REQUEST_REJECTED;
   }
 }
 
-/**
- * How an ExchangeRate-API answer is read (handbook: "a 200 carrying an error body"; the
- * status code alone never decides):
- * - an error body (`result: "error"`), whatever the HTTP status → definitive, never
- *   retried in a loop (`quota-reached`, `invalid-key`, `inactive-account` included; the
- *   recorded `invalid-key` came with a 403);
- * - HTTP 429 → definitive (`rate-limited`): the open endpoint locks the IP out for 20
- *   minutes, and retrying inside that window only extends the outage;
- * - 5xx → transient; an unreadable body → invalid (both retried);
- * - a readable success on another status → definitive.
- */
 export function classifyExchangeRateApiResponse(status: number, text: string, knownCurrencies: readonly string[]): ResponseClassification<ParsedRates> {
   const parsed = parseLatestResponse(text, knownCurrencies);
   if (parsed.kind === 'ERROR') {
@@ -53,18 +38,10 @@ export function classifyExchangeRateApiResponse(status: number, text: string, kn
 
 export interface ExchangeRateApiProviderOptions {
   readonly name: string;
-  /** Up to and including `/latest`; may hold `{apiKey}` (the keyed v6 endpoint). */
   readonly baseUrl: string;
   readonly apiKey: string | undefined;
 }
 
-/**
- * ExchangeRate-API v6 (`/latest/USD`), keyed or open access. The key, when there is one,
- * travels in the URL PATH (the standard endpoint has no header option — handbook:
- * "tokens passed in URLs"): only a path with `[REDACTED]` in its place reaches
- * `provider_calls` and logs, and the shared client scrubs the key from every error text
- * and body as a second line of defence. Rotation is configuration + restart.
- */
 export class ExchangeRateApiProvider extends RateProvider {
   private readonly logger = new Logger(ExchangeRateApiProvider.name);
   readonly name: string;

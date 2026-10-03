@@ -65,7 +65,6 @@ import { ScriptedFlowCheckpoints } from './flow-test-doubles';
 import { ScriptedReconciliationCheckpoints } from './reconciliation-test-doubles';
 import { TestDatabase, startTestDatabase } from './test-database';
 
-/** A structurally valid argon2id PHC string for users created outside the auth flow. */
 export const PLACEHOLDER_PASSWORD_HASH = '$argon2id$v=19$m=19456,t=2,p=1$aGFybmVzcw$aGFybmVzcw';
 
 export interface UserAccount {
@@ -75,7 +74,7 @@ export interface UserAccount {
   readonly currency: string;
 }
 
-/** Everything a posting or a reservation could have touched. Equal snapshots ⇒ nothing was written. */
+
 export interface LedgerSnapshot {
   readonly transactionCount: number;
   readonly entryCount: number;
@@ -90,66 +89,39 @@ export interface LedgerSnapshot {
   readonly auditLogCount: number;
 }
 
-/**
- * The full application — every module, the real HTTP pipeline, a real Redis — with
- * email captured and the clock controllable. Present when the harness was started
- * with `{ auth: true }`.
- */
+
 export interface AuthHarness {
   readonly app: NestExpressApplication;
   readonly redis: StartedRedisContainer;
   readonly emails: CapturingEmailSender;
   readonly clock: TestClock;
   readonly outbox: OutboxDispatcher;
-  /** Deliver every due outbox event (the worker's job), until none are left. */
   deliverOutbox(): Promise<void>;
 }
 
 export interface HarnessOptions {
   readonly auth?: boolean;
   readonly logStream?: DestinationStream;
-  /**
-   * Run the simulated PSP on an ephemeral port and point the app at it (implies
-   * `auth`). Webhooks are delivered on command through the real HTTP pipeline.
-   */
+ 
   readonly payments?: { readonly captureCompletion?: CaptureCompletion; readonly hangMilliseconds?: number } | true;
-  /**
-   * Run the simulated ExchangeRate-API on an ephemeral port and point the app at it (implies
-   * `payments`, for its sign-up helpers). Keyed Business plan by default — the API key
-   * travels in the URL path, so key hygiene is exercised by every FX test; `open: true`
-   * uses the key-less open-access endpoint (OPEN plan) instead.
-   */
+
   readonly fx?: { readonly open?: boolean } | true;
-  /**
-   * Enable Paystack and run the simulated Paystack on an ephemeral port (implies `payments`). The key is synthetic
-   * (`sk_test_…`, random per harness); webhooks are delivered on command through the real pipeline. Without this,
-   * `PAYSTACK_BASE_URL` points nowhere (`127.0.0.1:9`): no test ever reaches the real Paystack.
-   */
+
   readonly paystack?: { readonly hangMilliseconds?: number; readonly checkoutWindowMinutes?: number; readonly webhookIpAllowlist?: string } | true;
 }
 
-/** Present when the harness was started with `{ paystack }`. */
 export interface PaystackHarness {
   readonly mock: MockPaystack;
-  /** The synthetic secret key: must never appear in a row, a log or a response. */
   readonly secretKey: string;
-  /** `POST /wallet/fund/paystack` through the real pipeline. */
   fund(user: SignedUpUser, body: Record<string, unknown>, idempotencyKey?: string): request.Test;
-  /** `GET /wallet/fund/{fundingId}`. */
   status(user: SignedUpUser, fundingId: string): request.Test;
-  /** POST raw bytes to the Paystack webhook route, with exactly these headers. */
   postWebhook(body: Buffer, headers: Record<string, string>): request.Test;
-  /**
-   * Every call the app made through the Paystack port, and whether it was made INSIDE a database transaction (the
-   * ambient UnitOfWork's) — which must never happen (CLAUDE.md non-negotiable).
-   */
+ 
   readonly gatewayCalls: { readonly operation: string; readonly insideTransaction: boolean }[];
 }
 
-/** Present when the harness was started with `{ fx }`. */
 export interface FxHarness {
   readonly api: MockExchangeRateApi;
-  /** The simulated provider's API key (keyed mode): must never appear in a row or a log. */
   readonly apiKey: string;
   readonly fetcher: FxRateFetcher;
   readonly poller: FxPoller;
@@ -157,36 +129,23 @@ export interface FxHarness {
   readonly quotes: QuoteService;
   readonly coordination: FetchCoordination;
   readonly metrics: FxMetrics;
-  /** Publish rates "now" on the TEST clock (by default published 60s ago, next update in 300s). */
   publishFresh(rates?: Record<string, string>, options?: { publishedSecondsAgo?: number; nextUpdateInSeconds?: number }): void;
-  /** Publish, then fetch once: an accepted snapshot in Postgres and Redis. */
   warm(rates?: Record<string, string>): Promise<void>;
-  /** Delete every `fx:*` Redis key (budget, breaker, lock, gate, cache) and the per-process copy. */
   resetRedisState(): Promise<void>;
-  /** Drop the cached snapshot only (a Redis flush of the cache), and the per-process copy. */
   flushSnapshotCache(): Promise<void>;
-  /** Count `provider_calls` rows of the FX provider. */
   providerCallCount(): Promise<number>;
-  /** `POST /fx/quotes` through the real pipeline. */
   quote(user: SignedUpUser, body: Record<string, unknown>, idempotencyKey?: string): request.Test;
 }
 
-/** Every `signUp()` user's password: a test that outlives the 900s access token logs in again with it. */
 export const HARNESS_USER_PASSWORD = 'correct horse battery staple';
 
-/** A verified user with a live access token. */
 export interface SignedUpUser {
   readonly userId: string;
   readonly email: string;
   readonly accessToken: string;
 }
 
-/**
- * Reconciliation (Phase 9), present with `{ payments }`: the jobs, the scheduler, the scripted
- * crash seam, and row readers. Runs are driven by the test (`runPeriod` / `tick`), on the
- * harness's `TestClock` — the mock PSP shares that clock, so capture, chargeback and settlement
- * times and the T+X windows all move together.
- */
+
 export interface ReconciliationHarness {
   readonly scheduler: ReconciliationScheduler;
   readonly internal: InternalReconciliationJob;
@@ -196,71 +155,47 @@ export interface ReconciliationHarness {
   readonly runs: ReconciliationRunRepository;
   readonly metrics: ReconciliationMetrics;
   readonly checkpoints: ScriptedReconciliationCheckpoints;
-  /** Run one period now (a fresh period key per call unless given). */
   run(kind: ReconciliationRunKind, periodKey?: string): Promise<RunResult>;
-  /** Every break, oldest first. */
   allBreaks(): Promise<ReconciliationBreak[]>;
-  /** Live (OPEN / ESCALATED) breaks, oldest first. */
   liveBreaks(): Promise<ReconciliationBreak[]>;
   runRow(kind: ReconciliationRunKind, periodKey: string): Promise<ReconciliationRun | null>;
 }
 
-/** The first administrators (bootstrap) and more admins granted through real approvals. */
 export interface Administrators {
   readonly admin: SignedUpUser;
   readonly security: SignedUpUser;
 }
 
-/**
- * Controls (Phase 10), present with `{ payments }`: `/admin/*` through the real HTTP pipeline (guards, barrier,
- * rate limits), the one-time bootstrap over the OWNER's connection, and the services for property tests.
- */
+
 export interface AdminHarness {
   readonly approvals: ApprovalService;
   readonly repository: ApprovalRepository;
   readonly metrics: AdminMetrics;
   readonly monitor: AdminMonitor;
-  /** Two fresh verified users → the first ADMIN and SECURITY officer (`bootstrap_first_administrators`, once per database). */
   bootstrap(): Promise<Administrators>;
-  /** A fresh verified user made `role` by a real ROLE_CHANGE: `requester` (an ADMIN) asks, `approver` (SECURITY) approves. */
   grant(role: 'ADMIN' | 'SECURITY', requester: SignedUpUser, approver: SignedUpUser): Promise<SignedUpUser>;
-  /** `POST /admin/approvals`. */
   request(user: SignedUpUser, body: Record<string, unknown>, idempotencyKey?: string): request.Test;
-  /** `POST /admin/approvals/:id/{approve|reject|cancel|review}`. */
   decide(user: SignedUpUser, approvalId: string, decision: 'approve' | 'reject' | 'cancel' | 'review', body?: Record<string, unknown>, idempotencyKey?: string): request.Test;
-  /** `GET /admin/...` (path after `/admin/`). */
   get(user: SignedUpUser, path: string): request.Test;
-  /** Request, then approve by another admin: the executed (or refused) approval. Fails the test on any non-2xx. */
   requestAndApprove(requester: SignedUpUser, approver: SignedUpUser, body: Record<string, unknown>): Promise<Record<string, unknown>>;
 }
 
-/** Present when the harness was started with `{ payments }`. */
 export interface PaymentsHarness {
   readonly psp: MockPsp;
   readonly runner: FlowRunner;
   readonly resumer: FlowResumer;
   readonly processor: WebhookProcessor;
   readonly checkpoints: ScriptedFlowCheckpoints;
-  /** Register, receive the code, verify: a real ACTIVE user with tokens. */
   signUp(): Promise<SignedUpUser>;
-  /** `POST /wallet/fund` through the real pipeline. */
   fund(user: SignedUpUser, body: Record<string, unknown>, idempotencyKey?: string): request.Test;
-  /** Log in again (a fresh access token) — for tests that move the clock past the token's life. */
   logIn(user: SignedUpUser): Promise<SignedUpUser>;
-  /** Clear every `rate-limit:*` counter (tests that repeat a subject inside a window), or only one rule's (`'global'`). */
   clearRateLimits(rule?: string): Promise<void>;
-  /** Make every waiting flow and webhook event due now ("time passes"; leases are untouched). */
   makeAllDue(): Promise<void>;
-  /** Let every held lease lapse (a dead worker's lease, after its timeout). */
   lapseLeases(): Promise<void>;
-  /**
-   * Play the worker until quiet: deliver pending webhooks, process events, resume due
-   * flows, make everything due again — up to `rounds` times.
-   */
+  
   drive(options?: { rounds?: number; deliverWebhooks?: boolean }): Promise<void>;
   readonly reconciliation: ReconciliationHarness;
   readonly admin: AdminHarness;
-  /** Only with `{ paystack }`. */
   readonly paystack: PaystackHarness | undefined;
 }
 
@@ -274,28 +209,16 @@ export interface LedgerHarness {
   readonly checks: LedgerChecksService;
   readonly reservations: ReservationService;
   readonly reservationChecks: ReservationChecksService;
-  /** Only with `{ auth: true }`. */
   readonly auth: AuthHarness | undefined;
-  /** Only with `{ payments }` or `{ fx }`. */
   readonly payments: PaymentsHarness | undefined;
-  /** Only with `{ fx }`. */
   readonly fx: FxHarness | undefined;
   createWallet(): Promise<{ userId: string; walletId: string }>;
-  /**
-   * Real `flow_instances` ids (`reservations.flow_id` has a foreign key since Phase 5):
-   * completed, FAILED flows the resumer never picks up. Create a pool up front so
-   * concurrency tests do no extra work inside their contention window.
-   */
+ 
   newFlowIds(count: number): Promise<string[]>;
   openUserAccount(currency: string, wallet?: { userId: string; walletId: string }): Promise<UserAccount>;
-  /** System-driven funding: DEBIT BANK:{currency} (asset up), CREDIT the user (we owe more). */
   fund(account: UserAccount, amountMinor: bigint): Promise<PostedTransaction>;
   balanceOf(accountId: string): Promise<bigint>;
-  /**
-   * Conversion provenance for tests that post a CONVERSION directly through the ledger
-   * (every CONVERSION must carry it since Phase 7), citing one ACCEPTED fixture snapshot
-   * created on first use. The rates are placeholders; `rateDisplay` is derived from the amounts.
-   */
+ 
   conversionProvenance(input: {
     sourceCurrency: string;
     sourceAmountMinor: bigint;
@@ -304,10 +227,7 @@ export interface LedgerHarness {
   }): Promise<ConversionProvenance>;
   reservedOf(accountId: string): Promise<bigint>;
   snapshot(): Promise<LedgerSnapshot>;
-  /**
-   * Run every §8.1 check — the ledger's and reservations' `reserved = Σ ACTIVE` —
-   * and fail the test with the full report if the books are not clean.
-   */
+
   expectCleanBooks(): Promise<LedgerIntegrityReport>;
   close(): Promise<void>;
 }
@@ -320,7 +240,6 @@ export async function startLedgerHarness(
   const withPaystack = options.paystack !== undefined;
   const withPayments = options.payments !== undefined || withFx || withPaystack;
   const paystackOptions = options.paystack === true ? {} : (options.paystack ?? {});
-  // Synthetic, random per harness: the shape of a Paystack test key, never a real one.
   const paystackSecretKey = `sk_test_${randomUUID().replace(/-/g, '')}${randomUUID().replace(/-/g, '').slice(0, 8)}`;
   const fxOpen = typeof options.fx === 'object' && options.fx.open === true;
   const fxApiKey = `mockfxkey${randomUUID().replace(/-/g, '').slice(0, 20)}`;
@@ -329,7 +248,6 @@ export async function startLedgerHarness(
   const redis = options.auth || withPayments ? await new RedisContainer('redis:7-alpine').start() : undefined;
   const pspSecrets = paymentProviderTestSecrets();
   const pspOptions = options.payments === true ? {} : (options.payments ?? {});
-  // One clock for the app and the simulated PSP: capture, chargeback and settlement times move with it.
   const clock = new TestClock();
   const psp = withPayments
     ? new MockPsp({
@@ -350,7 +268,6 @@ export async function startLedgerHarness(
     ...(pspUrl
       ? {
           PSP_BASE_URL: pspUrl,
-          // Fast failure in tests; the policy (retries on reads only) is unchanged.
           PSP_REQUEST_TIMEOUT_MILLISECONDS: '300',
           FUNDING_LIMITS: '{"NGN":{"minimum":"100","maximum":"100000000000"},"USD":{"minimum":"100","maximum":"10000000"}}',
           PSP_FUNDING_CURRENCIES: 'NGN,USD',
@@ -364,7 +281,6 @@ export async function startLedgerHarness(
           PAYSTACK_BASE_URL: paystackUrl,
           PAYSTACK_CALLBACK_URL: 'http://localhost:5173/funding/return',
           PAYSTACK_FUNDING_CURRENCIES: 'NGN,USD',
-          // Fast failure in tests; the policy (reads retried, initialize sent once) is unchanged.
           PAYSTACK_REQUEST_TIMEOUT_MILLISECONDS: '300',
           PAYSTACK_INITIALIZE_TIMEOUT_MILLISECONDS: '1000',
           ...(paystackOptions.checkoutWindowMinutes ? { PAYSTACK_CHECKOUT_WINDOW_MINUTES: String(paystackOptions.checkoutWindowMinutes) } : {}),
@@ -376,9 +292,7 @@ export async function startLedgerHarness(
           ...(fxOpen
             ? { FX_RATE_BASE_URL: `${fxUrl}/v6/latest`, FX_PROVIDER_PLAN: 'OPEN' }
             : { FX_RATE_BASE_URL: `${fxUrl}/v6/{apiKey}/latest`, FX_PROVIDER_PLAN: 'BUSINESS', EXCHANGE_RATE_API_KEY: fxApiKey }),
-          // Fast failure in tests; the policy (retries on reads only) is unchanged.
           FX_REQUEST_TIMEOUT_MILLISECONDS: '400',
-          // Always re-read Redis: tests move the clock and flush the cache between steps.
           FX_LOCAL_CACHE_MILLISECONDS: '0',
         }
       : {}),
@@ -416,14 +330,11 @@ export async function startLedgerHarness(
       outbox,
       async deliverOutbox() {
         while ((await outbox.dispatchDue(100)).claimed > 0) {
-          // keep draining
         }
       },
     };
     if (psp) {
       const http = () => request(app.getHttpServer());
-      // Sent as a string: superagent would JSON-serialise a Buffer and change the bytes
-      // (the signature is over the raw bytes, so that is refused — correctly).
       psp.setDeliverer(async (body, headers) => (await http().post(PSP_WEBHOOK_PATH).set(headers).send(body.toString('utf8'))).status);
       paystackMock?.setDeliverer(async (body, headers) => (await http().post(PAYSTACK_WEBHOOK_PATH).set(headers).send(body.toString('utf8'))).status);
       const runner = moduleRef.get(FlowRunner);
@@ -439,7 +350,6 @@ export async function startLedgerHarness(
           `UPDATE webhook_events SET next_attempt_at = now() WHERE processed_at IS NULL AND next_attempt_at > now()`,
         );
       };
-      // Sign-ups share the outbox drain; run them one at a time so parallel callers can't race.
       let signUpQueue: Promise<unknown> = Promise.resolve();
       const signUpOne = async (): Promise<SignedUpUser> => {
         const email = `funding-${randomUUID().slice(0, 12)}@example.com`;
@@ -465,7 +375,6 @@ export async function startLedgerHarness(
         metrics: moduleRef.get(ReconciliationMetrics),
         checkpoints: reconciliationCheckpoints,
         async run(kind, periodKey) {
-          // A distinct, well-formed period per call (years from 3000 on: never a real date's key).
           periodSequence += 1;
           const key = periodKey ?? `${String(3000 + periodSequence).padStart(4, '0')}-01-01`;
           const result = await scheduler.runPeriod(kind, key);
@@ -604,7 +513,6 @@ export async function startLedgerHarness(
       };
     }
     if (fxApi) {
-      // FX boundaries are tested to the millisecond: time moves only when a test says so.
       auth.clock.freeze();
       const redisService = moduleRef.get(RedisService);
       const rates = moduleRef.get(FxRateService);

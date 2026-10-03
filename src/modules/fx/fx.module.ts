@@ -20,7 +20,6 @@ import { QuoteService } from './quote.service';
 import { RateCache } from './rate-cache';
 import { RateSnapshotGuard } from './rate-snapshot.guard';
 
-/** Fail loudly at boot: every active currency needs plausibility bounds, or no fetch could ever be accepted. */
 @Injectable()
 export class FxConfigurationCheck implements OnApplicationBootstrap {
   constructor(
@@ -40,12 +39,6 @@ export class FxConfigurationCheck implements OnApplicationBootstrap {
   }
 }
 
-/**
- * FX (design §4.3–§4.5, §7.4, §7.7, §14 `fx/`): the rate provider behind its port, the
- * pipeline (fetcher, sanity, snapshots, cache), the read path, the worker's poller, and
- * quotes. The provider is ExchangeRate-API (user decision 2026-09-29), keyed or open
- * access by configuration; a second provider would be bound here, behind the same port.
- */
 @Module({
   controllers: [FxController],
   providers: [
@@ -63,7 +56,6 @@ export class FxConfigurationCheck implements OnApplicationBootstrap {
             timeoutMilliseconds: fx.requestTimeoutMilliseconds,
             readRetries: fx.readRetries,
             secrets: fx.apiKey ? [fx.apiKey, encodeURIComponent(fx.apiKey)] : [],
-            // Rate feeds carry no secrets, and every digit of every rate is evidence.
             recordResponseAs: 'raw-json-text',
           },
           recorder,
@@ -94,7 +86,6 @@ export class FxConfigurationCheck implements OnApplicationBootstrap {
     RateProvider,
     CurrencyPairRepository,
     RateSnapshotGuard,
-    // Phase 10: rate overrides write snapshots; their handler offers them to the cache.
     ExchangeRateSnapshotRepository,
     RateCache,
   ],

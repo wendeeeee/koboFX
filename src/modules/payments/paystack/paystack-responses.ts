@@ -5,19 +5,11 @@ import { ProviderResponseInvalidError } from '../payment.errors';
 import { PaystackCheckout, PaystackDispute, PaystackTransaction } from './paystack-gateway.port';
 import { isPaystackTransactionStatus } from './paystack-status';
 
-/**
- * Reading Paystack's answers (PAYSTACK_PLAN.md A1, A17; handbook: don't trust the schema).
- *
- * - **No float, ever.** Paystack sends amounts and ids as JSON NUMBERS. `lossless-json` hands each over as its source
- *   text; an amount must then be digits only (no sign, no fraction, no exponent, ≤ 18 digits) → `bigint`. `20000.0`,
- *   `2e4` and `"20000"` are refused, not "fixed".
- * - **Only the fields we use** are validated; anything else Paystack adds or changes is ignored.
- * - Every status is mapped explicitly (`paystack-status.ts`); an unknown one fails the response.
- */
+
 
 const DIGITS = /^(0|[1-9]\d{0,17})$/;
 
-/** Exact minor units from a JSON number's source text, or undefined if it is not a plain non-negative integer. */
+
 export function minorUnitsFromJsonNumber(value: unknown): bigint | undefined {
   if (!isLosslessNumber(value)) return undefined;
   return DIGITS.test(value.value) ? BigInt(value.value) : undefined;
@@ -25,7 +17,7 @@ export function minorUnitsFromJsonNumber(value: unknown): bigint | undefined {
 
 const losslessNumber = z.custom<LosslessNumber>((value) => isLosslessNumber(value), 'must be a JSON number');
 const minorUnits = losslessNumber.refine((value) => DIGITS.test(value.value), 'must be a whole number of subunits (digits only)');
-/** Paystack ids are integers; kept as decimal text. Some endpoints send them as strings: accepted only if digits. */
+
 const integerId = z.union([losslessNumber, z.string()]).refine(
   (value) => /^[1-9]\d{0,24}$/.test(typeof value === 'string' ? value : value.value),
   'must be a positive integer id',
@@ -74,12 +66,11 @@ function textOf(value: LosslessNumber | string): string {
   return typeof value === 'string' ? value : value.value;
 }
 
-/** Parse a Paystack body losslessly. Throws on anything that is not JSON. */
 export function parsePaystackJson(text: string): unknown {
   return parse(text);
 }
 
-/** `{status, message, data}`; `status` must be true — a `false` reaching here is a classification bug. */
+
 function dataOf(body: unknown, operation: string): { data: unknown; meta: unknown } {
   const result = envelope.safeParse(body);
   if (!result.success) throw new ProviderResponseInvalidError(`Malformed Paystack envelope: ${describe(result.error)}`, operation);

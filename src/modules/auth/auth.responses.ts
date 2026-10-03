@@ -3,13 +3,10 @@ import { ApiInstant, ApiUuid } from '../../openapi/properties';
 import { UserRole, UserStatus } from '../users/user.types';
 import { IssuedTokenResponse, SafeUser, SessionResponse, TokenPairResponse } from './auth.types';
 
-/**
- * OpenAPI documentation of the auth bodies (Phase 11). Never instantiated: `implements` keeps each class in step
- * with the interface the code returns, and the response-reality tests catch a documented field that is not sent.
- */
+
 @ApiSchema({ name: 'IssuedToken' })
 export class IssuedTokenResponseDocument implements IssuedTokenResponse {
-  @ApiProperty({ example: '<token>', description: 'Opaque to the client. Access: an RS256 JWT. Refresh: 256 random bits.' })
+  @ApiProperty({ example: '<token>', description: '' })
   token!: string;
 
   @ApiInstant('When the token stops being accepted.', '2026-09-29T10:15:00.000Z')
@@ -61,7 +58,7 @@ export class RefreshResponseDocument implements Pick<SessionResponse, 'tokens'> 
   tokens!: TokenPairResponseDocument;
 }
 
-/** The uniform acknowledgement of register and resend-otp (enumeration resistance: identical whatever the email's state). */
+
 @ApiSchema({ name: 'UniformMessage' })
 export class UniformMessageDocument {
   @ApiProperty({ example: 'If this email can be registered, a verification code has been sent to it.' })

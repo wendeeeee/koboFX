@@ -1,10 +1,4 @@
-/**
- * The break taxonomy (Phase 9 plan §F): one type per kind of discrepancy, each with how bad it
- * is and how it may be resolved. The database enum `reconciliation_break_type` holds the same
- * values (a spec asserts they match).
- */
 export enum BreakType {
-  // External — our books against the PSP's (design §8.2).
   MISSING_IN_LEDGER = 'MISSING_IN_LEDGER',
   PAYMENT_WITHOUT_FLOW = 'PAYMENT_WITHOUT_FLOW',
   MISSING_AT_PSP = 'MISSING_AT_PSP',
@@ -19,7 +13,6 @@ export enum BreakType {
   SETTLEMENT_BATCH_CHANGED = 'SETTLEMENT_BATCH_CHANGED',
   SETTLEMENT_IN_LOCKED_PERIOD = 'SETTLEMENT_IN_LOCKED_PERIOD',
   RECEIVABLE_PROOF_FAILED = 'RECEIVABLE_PROOF_FAILED',
-  // Internal — the books against themselves (design §8.1).
   TRIAL_BALANCE_UNBALANCED = 'TRIAL_BALANCE_UNBALANCED',
   ACCOUNTING_EQUATION_FAILED = 'ACCOUNTING_EQUATION_FAILED',
   CACHED_BALANCE_DRIFT = 'CACHED_BALANCE_DRIFT',
@@ -31,23 +24,13 @@ export enum BreakType {
 
 export const BREAK_TYPES: readonly BreakType[] = Object.values(BreakType);
 
-/**
- * - `MONEY`: money is wrong or unaccounted for — counts toward `reconciliation_drift_minor`
- *   (pages), escalated at detection (only a Phase 10 CORRECTION or a human resolves it).
- * - `SECURITY`: someone edited the database directly (§16 "Hash chain broken": page security).
- * - `INVESTIGATE`: a liveness or timing problem; an automatic resolution is tried first.
- */
+
 export type BreakSeverity = 'MONEY' | 'SECURITY' | 'INVESTIGATE';
 
 export interface BreakPolicy {
   readonly severity: BreakSeverity;
-  /** Created ESCALATED rather than OPEN: nothing automatic can resolve it. */
   readonly escalateOnDetection: boolean;
-  /**
-   * Re-derived in full by every run of its kind: when such a run no longer sees a live break
-   * and nothing named its cause, the break is escalated as "no longer detected" — never
-   * silently resolved. One-off events (a settlement line, a report) are not re-derived.
-   */
+ 
   readonly rederivedBy: 'INTERNAL' | 'EXTERNAL_DAILY' | null;
 }
 
@@ -82,7 +65,6 @@ export const BREAK_POLICIES: Readonly<Record<BreakType, BreakPolicy>> = {
   [BreakType.FX_PROVENANCE_MISMATCH]: money('INTERNAL'),
 };
 
-/** The subject keys — one live break per `(type, subject)`. Stable: they are the dedupe key. */
 export const subjectKeys = {
   payment: (provider: string, paymentId: string) => `payment:${provider}:${paymentId}`,
   flow: (flowId: string) => `flow:${flowId}`,

@@ -4,7 +4,6 @@ import {
   ReconciliationCheckpoints,
 } from '../../src/modules/reconciliation/reconciliation-checkpoints';
 
-/** A crash injected at a reconciliation step boundary (design §11). */
 export class InjectedReconciliationCrash extends Error {
   constructor(point: ReconciliationCheckpoint, kind: string) {
     super(`Injected crash at ${point} in a ${kind} run`);
@@ -12,7 +11,6 @@ export class InjectedReconciliationCrash extends Error {
   }
 }
 
-/** Records every boundary reached and throws once at an armed one (then the run is resumed). */
 export class ScriptedReconciliationCheckpoints extends ReconciliationCheckpoints {
   readonly log: { point: ReconciliationCheckpoint; runId: string; kind: string }[] = [];
   private armed: { point: ReconciliationCheckpoint; kind?: string } | undefined;

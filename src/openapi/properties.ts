@@ -1,14 +1,9 @@
 import { ApiProperty, ApiPropertyOptions } from '@nestjs/swagger';
 
-/**
- * Property helpers for the OpenAPI contract. Amounts are ALWAYS strings of minor units (never `number`): the
- * contract test walks the whole document and fails on any amount-like property typed `number`.
- */
 
-/** As written in the DTOs: `/wallet/fund` and admin payloads allow ≤ 18 digits; quotes and conversions ≤ 19. */
 export const MINOR_UNITS_PATTERN_18 = '^[1-9]\\d{0,17}$';
 export const MINOR_UNITS_PATTERN_19 = '^[1-9]\\d{0,18}$';
-/** A stored amount on the way out: a whole number of minor units, possibly zero or negative (an overdraft). */
+
 export const SIGNED_MINOR_UNITS_PATTERN = '^-?\\d+$';
 export const CURRENCY_PATTERN = '^[A-Z]{3}$';
 
@@ -18,11 +13,9 @@ const MINOR_UNITS_NOTE =
 
 type Extra = Omit<ApiPropertyOptions, 'type' | 'format' | 'pattern' | 'example'> & { nullable?: boolean };
 
-/** A request amount (positive). */
 export const ApiMinorUnits = (description: string, example: string, pattern: string, options: Extra = {}): PropertyDecorator =>
   ApiProperty({ ...options, type: 'string', pattern, example, description: `${description} ${MINOR_UNITS_NOTE}` } as ApiPropertyOptions);
 
-/** A response amount (as stored; may be zero or negative where a balance can be). */
 export const ApiAmount = (description: string, example: string | null, options: Extra = {}): PropertyDecorator =>
   ApiProperty({
     ...options,
@@ -44,10 +37,8 @@ export const ApiUuid = (description: string, example: string, options: Extra = {
 export const ApiInstant = (description: string, example: string | null = '2026-09-29T10:00:00.000Z', options: Extra = {}): PropertyDecorator =>
   ApiProperty({ ...options, type: 'string', format: 'date-time', example, description } as ApiPropertyOptions);
 
-/** A display rate: a plain decimal string, 12 significant digits. Display only — the amounts are authoritative. */
 export const ApiDisplayRate = (description: string, example: string): PropertyDecorator =>
   ApiProperty({ type: 'string', pattern: '^\\d+(\\.\\d+)?$', example, description: `${description} Display only (12 significant digits); the amounts are authoritative.` });
 
-/** A free-form JSON object (internal metadata, evidence details, audit states). */
 export const ApiFreeObject = (description: string, options: Extra & { example?: unknown } = {}): PropertyDecorator =>
   ApiProperty({ ...options, type: 'object', additionalProperties: true, description } as ApiPropertyOptions);

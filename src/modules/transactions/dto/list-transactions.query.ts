@@ -3,16 +3,11 @@ import { IsIn, IsOptional, IsString, Matches, MaxLength } from 'class-validator'
 import { HistorySort } from '../history-cursor';
 import { HISTORY_TYPES } from '../history-status';
 
-/** 1–100, digits only (no sign, no decimals, no exponent, no padding). */
 const LIMIT_PATTERN = /^(100|[1-9]\d?)$/;
 const INSTANT_SHAPE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{1,6})?(Z|[+-]\d{2}:\d{2})$/;
 const INSTANT_MESSAGE = 'must be ISO-8601 with an offset and at most 6 fractional digits, e.g. 2026-09-29T10:00:00Z';
 
-/**
- * `GET /transactions` (design §7.8). Query strings stay strings here; the service parses them
- * exactly (`limit` to a number, instants to epoch µs — never via a JS `Date`). Unknown parameters
- * are refused by the global pipe (`forbidNonWhitelisted`).
- */
+
 export class ListTransactionsQuery {
   @ApiPropertyOptional({ maxLength: 256, description: 'The previous page\'s `nextCursor`. Valid only with the same sort and filters.' })
   @IsOptional()

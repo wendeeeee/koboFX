@@ -1,7 +1,5 @@
 /**
- * Well-known passwords of 12+ characters (shorter ones already fail the length rule),
- * compared case-insensitively. Drawn from the most common entries in public breach
- * corpora. Deliberately small and local; see `password-policy.ts`.
+ * Well-known passwords of 12+ characters`.
  */
 export const COMMON_PASSWORDS: ReadonlySet<string> = new Set([
   '123456789012',

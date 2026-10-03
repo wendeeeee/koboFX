@@ -11,7 +11,6 @@ export class CurrencyEntity {
   @Column({ type: 'text' })
   symbol!: string;
 
-  /** smallint 0–4: a count of decimal places, not an amount, so `number` is correct. */
   @Column({ name: 'minor_unit', type: 'smallint' })
   minorUnit!: number;
 

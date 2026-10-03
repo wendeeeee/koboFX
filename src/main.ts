@@ -1,12 +1,12 @@
 import 'reflect-metadata';
-import 'dotenv/config';
+import * as dotenv from 'dotenv';
 import { NestFactory } from '@nestjs/core';
 import { NestExpressApplication } from '@nestjs/platform-express';
 import { AppModule } from './app.module';
 import { configureApp } from './app.setup';
 import { APP_CONFIG } from './config/config.module';
 import { AppConfig, ConfigValidationError } from './config/configuration';
-
+dotenv.config()
 async function bootstrap(): Promise<void> {
   const app = await NestFactory.create<NestExpressApplication>(AppModule.forRoot(), {
     bufferLogs: true,
@@ -18,7 +18,6 @@ async function bootstrap(): Promise<void> {
 }
 
 bootstrap().catch((error: unknown) => {
-  // Fail fast and loudly: a misconfigured money service must not limp along.
   if (error instanceof ConfigValidationError) {
     process.stderr.write(`${error.message}\n`);
   } else {

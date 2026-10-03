@@ -2,11 +2,6 @@ import { ApiSchema } from '@nestjs/swagger';
 import { IsString, Matches, MaxLength } from 'class-validator';
 import { ApiCurrency, ApiMinorUnits, MINOR_UNITS_PATTERN_18 } from '../../../../openapi/properties';
 
-/**
- * `POST /wallet/fund/paystack`. Only what to fund: the amount (a string of minor units, never a JSON number) and the
- * currency. No email (the worker uses the authenticated user's stored one), no reference (it is the funding id), no
- * card data (the customer pays on Paystack's hosted checkout). Unknown fields are refused by the global pipe.
- */
 @ApiSchema({ name: 'PaystackFundWalletRequest' })
 export class PaystackFundWalletDto {
   @ApiMinorUnits('How much to fund. Within the currency\'s funding limits (default NGN ₦100 – ₦1,000,000).', '150000', MINOR_UNITS_PATTERN_18, { maxLength: 19 })

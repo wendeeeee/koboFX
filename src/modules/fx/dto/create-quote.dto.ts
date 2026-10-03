@@ -5,12 +5,6 @@ import { ApiCurrency, ApiMinorUnits, MINOR_UNITS_PATTERN_19 } from '../../../ope
 const MINOR_UNITS = /^[1-9]\d{0,18}$/;
 const MINOR_UNITS_MESSAGE = 'must be a positive whole number of minor units, as a string';
 
-/**
- * `POST /fx/quotes` (design §7.7, §12). Directional: `from` is sold, `to` is bought. Give
- * EXACTLY ONE of `sourceAmount` (how much `from` to sell) or `targetAmount` (how much
- * `to` to receive — "buy $50 with NGN"). Amounts are strings of minor units, never JSON
- * numbers.
- */
 @ApiSchema({ name: 'CreateQuoteRequest' })
 export class CreateQuoteDto {
   @ApiCurrency('Sold (debited).', 'NGN')

@@ -242,3 +242,122 @@ curl -s -X POST $API/webhooks/psp -H 'Content-Type: application/json' -d '{"id":
 ```
 
 Webhooks are hints: the worker asks the PSP for the authoritative state before anything changes.
+
+## 8. Paystack funding (test mode)
+
+Paystack is a second provider. `POST /wallet/fund` continues to use the simulated PSP;
+`POST /wallet/fund/paystack` accepts only `{ amount, currency }`. The worker reads the authenticated
+user's stored email and sends it to Paystack to initialize checkout. Neither endpoint accepts card details.
+The committed OpenAPI document includes Paystack; a running server with `PAYSTACK_ENABLED=false`
+omits both Paystack routes from its document and returns 404 for them.
+
+### Configuration and local mock
+
+Use the existing development setup and migrations from section 3. Set these entries in your ignored `.env`:
+
+```dotenv
+PAYSTACK_ENABLED=true
+PAYSTACK_SECRET_KEY=sk_test_replace_with_your_test_secret
+PAYSTACK_BASE_URL=http://localhost:4030
+PAYSTACK_CALLBACK_URL=http://localhost:5173/funding/return
+PAYSTACK_FUNDING_CURRENCIES=NGN
+PAYSTACK_CHECKOUT_WINDOW_MINUTES=30
+MOCK_PAYSTACK_WEBHOOK_URL=http://localhost:3000/api/v1/webhooks/paystack
+```
+
+Keep the key private. For the mock, any synthetic `sk_test_` key accepted by config works; the API
+and mock must use the same key. Keep `PSP_NAME` as configured for the simulated PSP. NGN needs an entry
+in `FUNDING_LIMITS` and `SETTLEMENT_WINDOWS`. Remove `PAYSTACK_WEBHOOK_URL`: the loader refuses this
+obsolete name. Set the browser return page explicitly as `PAYSTACK_CALLBACK_URL`; the webhook
+address belongs in the dashboard, not in that variable.
+
+Run `npm run start:dev`, `npm run start:worker:dev`, and `npm run start:mock-paystack:dev` in separate
+terminals. The mock checkout has Pay and Decline buttons. Tests use an ephemeral mock port and synthetic
+keys; other test harnesses default to `http://127.0.0.1:9`, never the real API.
+
+### Real test-mode smoke and checkout
+
+Switch `PAYSTACK_BASE_URL` to `https://api.paystack.co`, use your dashboard's **test** secret, and
+restart the API and worker. Configure the Paystack account so the merchant bears fees: verify's
+amount must equal the requested amount, otherwise funding is held. Use a dedicated test account;
+unrelated successful payments produce reconciliation breaks.
+
+1. Register, verify, and log in as in section 4. Obtain your user id from `GET /users/me`.
+2. Run `npm run paystack:smoke -- <active-user-uuid>` manually. This reads that user's stored email,
+   initializes one test transaction, verifies it, checks an unknown reference and parses a transaction
+   list through the real adapter. It prints statuses only. A freshly initialized transaction may
+   be unpaid or not yet visible. This diagnostic creates no funding flow and does not complete checkout;
+   it refuses CI, `NODE_ENV=test`, disabled Paystack, live keys and a non-official API URL.
+3. Start a tunnel, for example `ngrok http 3000` or `cloudflared tunnel --url http://localhost:3000`.
+   In the Paystack dashboard's **test-mode webhook settings**, save
+   `https://<tunnel-host>/api/v1/webhooks/paystack`. This setting is separate from the browser callback.
+   See [Paystack's webhook documentation](https://paystack.com/docs/payments/webhooks/).
+4. Create a funding using your bearer token, then poll the shared status endpoint:
+
+   ```bash
+   API=http://localhost:3000/api/v1
+   FUNDING_KEY=$(node -e 'console.log(require("node:crypto").randomUUID())')
+   FUNDING=$(curl -fsS -X POST "$API/wallet/fund/paystack" \
+     -H "Authorization: Bearer $TOKEN" -H "Idempotency-Key: $FUNDING_KEY" \
+     -H 'Content-Type: application/json' -d '{"amount":"150000","currency":"NGN"}')
+   FUNDING_ID=$(printf '%s' "$FUNDING" | jq -r .fundingId)
+   curl -fsS "$API/wallet/fund/$FUNDING_ID" -H "Authorization: Bearer $TOKEN"
+   ```
+
+   The first response is `202 PENDING`. Poll until `checkout.authorizationUrl` appears; open that
+   URL in your browser. `expiresAt` is KoboFX's checkout window, not an expiry promised by Paystack.
+   Retry the POST with the same key to verify identical response bytes and a single funding id.
+5. Complete checkout with a test card. Paystack documents these values (use any future expiry):
+
+   | Outcome | Card | CVV | Extra validation |
+   |---|---|---|---|
+   | Success | `4084 0840 8408 4081` | `408` | None |
+   | PIN | `5078 5078 5078 5078 12` | `081` | PIN `1111` |
+   | PIN and OTP | `5060 6666 6666 6666 666` | `123` | PIN `1234`, OTP `123456` |
+   | Declined | `4084 0800 0000 5408` | `001` | None |
+
+   Source: [Paystack test payments](https://paystack.com/docs/payments/test-payments/).
+6. Poll until `COMPLETED`, with `provider: "paystack"` and `checkout: null`. The callback's
+   `?reference=` is not proof of payment. Confirm `GET /wallet` increased by exactly `150000` minor
+   units and `GET /transactions/funding:<fundingId>` shows one `CARD_DEPOSIT`. Replaying the request
+   or webhook must not add another credit. Repeat without a webhook to check resumer completion.
+7. Check internal reconciliation via `GET /admin/reconciliation-runs` using an administrator token
+   after the next scheduled run: the internal run should be `CLEAN`. Check `/admin/breaks` as well.
+   The automated tests additionally call `expectCleanBooks()` to prove the accounting invariants.
+
+An unsigned webhook returns 401 and is stored. If `PAYSTACK_WEBHOOK_IP_ALLOWLIST` is set, only
+allowed `req.ip` values pass; configure `TRUST_PROXY_HOPS` for your actual proxy chain before using
+the allowlist behind a tunnel. Do not trust an arbitrary forwarded header. Disable the allowlist
+for the local mock. Declines and abandonment remain pending within the checkout window; money still
+in flight remains pending beyond it. `CHECKOUT_UNRECOVERABLE` means the initialize response was lost
+and Paystack cannot return the checkout URL: create another funding with a new idempotency key.
+
+### Automated acceptance checks
+
+Use a path fragment including `integration/`: the worktree name itself contains `paystack`, so
+`--testPathPattern=paystack` selects unrelated suites too.
+
+```bash
+npm run test:int -- --testPathPattern='integration/paystack-'
+npm run docs:generate
+npm run test:int -- --testPathPattern='integration/openapi-contract'
+npm run test:e2e -- --testPathPattern='e2e/auth.e2e'
+npm run typecheck
+npm run build
+```
+
+`docs:generate` exports `docs/openapi.json` from the real module/controller graph with both providers
+enabled, synthetic config and disconnected database/Redis substitutes. It does not run app lifecycle
+hooks or test HTTP behavior. The contract suite independently builds the document from the running
+app and checks it byte for byte; `UPDATE_OPENAPI=1` also lets that suite regenerate it.
+Review the generated diff. The mock suites cover signature evidence, verify-only credit, retries,
+replay, disputes, schema guards and reconciliation. Crash, race and property tests exercise recovery
+and exactly-once posting. Use `scripts/mutation-check.py` for the seven mutations listed in
+`PAYSTACK_PROMPT.md` §6; each must fail a test that passes without the mutation. Mutation execution
+and the ≥90% coverage acceptance gate must be recorded separately, not inferred from test presence.
+
+Settlement ingestion remains deferred: `PAYSTACK_RECEIVABLE` is not discharged into BANK/fees and
+Paystack settlement-window checks are skipped. Late-success and HELD breaks are detected, but the
+existing correction executor still requires simulated-provider settlement lines; completing their
+approved-credit recovery path remains a functional follow-up, not a verified acceptance claim.
+Record the manual smoke and checkout outcome separately; automated mock tests do not prove it.

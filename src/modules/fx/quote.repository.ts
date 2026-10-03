@@ -3,7 +3,6 @@ import { Dec, dec } from '../../common/money';
 import { UnitOfWork } from '../../database/transaction/unit-of-work';
 import { QuoteAmountMode } from './pricing';
 
-/** A quote as stored: everything Phase 7 posts, verbatim (design §7.7; Phase 6 §5.8). */
 export interface Quote {
   readonly id: string;
   readonly userId: string;
@@ -54,7 +53,6 @@ interface QuoteRow {
   consumed_at: Date | null;
 }
 
-// Amounts and rates come back as text and are parsed straight to bigint / Decimal.
 const COLUMNS = `id, user_id, source_currency_code, target_currency_code, amount_mode,
   source_amount_minor::text AS source_amount_minor, target_amount_minor::text AS target_amount_minor,
   target_mid_value_minor::text AS target_mid_value_minor, revenue_minor::text AS revenue_minor,
@@ -88,7 +86,6 @@ function toQuote(row: QuoteRow): Quote {
   };
 }
 
-/** `quotes`: insert, read scoped by user, and the single atomic consumption. */
 @Injectable()
 export class QuoteRepository {
   constructor(private readonly unitOfWork: UnitOfWork) {}
@@ -126,7 +123,6 @@ export class QuoteRepository {
     return toQuote(row);
   }
 
-  /** Scoped by the caller in the WHERE clause: another user's quote is simply not found. */
   async findForUser(quoteId: string, userId: string): Promise<Quote | undefined> {
     const [row] = (await this.unitOfWork.manager.query(`SELECT ${COLUMNS} FROM quotes WHERE id = $1 AND user_id = $2`, [
       quoteId,
@@ -135,10 +131,6 @@ export class QuoteRepository {
     return row ? toQuote(row) : undefined;
   }
 
-  /**
-   * The single consumption: one statement, one `now`. Succeeds only for the owner, if
-   * unconsumed, strictly before expiry. Returns undefined when it did not consume.
-   */
   async consume(quoteId: string, userId: string, now: Date): Promise<Quote | undefined> {
     const [row] = (await this.unitOfWork.manager.query(
       `WITH consumed AS (

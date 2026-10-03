@@ -4,7 +4,6 @@ import { QuoteAmountMode } from './pricing';
 import { PairRateView, RATE_ATTRIBUTION, RatesView } from './fx-rates.view';
 import type { QuoteStatus, QuoteView } from './quote.service';
 
-/** OpenAPI documentation of the FX bodies (Phase 11). Never instantiated. Example figures: USD/NGN 1,530, 150 bps. */
 export const EXAMPLE_SNAPSHOT_ID = '5e4d3c2b-1a09-4f8e-a7d6-c5b4a3928170';
 export const EXAMPLE_QUOTE_ID = '7d6c5b4a-3928-4170-8e5d-4c3b2a190807';
 export const EXAMPLE_MID_NGN_USD = '0.000653594771242';

@@ -10,12 +10,7 @@ import { RefreshTokenRevocationReason } from './tokens/refresh-token-rotation';
 import { RefreshTokenService } from './tokens/refresh-token.service';
 
 /**
- * Login, refresh and logout (design §9.1).
- *
- * Login does exactly one argon2 verification on every path — against a dummy hash
- * for an unknown email — and answers every failure with the same 401 (decision #6).
- * Brute force is bounded by the route's rate limits, keyed by IP + email and by email,
- * not by locking the account (a lockout would let anyone lock anyone out).
+ * Login, refresh and logout .
  */
 @Injectable()
 export class LoginService {
@@ -54,7 +49,6 @@ export class LoginService {
     return { tokens: this.sessions.tokenPair(rotated.userId, rotated.refreshToken) };
   }
 
-  /** Revoke the caller's own session (the family their access token belongs to). */
   async logout(userId: string, refreshTokenFamilyId: string): Promise<void> {
     await this.refreshTokens.revokeFamily(refreshTokenFamilyId, userId, RefreshTokenRevocationReason.LOGOUT, {
       type: 'USER',

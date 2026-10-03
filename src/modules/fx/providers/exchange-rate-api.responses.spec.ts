@@ -49,7 +49,6 @@ describe('parsing without a float (Phase 6 §5.6)', () => {
     const parsed = asRates(parseLatestResponse(success('{"USD":1,"NGN":1530.123456789012345,"EUR":0.87924100000000000001}'), KNOWN));
     expect(parsed.rates.get('NGN')?.toFixed()).toBe('1530.123456789012345');
     expect(parsed.rates.get('EUR')?.toFixed()).toBe('0.87924100000000000001');
-    // What JSON.parse would have done:
     expect(String(JSON.parse('1530.123456789012345'))).toBe('1530.1234567890124');
   });
 

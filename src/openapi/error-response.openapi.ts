@@ -3,10 +3,8 @@ import { ErrorCode } from '../common/errors';
 import { ErrorBody } from '../common/filters/error-response';
 import { ERROR_CODE_DESCRIPTIONS, ERROR_CODE_HTTP_STATUS } from './error-codes.openapi';
 
-/** Example correlation id: what `correlationIdMiddleware` generates when the client sends none (a UUID). */
 export const EXAMPLE_CORRELATION_ID = '6f1d2c3b-4a5e-4f60-8a7b-9c0d1e2f3a4b';
 
-/** The error contract (design §12.1), as `AllExceptionsFilter` writes it. Documentation only. */
 export class ErrorResponse implements ErrorBody {
   @ApiProperty({ type: 'integer', example: 409, description: 'The HTTP status, repeated.' })
   statusCode!: number;
@@ -34,7 +32,6 @@ export class ErrorResponse implements ErrorBody {
 
 const EXAMPLE_TIMESTAMP = '2026-09-10T11:04:22.114Z';
 
-/** Curated messages and details for the codes clients act on most; the rest use the code's description. */
 const CURATED: Partial<Record<ErrorCode, { message: string; details?: Record<string, unknown> }>> = {
   [ErrorCode.INSUFFICIENT_FUNDS]: {
     message: 'The balance cannot cover this debit.',
@@ -77,7 +74,6 @@ const CURATED: Partial<Record<ErrorCode, { message: string; details?: Record<str
   [ErrorCode.INVARIANT_VIOLATION]: { message: 'An unexpected error occurred.' },
 };
 
-/** An example body for one code, in the exact §12.1 shape. */
 export function errorExample(code: ErrorCode): ErrorBody {
   const curated = CURATED[code];
   const serverFault = ERROR_CODE_HTTP_STATUS[code] >= 500 && ERROR_CODE_HTTP_STATUS[code] !== 503;

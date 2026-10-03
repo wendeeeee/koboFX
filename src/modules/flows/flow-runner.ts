@@ -18,16 +18,7 @@ export type AdvanceResult =
   | { readonly kind: 'NOT_CLAIMED' }
   | { readonly kind: 'RAN'; readonly initialState: string; readonly finalState: string; readonly outcomes: readonly StepOutcome[] };
 
-/**
- * Drives flows one step at a time (design §7.5; handbook: full resumability). Both the
- * resumer and the webhook processor go through here, so there is exactly one way a
- * flow moves:
- *
- * claim (lease) → the definition's step (external calls outside any transaction, then
- * ONE fenced, state-guarded commit) → on failure, give the lease back with exponential
- * backoff and `last_error`. A flow is never abandoned: the backoff is capped, and
- * `flows_stalled` pages a human.
- */
+
 @Injectable()
 export class FlowRunner {
   private readonly logger = new Logger(FlowRunner.name);
@@ -52,7 +43,6 @@ export class FlowRunner {
     return definition;
   }
 
-  /** Claim one flow now and run up to `maxSteps` steps while each one transitions. */
   async advance(flowId: string, options: { maxSteps?: number; includeCompleted?: boolean } = {}): Promise<AdvanceResult> {
     const maxSteps = options.maxSteps ?? 10;
     const outcomes: StepOutcome[] = [];
@@ -71,16 +61,6 @@ export class FlowRunner {
     return { kind: 'RAN', initialState, finalState, outcomes };
   }
 
-  /**
-   * Move a flow on a fact its definition does not fetch itself — a PSP settlement report says a
-   * deposit was paid out (POSTED → SETTLED, Phase 9). Still the one way a flow moves: claim the
-   * lease (completed flows included), then ONE fenced, state-guarded commit running `work` (the
-   * caller's audit and row updates). The database trigger checks the transition.
-   *
-   * - `NOT_CLAIMED`: someone else holds the flow right now; try again later.
-   * - `STALE`: the flow is no longer in `from` (e.g. a chargeback reversed it first); the lease is
-   *   given back untouched — its schedule and parked note are preserved.
-   */
   async applyExternalTransition(
     flowId: string,
     from: string,
@@ -109,7 +89,6 @@ export class FlowRunner {
     return 'APPLIED';
   }
 
-  /** Run one step of a flow this process has claimed. Never throws for a step failure. */
   async runClaimed(flow: ClaimedFlow): Promise<StepOutcome> {
     return RequestContext.run({ correlationId: `flow-step-${randomUUID()}` }, async () => {
       const definition = this.definitionFor(flow.flowType);
@@ -146,7 +125,6 @@ export class FlowRunner {
     const message = error instanceof Error ? `${error.name}: ${error.message}` : String(error);
     const context = { flowId: flow.id, flowType: flow.flowType, state: flow.state, attempts: flow.attempts };
     if (error instanceof FlowLeaseLostError) {
-      // Someone else owns the flow now; our result was discarded. Nothing to release.
       this.logger.warn(context, 'Flow lease lost; step result discarded');
       return { kind: 'WAITING', state: flow.state, reason: message };
     }
@@ -154,7 +132,6 @@ export class FlowRunner {
     else this.logger.error({ ...context, err: error }, 'Flow step failed; will retry');
     const retryInSeconds = this.backoff(flow.attempts);
     await this.repository.release(flow, retryInSeconds, message).catch((releaseError: unknown) => {
-      // The lease lapses on its own; the flow is retried after it.
       this.logger.error({ ...context, err: releaseError }, 'Could not release a flow lease');
     });
     return { kind: 'WAITING', state: flow.state, reason: message, retryInSeconds };

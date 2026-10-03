@@ -18,12 +18,10 @@ import { RouteDescriptor, collectRoutes } from './route-metadata';
 
 export const BEARER_SCHEME = 'bearer';
 export const PSP_SIGNATURE_SCHEME = 'pspSignature';
-/** Paystack's webhook signature (PAYSTACK_PLAN.md A6). */
 export const PAYSTACK_SIGNATURE_SCHEME = 'paystackSignature';
 const SIGNATURE_SCHEMES = [PSP_SIGNATURE_SCHEME, PAYSTACK_SIGNATURE_SCHEME];
 export const IDEMPOTENCY_KEY_PARAMETER = 'IdempotencyKey';
 
-/** One tag per module (Phase 11 plan §B). */
 export const API_TAGS = {
   auth: 'Registration, email verification, sessions. No `Idempotency-Key` here: each route is safe to retry by its own semantics (a recorded deviation from design §12).',
   users: 'The caller\'s own profile.',
@@ -80,7 +78,6 @@ const METHODS: Partial<Record<RequestMethod, string>> = {
   [RequestMethod.DELETE]: 'delete',
 };
 
-/** The codes the request pipeline (not the route's own logic) can answer with, from the route's real metadata. */
 export function pipelineErrorCodes(route: RouteDescriptor): ErrorCode[] {
   const codes: ErrorCode[] = [ErrorCode.INTERNAL_ERROR, ErrorCode.INVARIANT_VIOLATION];
   if (route.skipRateLimit) return codes; // health: no guards that can refuse, no database error it does not catch
@@ -104,13 +101,11 @@ export function pipelineErrorCodes(route: RouteDescriptor): ErrorCode[] {
   return codes;
 }
 
-/** Every code a route documents: its own (`@ApiErrors`) and the pipeline's, de-duplicated, in enum order. */
 export function documentedErrorCodes(route: RouteDescriptor): ErrorCode[] {
   const all = new Set<ErrorCode>([...route.errors, ...pipelineErrorCodes(route)]);
   return (Object.values(ErrorCode) as ErrorCode[]).filter((code) => all.has(code));
 }
 
-/** Raised inside the idempotency barrier and permanent: the route's own codes (and its pipes' validation), below 500. */
 function storedRefusal(route: RouteDescriptor, code: ErrorCode): boolean {
   const status = ERROR_CODE_HTTP_STATUS[code];
   const inside = route.errors.includes(code) || (code === ErrorCode.VALIDATION_FAILED && route.validatesInput);
@@ -120,8 +115,7 @@ function storedRefusal(route: RouteDescriptor, code: ErrorCode): boolean {
 function errorResponse(status: number, codes: readonly ErrorCode[], route: RouteDescriptor): ResponseObject {
   const headers: Record<string, HeaderObject> = { 'X-Correlation-Id': correlationHeader };
   if (status === 429 || status === 503 || codes.includes(ErrorCode.REQUEST_IN_PROGRESS)) headers['Retry-After'] = retryAfterHeader;
-  // A permanent refusal raised INSIDE the barrier (the handler and its pipes) is stored and replayed for that key; the
-  // guards, the key checks and the body parser refuse before it, and transient failures are never stored.
+
   if (route.idempotent && codes.some((code) => storedRefusal(route, code))) headers['Idempotent-Replayed'] = replayedHeader;
   const narrowed: SchemaObject = {
     type: 'object',
@@ -160,7 +154,7 @@ function accessDescription(route: RouteDescriptor): string {
 }
 
 function decorate(operation: OperationObject, route: RouteDescriptor): void {
-  // Security: what JwtAuthGuard enforces. Public routes say so explicitly; the webhook keeps its signature scheme.
+  
   if (route.isPublic) {
     operation.security = operation.security?.some((requirement) => SIGNATURE_SCHEMES.some((scheme) => scheme in requirement))
       ? operation.security
@@ -203,10 +197,7 @@ function decorate(operation: OperationObject, route: RouteDescriptor): void {
   }
 }
 
-/**
- * OpenAPI 3.0 ignores every sibling of `$ref`, so `{ $ref, nullable: true }` (what `@ApiProperty({ type: Class,
- * nullable: true })` emits) would silently document "never null". Rewrite such nodes as `{ allOf: [{ $ref }], … }`.
- */
+
 function normaliseReferenceSiblings(node: unknown): void {
   if (typeof node !== 'object' || node === null) return;
   if (Array.isArray(node)) return node.forEach(normaliseReferenceSiblings);
@@ -220,11 +211,7 @@ function normaliseReferenceSiblings(node: unknown): void {
   }
 }
 
-/**
- * The OpenAPI 3 document of the running application (Phase 11). Built from the controllers' decorators, then
- * completed from the SAME metadata the guard chain reads (public, roles, unverified, idempotent, rate limits), so
- * security, the `Idempotency-Key` parameter and the pipeline's error codes cannot drift from what the app does.
- */
+
 export function buildOpenApiDocument(app: INestApplication): OpenAPIObject {
   const builder = new DocumentBuilder()
     .setTitle('KoboFX API')

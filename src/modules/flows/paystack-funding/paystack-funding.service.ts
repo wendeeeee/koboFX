@@ -13,7 +13,7 @@ import { fundingAmount } from '../funding/funding-limits';
 import { PaystackFundWalletDto } from './dto/paystack-fund-wallet.dto';
 import { PaystackFundingState } from './paystack-funding-transitions';
 
-/** `202` body of `POST /wallet/fund/paystack`: stored and replayed byte for byte by the idempotency barrier. */
+
 export interface PaystackFundingAccepted {
   readonly fundingId: string;
   readonly status: 'PENDING';
@@ -22,11 +22,7 @@ export interface PaystackFundingAccepted {
   readonly provider: 'paystack';
 }
 
-/**
- * Starts Paystack funding flows (PAYSTACK_PLAN.md C1). Database-only — it runs inside the idempotency barrier's
- * transaction, and Paystack is only ever called by the worker, after this commits. The request carries no email and
- * no reference: the worker reads the user's stored email, and the reference is the flow id.
- */
+
 @Injectable()
 export class PaystackFundingService {
   constructor(

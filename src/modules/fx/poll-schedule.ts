@@ -1,23 +1,6 @@
 import { createHash } from 'node:crypto';
 import { ProviderPlanProfile } from './provider-plan';
 
-/**
- * When to ask the provider again (Phase 6 §5.3) — pure, so a simulated month can prove it.
- *
- * Fetching more often than the provider publishes buys nothing, so the next poll is just
- * after the publication the last response announced (`time_next_update_unix`), plus a
- * deterministic jitter of 30–90s (derived from the snapshot id, so every worker agrees
- * and the decision does not flap between ticks). Guards:
- * - the provider is late (its announced time had already passed when we fetched) →
- *   retry after the plan's `latePublicationRetrySeconds`;
- * - never sooner than `MINIMUM_POLL_GAP_SECONDS` after a fetch;
- * - never later than one cadence + the publication grace after a fetch — a garbage
- *   far-future "next update" cannot silence us (real announcements run slightly over one
- *   cadence: the open endpoint announced 86,790s for a daily cadence). Because the
- *   jitter (≤ 90s) is shorter than every plan's grace, the poll always lands before the
- *   current snapshot stops being executable.
- * Failures are paced separately, by `backoffSeconds` (the negative cache).
- */
 export interface LatestFetch {
   readonly snapshotId: string;
   readonly fetchedAt: Date;
@@ -53,27 +36,18 @@ export function isPollDue(now: Date, latest: LatestFetch | undefined, profile: P
   return now.getTime() >= nextPollAt(latest, profile).getTime();
 }
 
-/** Why a fetch failed, as far as pacing the next attempt is concerned. */
 export enum FetchFailureKind {
-  /** Timeout, network error, 5xx: try again soon, backing off. */
   TRANSIENT = 'TRANSIENT',
-  /** A response we could not read. */
   INVALID_RESPONSE = 'INVALID_RESPONSE',
-  /** `quota-reached`: the plan's monthly quota is spent. Page. */
   QUOTA_REACHED = 'QUOTA_REACHED',
-  /** HTTP 429 from the open-access endpoint: the IP is locked out for 20 minutes. */
   RATE_LIMITED = 'RATE_LIMITED',
-  /** `invalid-key`, `inactive-account`: nothing changes until the configuration does. Page. */
   CREDENTIALS_REJECTED = 'CREDENTIALS_REJECTED',
-  /** `unsupported-code`, `malformed-request`, another refusal: our bug. Page. */
   REQUEST_REJECTED = 'REQUEST_REJECTED',
-  /** Our own request budget for the day or month is spent. Page. */
   BUDGET_SPENT = 'BUDGET_SPENT',
 }
 
 const TRANSIENT_BASE_SECONDS = 60;
 const TRANSIENT_CAP_SECONDS = 900;
-/** The open endpoint's documented lockout is 20 minutes; wait one more. */
 const RATE_LIMITED_SECONDS = 21 * 60;
 const REJECTED_SECONDS = 3_600;
 
@@ -82,10 +56,6 @@ function secondsUntilNextUtcDay(now: Date): number {
   return Math.max(MINIMUM_POLL_GAP_SECONDS, Math.ceil((next - now.getTime()) / 1000));
 }
 
-/**
- * How long no instance may call the provider after a failure (the negative cache, which
- * doubles as the circuit breaker — Phase 6 §5.10). `consecutiveFailures` ≥ 1.
- */
 export function backoffSeconds(kind: FetchFailureKind, consecutiveFailures: number, now: Date): number {
   switch (kind) {
     case FetchFailureKind.TRANSIENT:
@@ -102,12 +72,10 @@ export function backoffSeconds(kind: FetchFailureKind, consecutiveFailures: numb
   }
 }
 
-/** Failures that need a human (alerted at error level with `alert: true`). */
 export function pages(kind: FetchFailureKind): boolean {
   return kind !== FetchFailureKind.TRANSIENT && kind !== FetchFailureKind.INVALID_RESPONSE && kind !== FetchFailureKind.RATE_LIMITED;
 }
 
-/** The request-budget periods a moment falls in (UTC). */
 export function budgetPeriods(now: Date): { readonly month: string; readonly day: string; readonly secondsUntilMonthEnd: number; readonly secondsUntilDayEnd: number } {
   const iso = now.toISOString();
   const monthEnd = Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1);

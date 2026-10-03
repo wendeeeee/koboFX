@@ -15,7 +15,6 @@ const NGN: Currency = ['NGN', 2];
 const USD: Currency = ['USD', 2];
 const EUR: Currency = ['EUR', 2];
 const GBP: Currency = ['GBP', 2];
-/** Test currencies with JPY-like (0) and KWD-like (3) minor units. */
 const JPX: Currency = ['JPX', 0];
 const KWX: Currency = ['KWX', 3];
 
@@ -39,20 +38,14 @@ const { SOURCE, TARGET } = QuoteAmountMode;
 describe('pricing — golden (design §11)', () => {
   it('reproduces the design §5.6 worked example exactly: ₦1,000,000 at 1,530.50, 50 bps', () => {
     const priced = price(NGN, USD, '1530.50', '1', 50, SOURCE, '100000000');
-    expect(priced.targetAmountMinor).toBe(65_011n); // userCreditMinor, ROUND_DOWN
-    expect(priced.targetMidValueMinor).toBe(65_338n); // midValueMinor, ROUND_HALF_EVEN
-    expect(priced.revenueMinor).toBe(327n); // the difference: residual folded in
+    expect(priced.targetAmountMinor).toBe(65_011n);
+    expect(priced.targetMidValueMinor).toBe(65_338n);
+    expect(priced.revenueMinor).toBe(327n);
     expect(priced.midRate.toFixed()).toBe('0.0006533812479581836001306762495916367');
     expect(priced.exactMidTargetMinor.toFixed(4)).toBe('65338.1248');
     expect(priced.exactClientTargetMinor.toFixed(4)).toBe('65011.4342');
   });
 
-  /**
-   * A reviewed corpus of awkward rates, pinned. Every row was cross-checked against an
-   * independent 60-digit Python `decimal` oracle (0 mismatches) before being pinned.
-   * Columns: source, target, source USD rate, target USD rate, spread, mode, amount →
-   * [source debited, target credited, target mid value, revenue].
-   */
   const corpus: [string, Currency, Currency, string, string, number, QuoteAmountMode, string, [string, string, string, string]][] = [
     ['real 2026-09-29 NGN mid, ₦1,000 → USD (task example)', NGN, USD, '1329.375909', '1', 150, SOURCE, '100000', ['100000', '74', '75', '1']],
     ['pair minimum ₦1,000 → EUR (triangulated cross)', NGN, EUR, '1329.375909', '0.879241', 150, SOURCE, '100000', ['100000', '65', '66', '1']],
@@ -114,9 +107,7 @@ describe('rates for display', () => {
   });
 });
 
-// ── properties ─────────────────────────────────────────────────────────────────────
 
-/** A positive USD rate with up to 9 decimals, steered: a third tiny (NGN→USD-like), a third large. */
 const usdRate: fc.Arbitrary<Dec> = fc.oneof(
   fc.bigInt({ min: 1n, max: 10n ** 9n }).map((n) => dec(n).div(new MoneyDecimal(10).pow(9))),
   fc.bigInt({ min: 10n ** 6n, max: 10n ** 13n }).map((n) => dec(n).div(new MoneyDecimal(10).pow(6))),
@@ -164,15 +155,12 @@ describe('pricing — properties (the invariant is the oracle)', () => {
         try {
           priced = priceScenario(s);
         } catch (error) {
-          // Only a result outside BIGINT may be refused.
           expect(error).toBeInstanceOf(InvalidAmountError);
           return;
         }
         const mid = priced.midRate;
-        // Directional client rates: selling A gets less than mid; buying A (via B→A) costs more.
         const sell = priced.clientRate;
         const buy = new MoneyDecimal(1).div(clientRateOf(triangulatedMid(s.targetUsdRate, s.sourceUsdRate), s.spreadBasisPoints));
-        // `buy` is 1 / (1 / mid) at 34 significant digits: equal to mid only within that precision.
         const tolerance = mid.times('1e-30');
         expect(sell.lte(mid)).toBe(true);
         expect(buy.gte(mid.minus(tolerance))).toBe(true);
@@ -181,21 +169,15 @@ describe('pricing — properties (the invariant is the oracle)', () => {
           expect(sell.lt(mid)).toBe(true);
           expect(buy.gt(mid)).toBe(true);
         }
-        // Never credit more than the mid value; revenue is exactly the difference.
         expect(priced.targetAmountMinor <= priced.targetMidValueMinor).toBe(true);
         expect(priced.revenueMinor).toBe(priced.targetMidValueMinor - priced.targetAmountMinor);
         expect(priced.revenueMinor >= 0n).toBe(true);
         if (priced.revenueMinor > 0n) nonzeroRevenue += 1;
-        // Credit never exceeds the exact client value of what was debited.
         expect(dec(priced.targetAmountMinor).lte(priced.exactClientTargetMinor)).toBe(true);
-        // SOURCE mode: the user loses less than one target minor unit to rounding. (In TARGET mode
-        // they get exactly what they asked for; the round-up of the debit is bounded below instead,
-        // and whatever it buys beyond the target is inside revenue via the mid value.)
         if (s.mode === SOURCE) expect(priced.exactClientTargetMinor.minus(dec(priced.targetAmountMinor)).lt(1)).toBe(true);
         expect(priced.exactMidTargetMinor.minus(dec(priced.targetMidValueMinor)).abs().lte(new MoneyDecimal('0.5'))).toBe(true);
         if (s.mode === TARGET) {
           targetMode += 1;
-          // The debit buys at least the target at the client rate, and at most one source unit more.
           const oneLess = minorToMajorDecimal(priced.sourceAmountMinor - 1n, s.sourceMinorUnit);
           const atOneLess = majorToExactMinor(oneLess.times(priced.clientRate), s.targetMinorUnit);
           expect(priced.exactClientTargetMinor.gte(dec(priced.targetAmountMinor).minus('1e-20'))).toBe(true);
@@ -214,9 +196,7 @@ describe('pricing — properties (the invariant is the oracle)', () => {
       fc.property(usdRate, usdRate, fc.integer({ min: 1, max: 9_999 }), (a, b, bps) => {
         const forward = triangulatedMid(a, b);
         const backward = triangulatedMid(b, a);
-        // Reference mids invert (to 34 significant digits).
         expect(forward.times(backward).minus(1).abs().lt('1e-32')).toBe(true);
-        // Client rates do not: the round trip loses the spread, both ways.
         const roundTrip = clientRateOf(forward, bps).times(clientRateOf(backward, bps));
         expect(roundTrip.lt(1)).toBe(true);
       }),

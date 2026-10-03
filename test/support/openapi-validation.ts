@@ -2,13 +2,7 @@ import Ajv, { ValidateFunction } from 'ajv';
 import addFormats from 'ajv-formats';
 import type { OpenAPIObject } from '@nestjs/swagger';
 
-/**
- * Validate real HTTP bodies against the published OpenAPI document (Phase 11). OpenAPI 3.0 schemas are not quite JSON
- * Schema: `nullable` is translated, documentation-only keywords are dropped, and — in CLOSED mode — every object that
- * lists `properties` gets `additionalProperties: false` unless it says otherwise, so a documented field the code never
- * sends, or a sent field the document never mentions, fails. The published document itself stays open (clients must
- * tolerate additive fields); only this validator closes it.
- */
+
 type Json = Record<string, unknown>;
 
 const DROPPED = new Set(['example', 'examples', 'discriminator', 'xml', 'externalDocs', 'deprecated']);
@@ -48,7 +42,6 @@ export interface OperationMatch {
   readonly operation: Json;
 }
 
-/** `/api/v1/transactions/funding:abc` → the documented `/api/v1/transactions/{reference}`. */
 export function matchOperation(document: OpenAPIObject, method: string, url: string): OperationMatch {
   const path = url.split('?')[0] as string;
   for (const [template, item] of Object.entries(document.paths)) {
@@ -72,7 +65,6 @@ export class OpenApiValidator {
 
   private readonly closed: boolean;
 
-  /** The documented schema of one response, compiled. */
   responseValidator(method: string, url: string, status: number): { validate: ValidateFunction; match: OperationMatch } {
     const match = matchOperation(this.document, method, url);
     const key = `${match.method} ${match.path} ${status}`;
@@ -89,17 +81,14 @@ export class OpenApiValidator {
     return { validate, match };
   }
 
-  /** Validate a schema-by-name (e.g. a request example against `WriteOffPayload`). */
   schemaValidator(name: string): ValidateFunction {
     return this.ajv.compile({ $ref: `openapi#/components/schemas/${name}` });
   }
 
-  /** Validate an arbitrary OpenAPI schema object (refs resolve into the document). */
   compile(schema: unknown): ValidateFunction {
     return this.ajv.compile(convert(schema, this.closed) as Json);
   }
 
-  /** Throws with every AJV error when `body` does not match the documented response. */
   assertResponse(method: string, url: string, status: number, body: unknown): void {
     const match = matchOperation(this.document, method, url);
     const response = (match.operation.responses as Record<string, Json>)[String(status)];
@@ -127,7 +116,6 @@ export class OpenApiValidator {
   }
 }
 
-/** The error codes an operation documents for one status (from the narrowed `code` enum). */
 export function documentedCodes(operation: Json, status: number): string[] {
   const response = (operation.responses as Record<string, Json>)[String(status)];
   const schema = ((response?.content as Json | undefined)?.['application/json'] as Json | undefined)?.schema as Json | undefined;

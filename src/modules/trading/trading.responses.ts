@@ -4,7 +4,6 @@ import { EXAMPLE_CLIENT_NGN_USD, EXAMPLE_MID_NGN_USD, EXAMPLE_QUOTE_ID, RateProv
 import { QuoteAmountMode } from '../fx/pricing';
 import type { ConversionLegView, ConversionView } from './conversion.view';
 
-/** OpenAPI documentation of the convert/trade body (Phase 11). Never instantiated. */
 @ApiSchema({ name: 'ConversionLeg' })
 export class ConversionLegDocument implements ConversionLegView {
   @ApiCurrency()

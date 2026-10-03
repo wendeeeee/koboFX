@@ -2,7 +2,7 @@ import { Column, Entity, PrimaryColumn } from 'typeorm';
 import { bigintTransformer } from '../../../database/bigint.transformer';
 import { EntryDirection } from '../ledger.types';
 
-/** Read model of `ledger_entries` (design §5.5): append-only, hash-chained per account. */
+/** Read model of `ledger_entries` and append-only, hash-chained per account. */
 @Entity('ledger_entries')
 export class LedgerEntryEntity {
   @PrimaryColumn({ type: 'bigint', transformer: bigintTransformer })

@@ -7,9 +7,7 @@ export interface PspHttpClientOptions {
   readonly provider: string;
   readonly baseUrl: string;
   readonly secretKey: string;
-  /** Per attempt (design §7.2: 2s). */
   readonly timeoutMilliseconds: number;
-  /** Retries after the first attempt, idempotent reads only (design §7.2: 3). */
   readonly readRetries: number;
   readonly retryBaseMilliseconds?: number;
   readonly retryCapMilliseconds?: number;
@@ -23,30 +21,22 @@ export interface PspRequest {
   readonly method: 'GET' | 'POST';
   readonly path: string;
   readonly body?: Record<string, unknown>;
-  /** Required on every POST: the PSP deduplicates writes on it. */
   readonly idempotencyKey?: string;
   readonly flowId?: string;
-  /** Record the response as its raw text (every digit kept) instead of redacted JSON. */
   readonly recordRawResponse?: boolean;
 }
 
 export interface PspResponse {
   readonly status: number;
   readonly body: unknown;
-  /** The `provider_calls` row of the successful attempt, when it could be written. */
   readonly providerCallId: string | undefined;
 }
 
-/** Only a read may be retried: re-sending a write could double its effect (design §7.2). */
 export function isRetryable(method: PspRequest['method']): boolean {
   return method === 'GET';
 }
 
-/**
- * How the PSP's answers are read: timeout, network error, 5xx, 429, an error body (even
- * on a `200`) → transient (for a write the outcome is unknown); a body that is not JSON →
- * invalid (retried like transient); any other 4xx → a definitive refusal.
- */
+
 export function classifyPspResponse(status: number, text: string): ResponseClassification<unknown> {
   let body: unknown;
   try {
@@ -67,13 +57,7 @@ export function classifyPspResponse(status: number, text: string): ResponseClass
   return { outcome: 'OK', value: body };
 }
 
-/**
- * The transport to the PSP (design §7.2, handbook: consuming APIs): the shared
- * `ProviderHttpClient` (per-attempt timeout, retries with full jitter on reads only,
- * every attempt recorded) with the PSP's classification. The API key travels in a
- * header and is never recorded (headers are not stored); writes carry the PSP's
- * `Idempotency-Key` and are sent exactly once.
- */
+
 export class PspHttpClient {
   private readonly client: ProviderHttpClient;
 

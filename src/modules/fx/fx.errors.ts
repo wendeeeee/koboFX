@@ -1,10 +1,5 @@
 import { DomainError, ErrorCode } from '../../common/errors';
 
-/**
- * No rate may be executed against right now (design §7.4: "a stale rate may be
- * displayed; it may never be executed against"). Transient: behind the idempotency
- * barrier the key is never stored, so a retry with the same key reprocesses.
- */
 export class FxRateStaleError extends DomainError {
   readonly code = ErrorCode.FX_RATE_STALE;
   readonly httpStatus = 503;
@@ -17,7 +12,6 @@ export class FxRateStaleError extends DomainError {
   }
 }
 
-/** No rate can be served at all (none fetched, or older than the display window, §7.4 / §16). */
 export class FxRateUnavailableError extends DomainError {
   readonly code = ErrorCode.FX_RATE_UNAVAILABLE;
   readonly httpStatus = 503;
@@ -38,7 +32,6 @@ export class SameCurrencyError extends DomainError {
   }
 }
 
-/** Both currencies are supported, but this direction is not traded (no active `currency_pairs` row). */
 export class UnsupportedCurrencyPairError extends DomainError {
   readonly code = ErrorCode.UNSUPPORTED_CURRENCY_PAIR;
   readonly httpStatus = 400;
@@ -48,7 +41,6 @@ export class UnsupportedCurrencyPairError extends DomainError {
   }
 }
 
-/** Absent, or another user's: never 403 — no existence leak (design §7.7). */
 export class QuoteNotFoundError extends DomainError {
   readonly code = ErrorCode.QUOTE_NOT_FOUND;
   readonly httpStatus = 404;
@@ -76,7 +68,6 @@ export class QuoteAlreadyUsedError extends DomainError {
   }
 }
 
-/** Our own provider request budget is spent (Phase 6 §5.3). Thrown before an attempt; nothing is sent. */
 export class ProviderRequestBudgetSpentError extends Error {
   constructor(
     readonly period: 'MONTH' | 'DAY',

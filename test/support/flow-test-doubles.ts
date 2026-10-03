@@ -12,15 +12,9 @@ export class InjectedCrash extends Error {
 export interface CrashPlan {
   readonly state: string;
   readonly point: FlowCheckpoint;
-  /**
-   * `throw`: the step aborts (its transaction rolls back). `hang`: the process "dies" —
-   * nothing after runs, the lease is never released. `pause`: the step stalls until
-   * `resume()` (a zombie worker that wakes up after its lease lapsed).
-   */
   readonly mode: 'throw' | 'hang' | 'pause';
 }
 
-/** Records every boundary reached and fires one planned crash. */
 export class ScriptedFlowCheckpoints extends FlowCheckpoints {
   readonly log: { point: FlowCheckpoint; state: string; flowId: string }[] = [];
   private plan: CrashPlan | undefined;
@@ -28,7 +22,6 @@ export class ScriptedFlowCheckpoints extends FlowCheckpoints {
   private onFired: (() => void) | undefined;
   private resumePaused: (() => void) | undefined;
 
-  /** Arm one crash; resolves when it fires. */
   arm(plan: CrashPlan): Promise<void> {
     this.plan = plan;
     this.fired = false;
@@ -41,7 +34,6 @@ export class ScriptedFlowCheckpoints extends FlowCheckpoints {
     this.plan = undefined;
   }
 
-  /** Let a paused step continue. */
   resume(): void {
     this.resumePaused?.();
   }

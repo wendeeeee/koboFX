@@ -2,7 +2,6 @@ import { Injectable } from '@nestjs/common';
 import { UnitOfWork } from '../../database/transaction/unit-of-work';
 import { OutboxEventType } from './outbox.types';
 
-/** Writes outbox events — only inside the transaction whose state change they announce. */
 @Injectable()
 export class OutboxService {
   constructor(private readonly unitOfWork: UnitOfWork) {}

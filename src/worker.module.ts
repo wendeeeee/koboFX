@@ -19,9 +19,9 @@ import { AdminModule } from './modules/admin/admin.module';
 import { PaystackFundingModule, isPaystackEnabled } from './modules/flows/paystack-funding/paystack-funding.module';
 
 /**
- * The worker process (design §3, §14): no HTTP. It runs the outbox dispatcher, the flow
+ * The worker process: runs the outbox dispatcher, the flow
  * resumer, the webhook processor, the reservation sweeper, the FX poller and the
- * reconciliation scheduler (Phase 9) and the control monitor (Phase 10: expiry, break-glass review).
+ * reconciliation schedulerand the control monitor (expiry, break-glass review).
  */
 @Module({})
 export class WorkerModule {
@@ -46,7 +46,6 @@ export class WorkerModule {
         FxModule,
         ReconciliationModule,
         AdminModule,
-        // Paystack funding flows and webhook resolution, only when enabled (PAYSTACK_PLAN.md).
         ...(isPaystackEnabled(env) ? [PaystackFundingModule] : []),
       ],
     };

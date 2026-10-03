@@ -9,11 +9,9 @@ export type ChallengeAttempt =
       readonly challengeId: string;
       readonly hmac: Buffer;
       readonly attempt: number;
-      /** This was the last permitted attempt: the challenge is already deleted. */
       readonly lastAttempt: boolean;
     };
 
-/** Replace any challenge with a fresh one, attempts at zero, with its TTL — atomically. */
 const STORE_SCRIPT = `
 redis.call('DEL', KEYS[1])
 redis.call('HSET', KEYS[1], 'challengeId', ARGV[1], 'hmac', ARGV[2], 'attempts', 0)
@@ -21,11 +19,7 @@ redis.call('PEXPIRE', KEYS[1], ARGV[3])
 return 1
 `;
 
-/**
- * Count one attempt and hand back what to compare against — atomically. The attempt
- * that reaches the maximum deletes the challenge in the same step, so however many
- * guesses arrive at once, at most the maximum are ever evaluated.
- */
+
 const ATTEMPT_SCRIPT = `
 if redis.call('EXISTS', KEYS[1]) == 0 then return {'GONE'} end
 local attempts = redis.call('HINCRBY', KEYS[1], 'attempts', 1)
@@ -38,7 +32,6 @@ end
 return {'EVALUATE', fields[1], fields[2], tostring(attempts), last}
 `;
 
-/** Single use: delete only if the challenge is still the one that matched. One caller wins. */
 const CONSUME_SCRIPT = `
 if redis.call('HGET', KEYS[1], 'challengeId') == ARGV[1] then
   redis.call('DEL', KEYS[1])
@@ -47,12 +40,7 @@ end
 return 0
 `;
 
-/**
- * One-time password challenges in Redis (design §7.1): ephemeral, TTL-expiring, and
- * never the code itself — only its HMAC. Every operation is one Lua script, so the
- * attempt counter and single use are atomic. Redis down ⇒ `DependencyUnavailableError`
- * ⇒ verification fails closed (503), never a bypass.
- */
+
 @Injectable()
 export class OneTimePasswordChallengeStore {
   constructor(private readonly redis: RedisService) {}

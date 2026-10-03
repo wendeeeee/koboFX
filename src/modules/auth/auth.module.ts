@@ -14,13 +14,8 @@ import { AccessTokenService } from './tokens/access-token.service';
 import { RefreshTokenService } from './tokens/refresh-token.service';
 import { VerificationService } from './verification.service';
 
-/**
- * Authentication (design §7.1, §9.1): register · verify · resend · login · refresh ·
- * logout. The guards live in `common/guards` and are registered globally by
- * `AppModule`; they use `AccessTokenService` and `UserRepository` from here.
- */
+
 @Module({
-  // Keys and algorithm are passed per call (AccessTokenService), never module defaults.
   imports: [JwtModule.register({}), UsersModule, WalletsModule, OutboxModule, AuditModule, OneTimePasswordsModule],
   controllers: [AuthController],
   providers: [

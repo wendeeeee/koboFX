@@ -18,25 +18,16 @@ export interface OverdueReservation {
 
 export interface ReservationIntegrityReport {
   readonly reservedBalanceMismatches: readonly ReservedBalanceMismatch[];
-  /**
-   * ACTIVE past `expires_at`. A liveness signal, NOT part of `isClean`: it means the
-   * sweeper has not run yet or a flow is stuck — money is locked, never wrong (design
-   * §6.3). It feeds the "reservations expired without resolution" alert (§10).
-   */
+  
   readonly overdueReservations: readonly OverdueReservation[];
-  /** True when every account's `reserved_minor` equals the sum of its ACTIVE reservations. */
   readonly isClean: boolean;
 }
 
-/**
- * Design §8.1 check 4, read-only: a Phase 9 reconciliation input and the reservation
- * tests' oracle, alongside `LedgerChecksService` (checks 1–3, 5, 6).
- */
+
 @Injectable()
 export class ReservationChecksService {
   constructor(private readonly unitOfWork: UnitOfWork) {}
 
-  /** Every account where `reserved_minor ≠ Σ(ACTIVE reservations.amount_minor)`. */
   async findReservedBalanceMismatches(): Promise<ReservedBalanceMismatch[]> {
     const rows = (await this.unitOfWork.manager.query(
       `SELECT accounts.id AS account_id, accounts.code,
@@ -58,7 +49,6 @@ export class ReservationChecksService {
     }));
   }
 
-  /** ACTIVE reservations whose `expires_at` is at or before `now` (the database clock by default). */
   async findOverdueReservations(now?: Date): Promise<OverdueReservation[]> {
     const rows = (await this.unitOfWork.manager.query(
       `SELECT id, account_id, flow_id, amount_minor::text AS amount_minor, expires_at

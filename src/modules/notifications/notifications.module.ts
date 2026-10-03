@@ -11,7 +11,6 @@ import {
   FundingPostedHandler,
 } from './outbox-handlers';
 
-/** Outbox consumers that notify people (design §14 `notifications/`). */
 @Module({
   imports: [OutboxModule, OneTimePasswordsModule, UsersModule, EmailModule],
   providers: [EmailVerificationRequestedHandler, ExistingAccountRegistrationAttemptedHandler, ConversionPostedHandler, FundingPostedHandler],

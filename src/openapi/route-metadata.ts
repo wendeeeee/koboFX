@@ -11,14 +11,10 @@ import { ErrorCode } from '../common/errors';
 import { UserRole } from '../modules/users/user.types';
 import { API_ERRORS_KEY } from './api-errors.decorator';
 
-/**
- * One HTTP route as the guard chain sees it: the SAME metadata keys, resolved the same way
- * (`getAllAndOverride(handler, class)`), so the document cannot claim a guard the route does not run.
- */
+
 export interface RouteDescriptor {
   readonly controller: Type<unknown>;
   readonly methodKey: string;
-  /** `@nestjs/swagger`'s default operation id: `${Controller}_${method}`. */
   readonly operationId: string;
   readonly requestMethod: RequestMethod;
   readonly isPublic: boolean;
@@ -28,7 +24,6 @@ export interface RouteDescriptor {
   readonly rateLimit: RateLimitPolicy | undefined;
   readonly skipRateLimit: boolean;
   readonly errors: readonly ErrorCode[];
-  /** The handler takes `@Body()`, `@Query()` or `@Param()`: the global `ValidationPipe` (or a param pipe) runs. */
   readonly validatesInput: boolean;
   readonly hasBody: boolean;
 }
@@ -37,7 +32,6 @@ const reflector = new Reflector();
 
 function argumentTypes(controller: Type<unknown>, methodKey: string): RouteParamtypes[] {
   const args = (Reflect.getMetadata(ROUTE_ARGS_METADATA, controller, methodKey) ?? {}) as Record<string, unknown>;
-  // Built-in parameters are keyed `${RouteParamtypes}:${index}`; custom ones (`@CurrentUser()`) `${uuid}__customRouteArgs__:${index}`.
   return Object.keys(args)
     .map((key) => /^(\d+):\d+$/.exec(key))
     .filter((match): match is RegExpExecArray => match !== null)

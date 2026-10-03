@@ -5,14 +5,12 @@ export interface IssuedTokenResponse {
   readonly expiresAt: string;
 }
 
-/** Token response, shaped like the reference service's `{ access, refresh }` pair. */
 export interface TokenPairResponse {
   readonly tokenType: 'Bearer';
   readonly access: IssuedTokenResponse;
   readonly refresh: IssuedTokenResponse;
 }
 
-/** A safe user object: never the password hash. */
 export interface SafeUser {
   readonly id: string;
   readonly email: string;
@@ -36,7 +34,6 @@ export function toSafeUser(profile: UserProfile): SafeUser {
   };
 }
 
-/** Uniform bodies (enumeration resistance): identical whatever the email's state. */
 export const REGISTRATION_ACCEPTED = {
   message: 'If this email can be registered, a verification code has been sent to it.',
 } as const;

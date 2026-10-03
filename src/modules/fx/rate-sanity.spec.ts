@@ -112,7 +112,6 @@ describe('rate sanity checks (design §7.4, Phase 6 §5.5)', () => {
     it('a genuine move (NGN, 2023) is rejected every time — repetition never accepts it', () => {
       const devalued = snapshot({ ...GOOD, NGN: '1500' });
       for (let fetch = 0; fetch < 5; fetch += 1) {
-        // The history stays the last ACCEPTED snapshot, so the verdict never changes.
         expect(checkSanity(devalued, context({ previous: previous(last) })).reasons).toEqual(['RATE_JUMP:NGN']);
       }
     });

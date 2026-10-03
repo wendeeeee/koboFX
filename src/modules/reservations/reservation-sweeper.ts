@@ -6,12 +6,6 @@ import { ReservationService } from './reservation.service';
 
 const SWEEP_BATCH_SIZE = 100;
 
-/**
- * The worker's reservation sweeper (Phase 3 decision 5): runs the tested
- * `expireDue(now, batchSize)` on an interval. The safety net, not the mechanism — every
- * expiry is counted in `reservations_expired_total` (by `expireDue`) and logged, because it means a flow
- * failed to resolve its own hold (§16 "Reservation orphaned").
- */
 @Injectable()
 export class ReservationSweeper {
   private readonly logger = new Logger(ReservationSweeper.name);

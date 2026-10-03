@@ -10,20 +10,6 @@ import { PasswordHasher } from './passwords/password-hasher';
 
 export type RegistrationOutcome = 'CREATED' | 'PENDING_RENEWED' | 'ALREADY_REGISTERED';
 
-/**
- * `POST /auth/register` (design §7.1). The caller always gets the same response; what
- * happens behind it (decision #5):
- *
- * - New email: user (PENDING_VERIFICATION) + wallet + `USER:{walletId}:NGN` + an
- *   `EmailVerificationRequested.v1` outbox event + audit row — ONE transaction.
- * - Email pending verification: the new password REPLACES the old one and a fresh
- *   code is requested. The account is never squatted: whoever proves the mailbox, with
- *   the password they chose, activates it (verify requires both).
- * - Email already active or suspended: nothing changes; the owner is told by email.
- *
- * The password is hashed first on every path, so all three cost the same argon2 work.
- * No Redis and no SMTP on this path: registration never depends on either.
- */
 @Injectable()
 export class AccountCreationService {
   private readonly logger = new Logger(AccountCreationService.name);

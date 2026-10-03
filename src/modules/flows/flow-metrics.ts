@@ -9,11 +9,7 @@ export interface StalledFlowCount {
   readonly count: number;
 }
 
-/**
- * `flows_stalled{flow_type,state}` (design §10; pages at 30 minutes): incomplete flows
- * whose state has not changed for the configured time. A gauge read from the database —
- * correct across processes. No metrics backend yet; a later phase exports it.
- */
+
 @Injectable()
 export class FlowMetrics {
   constructor(

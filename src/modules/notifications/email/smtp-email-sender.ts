@@ -4,7 +4,6 @@ import { APP_CONFIG } from '../../../config/config.module';
 import { AppConfig } from '../../../config/configuration';
 import { EmailMessage, EmailSender } from './email-sender';
 
-/** SMTP adapter (handbook: all calls will fail — so every call has a timeout). */
 @Injectable()
 export class SmtpEmailSender extends EmailSender implements OnModuleDestroy {
   private readonly transporter: Transporter;

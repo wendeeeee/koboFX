@@ -13,7 +13,7 @@ const page = (overrides: Record<string, unknown> = {}, lineOverrides: Record<str
   chargebacks: '0',
   net: '985',
   line_count: 1,
-  bank_reference: 'BNK123', // a field we do not use: ignored
+  bank_reference: 'BNK123',
   lines: {
     data: [{ id: 'l1', type: 'payment', payment_id: 'pay_a', chargeback_id: null, currency: 'NGN', amount: '1000', fee: '15', extra: { nested: true }, ...lineOverrides }],
     next_cursor: null,

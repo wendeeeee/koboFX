@@ -11,11 +11,6 @@ export function unregisterUnitOfWork(unitOfWork: UnitOfWork): void {
   if (current === unitOfWork) current = undefined;
 }
 
-/**
- * Run the decorated async method inside `UnitOfWork.run()` — joining an ambient
- * transaction if there is one. Handlers use this to own the transaction boundary
- * (design §3.2).
- */
 export function Transactional(): MethodDecorator {
   return (_target, propertyKey, descriptor: PropertyDescriptor) => {
     const original = descriptor.value as (...args: unknown[]) => Promise<unknown>;

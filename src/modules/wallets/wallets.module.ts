@@ -5,7 +5,6 @@ import { WalletBalancesService } from './wallet-balances.service';
 import { WalletController } from './wallet.controller';
 import { WalletProvisioningService } from './wallet-provisioning.service';
 
-/** Wallets: provisioning, the `GET /wallet` read model, and the funding endpoints (design §12). */
 @Module({
   imports: [LedgerModule, FlowsModule],
   controllers: [WalletController],

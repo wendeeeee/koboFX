@@ -12,10 +12,7 @@ import { FundingFlow } from './funding/funding-flow';
 import { FundingPaymentRepository } from './funding/funding-payment.repository';
 import { FundingService } from './funding/funding.service';
 
-/**
- * Durable state machines and their resumer (design §7.5, §14 `flows/`). The funding
- * flow registers itself with the runner on init.
- */
+
 @Module({
   imports: [PaymentsModule, LedgerModule, AuditModule, UsersModule],
   providers: [

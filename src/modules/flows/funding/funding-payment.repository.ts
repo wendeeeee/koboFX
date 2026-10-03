@@ -18,8 +18,6 @@ export interface FundingPayment {
   readonly failureCode: string | null;
   readonly fundingTransactionId: string | null;
   readonly chargebackTransactionId: string | null;
-  /** Paystack only: the hosted checkout, and OUR window end (null until initialize answered). */
-  /** Always set by this repository; optional only so pre-Paystack fixtures need not name it. */
   readonly checkout?: FundingCheckout | null;
   readonly createdAt?: Date;
 }
@@ -81,7 +79,6 @@ function toPayment(row: FundingPaymentRow): FundingPayment {
   };
 }
 
-/** The facts a funding flow records, set once each (trigger-enforced). */
 export interface FundingPaymentUpdate {
   readonly clearPaymentMethodToken?: boolean;
   readonly providerPaymentId?: string;
@@ -94,7 +91,6 @@ export interface FundingPaymentUpdate {
   readonly chargebackTransactionId?: string;
 }
 
-/** `funding_payments` (Phase 5): raw SQL on the ambient UnitOfWork. */
 @Injectable()
 export class FundingPaymentRepository {
   constructor(private readonly unitOfWork: UnitOfWork) {}
@@ -105,7 +101,6 @@ export class FundingPaymentRepository {
     accountId: string;
     amount: Money;
     provider: string;
-    /** The simulated PSP's single-use token; null for Paystack (the customer pays on Paystack's checkout). */
     paymentMethodToken: string | null;
   }): Promise<void> {
     await this.unitOfWork.requireTransaction().query(
@@ -138,11 +133,6 @@ export class FundingPaymentRepository {
     return row?.flow_id ?? null;
   }
 
-  /**
-   * What a PSP settlement said about this deposit (Phase 9): the batch line that paid it out,
-   * when, and the PSP's fee for it. Set once, together, only on a posted and not-yet-settled
-   * deposit — returns false otherwise (the caller's attribution was stale).
-   */
   async recordSettlement(
     manager: EntityManager,
     flowId: string,
@@ -160,7 +150,6 @@ export class FundingPaymentRepository {
     return rows.length === 1;
   }
 
-  /** Paystack's checkout, set once (trigger-enforced), with OUR window end. */
   async recordCheckout(manager: EntityManager, flowId: string, checkout: FundingCheckout): Promise<void> {
     await manager.query(
       `UPDATE funding_payments
@@ -170,7 +159,6 @@ export class FundingPaymentRepository {
     );
   }
 
-  /** Set-once facts use `coalesce`, so re-running a step never tries to change one. */
   async update(manager: EntityManager, flowId: string, update: FundingPaymentUpdate): Promise<void> {
     await manager.query(
       `UPDATE funding_payments

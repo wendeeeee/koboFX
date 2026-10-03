@@ -4,7 +4,6 @@ import type { FundingAccepted, FundingCheckoutView, FundingView } from '../flows
 import type { PaystackFundingAccepted } from '../flows/paystack-funding/paystack-funding.service';
 import type { WalletBalance } from './wallet-balances.service';
 
-/** OpenAPI documentation of the wallet bodies (Phase 11). Never instantiated. */
 @ApiSchema({ name: 'WalletBalance' })
 export class WalletBalanceDocument implements WalletBalance {
   @ApiCurrency()

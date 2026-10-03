@@ -1,6 +1,6 @@
-import 'dotenv/config';
+import * as dotenv from 'dotenv';
 import { MockExchangeRateApi, RECORDED_RATES } from './mock-exchange-rate-api';
-
+dotenv.config();
 /**
  * Runs the simulated ExchangeRate-API for local development (`npm run start:mock-fx:dev`).
  * Point the app at it with `FX_RATE_BASE_URL=http://localhost:4020/v6/latest`. It publishes

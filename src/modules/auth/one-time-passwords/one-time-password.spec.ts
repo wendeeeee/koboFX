@@ -7,8 +7,7 @@ import {
   oneTimePasswordMatches,
 } from './one-time-password';
 
-// The module's own `crypto` binding (not the `import * as` namespace copy), so spies reach it.
-// eslint-disable-next-line @typescript-eslint/no-require-imports
+
 const nodeCrypto = require('node:crypto') as typeof crypto;
 const PEPPER = crypto.randomBytes(32);
 const CHALLENGE = '7d0f8f0e-0b1a-4c55-9f55-0d7c1d6f1a11';
@@ -45,7 +44,6 @@ describe('one-time passwords (design §7.1)', () => {
     const expected = samples / 10;
     for (const position of counts) {
       const chiSquare = position.reduce((sum, observed) => sum + (observed - expected) ** 2 / expected, 0);
-      // 9 degrees of freedom: p = 0.0001 critical value is 33.7.
       expect(chiSquare).toBeLessThan(33.7);
     }
   });

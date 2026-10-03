@@ -5,10 +5,8 @@ import { RateSnapshot } from './exchange-rate-snapshot.repository';
 
 export const SNAPSHOT_CACHE_KEY = 'fx:snapshot:USD';
 
-/** The cached form: the WHOLE accepted snapshot in one value, rates as decimal strings. */
 interface CachedSnapshot {
   readonly version: 1;
-  /** Zero-padded `fetchedAt` + id: the compare-and-set order (newer fetch wins). */
   readonly order: string;
   readonly id: string;
   readonly provider: string;
@@ -18,11 +16,6 @@ interface CachedSnapshot {
   readonly rates: Record<string, string>;
 }
 
-/**
- * Replace the cached snapshot only if the offered one is newer — a slow fetcher or a
- * re-seed from the database can never overwrite a newer snapshot with an older one. One
- * `SET` of one value: a reader sees one whole fetch or the other, never a mix.
- */
 const COMPARE_AND_SET = `
 local current = redis.call('GET', KEYS[1])
 if current then
@@ -35,31 +28,15 @@ return 1
 
 const READ = `return redis.call('GET', KEYS[1])`;
 
-/**
- * "Newer" for the cache — the same order as `latestAccepted()` in the database: fetch time,
- * then the provider's publication time (two fetches in one millisecond must not be decided
- * by a random id), then the id.
- */
 export function snapshotOrder(snapshot: Pick<RateSnapshot, 'fetchedAt' | 'providerUpdatedAt' | 'id'>): string {
   const pad = (date: Date) => String(date.getTime()).padStart(15, '0');
   return `${pad(snapshot.fetchedAt)}:${pad(snapshot.providerUpdatedAt)}:${snapshot.id}`;
 }
 
-/**
- * Redis `fx:snapshot:USD` (design §7.4; Phase 6 §5.15): the shared cache every API and
- * worker instance reads, so serving rates and quotes costs no provider call. Written ONLY
- * by the fetcher (the poller, or the single-flighted catch-up) and the poller's re-seed
- * from the database — never by a request handler. Its TTL is housekeeping (display window
- * + 1h); freshness is always read from the snapshot's own fields.
- *
- * Every failure is `DependencyUnavailableError` (RedisService): callers fall back to the
- * database snapshot (§16).
- */
 @Injectable()
 export class RateCache {
   constructor(private readonly redis: RedisService) {}
 
-  /** Returns true if the snapshot was written (it was newer than the cached one). */
   async offer(snapshot: RateSnapshot, timeToLiveSeconds: number): Promise<boolean> {
     const value: CachedSnapshot = {
       version: 1,
@@ -82,7 +59,7 @@ export class RateCache {
     try {
       cached = JSON.parse(raw) as CachedSnapshot;
     } catch {
-      return undefined; // unreadable: treated as a miss, the database is the durable record
+      return undefined;
     }
     if (cached.version !== 1 || typeof cached.rates !== 'object' || cached.rates === null) return undefined;
     return {

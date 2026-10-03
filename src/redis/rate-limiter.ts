@@ -9,15 +9,10 @@ export interface RateLimitCounter {
 
 export interface RateLimitDecision {
   readonly allowed: boolean;
-  /** Seconds until the tightest exceeded window resets; 0 when allowed. */
   readonly retryAfterSeconds: number;
 }
 
-/**
- * Fixed-window counters, all of one request's counters in ONE Lua script: increment,
- * start the window on the first hit, report count and remaining TTL. Redis runs a
- * script atomically, so concurrent requests can never both see "the 5th".
- */
+
 const CONSUME_SCRIPT = `
 local result = {}
 for index, key in ipairs(KEYS) do
@@ -38,7 +33,6 @@ return result
 export class RateLimiter {
   constructor(private readonly redis: RedisService) {}
 
-  /** Count one hit against every counter. Raises `DependencyUnavailableError` if Redis is down. */
   async consume(counters: readonly RateLimitCounter[]): Promise<RateLimitDecision> {
     if (counters.length === 0) return { allowed: true, retryAfterSeconds: 0 };
     const reply = (await this.redis.evaluate(

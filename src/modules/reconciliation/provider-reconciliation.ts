@@ -5,10 +5,7 @@ import type { ReconciliationBreak } from './break.service';
 import type { ExternalRunResult } from './external-reconciliation.job';
 import type { ClaimedRun } from './reconciliation-run.repository';
 
-/**
- * External reconciliation of a provider OTHER than the configured simulated PSP (PAYSTACK_PLAN.md C7): its own daily
- * and hourly runs (`reconciliation_runs.provider`), its own breaks. Registered by the provider's module when enabled.
- */
+
 export interface ProviderReconciliation {
   readonly provider: string;
   runDaily(run: ClaimedRun): Promise<ExternalRunResult>;
@@ -35,12 +32,7 @@ export class ProviderReconciliationRegistry {
   }
 }
 
-/**
- * Which provider a break is about — so each provider's run sweeps ("no longer detected") only its OWN breaks:
- * a `payment:{provider}:…` or `receivable:{provider}:{currency}` subject names it; a break on a flow belongs to its
- * funding payment's provider; anything else (`receivable:{currency}`, internal subjects) to none — the simulated PSP's
- * run keeps treating those exactly as before.
- */
+
 @Injectable()
 export class BreakOwnership {
   constructor(private readonly unitOfWork: UnitOfWork) {}

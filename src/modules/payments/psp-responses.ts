@@ -3,14 +3,7 @@ import { Money } from '../../common/money';
 import { ProviderPayment, ProviderPaymentStatus } from './payment-provider.port';
 import { ProviderResponseInvalidError } from './payment.errors';
 
-/**
- * Boundary schemas for the PSP (design §7.2 point 1): ONLY the fields we use.
- * `.passthrough()` is deliberately not used and unknown keys are simply ignored, so a
- * provider adding or changing a field we don't read can never become our outage.
- *
- * Amounts must be strings of minor units: a JSON number has already passed through a
- * float, so it is refused rather than trusted (no floats in the money path).
- */
+
 const minorUnits = z.string().regex(/^(0|[1-9]\d{0,17})$/, 'amount must be a string of minor units');
 const timestamp = z.string().datetime({ offset: true });
 
@@ -84,7 +77,6 @@ export function parsePaymentList(body: unknown, operation: string): ProviderPaym
   return result.data.data.map(toPayment);
 }
 
-/** A `{ "error": { "code" } }` body — which some providers send with a `200`. */
 export function providerErrorCode(body: unknown): string | null | undefined {
   if (typeof body !== 'object' || body === null || !('error' in body)) return undefined;
   const error = (body as { error: unknown }).error;

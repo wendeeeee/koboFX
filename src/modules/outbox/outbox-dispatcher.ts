@@ -6,7 +6,6 @@ import { AppConfig, OutboxConfig } from '../../config/configuration';
 import { UnitOfWork } from '../../database/transaction/unit-of-work';
 import { ClaimedOutboxEvent, OutboxEventHandler } from './outbox.types';
 
-/** How long a claimed event is ours before another dispatcher may take it. */
 export const OUTBOX_CLAIM_LEASE_SECONDS = 60;
 const MAXIMUM_BACKOFF_SECONDS = 3600;
 const MAXIMUM_ERROR_LENGTH = 500;
@@ -23,19 +22,7 @@ export function backoffSeconds(attempts: number): number {
   return exponentialBackoffSeconds(attempts, 5, MAXIMUM_BACKOFF_SECONDS);
 }
 
-/**
- * Drains `outbox_events` (design §7.6). At-least-once:
- *
- * 1. Claim a batch in ONE statement (`FOR UPDATE SKIP LOCKED`, so dispatchers never
- *    block each other) and push each row's `next_attempt_at` out by a lease. Commit.
- * 2. Run each handler outside any transaction (handlers call SMTP; no DB transaction
- *    is ever held across a third-party call).
- * 3. Record the result: `published_at`, or a backoff and `last_error`, or — after the
- *    configured attempts — `failed_at` (dead letter, kept and visible).
- *
- * A dispatcher that dies after step 2 lets the lease lapse, and the event is handled
- * again: every handler is idempotent.
- */
+
 @Injectable()
 export class OutboxDispatcher {
   private readonly logger = new Logger(OutboxDispatcher.name);
@@ -64,7 +51,6 @@ export class OutboxDispatcher {
     for (const event of events) {
       const handler = this.handlers.get(event.eventType);
       try {
-        // An unknown type is most likely deployment skew (an older worker): retry, loudly.
         if (!handler) throw new Error(`No handler registered for ${event.eventType}`);
         await handler.handle(event);
         await this.markPublished(event.id);

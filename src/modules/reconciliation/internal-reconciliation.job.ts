@@ -15,7 +15,6 @@ import { ReconciliationCheckpoint, ReconciliationCheckpoints } from './reconcili
 import { ReconciliationMetrics } from './reconciliation-metrics';
 import { ClaimedRun, ReconciliationRunRepository, ReconciliationRunStatus } from './reconciliation-run.repository';
 
-/** A conversion whose recorded provenance does not reproduce from its own snapshot (Phase 9 §H.10). */
 export interface FxProvenanceMismatch {
   readonly transactionId: string;
   readonly currency: string;
@@ -23,13 +22,11 @@ export interface FxProvenanceMismatch {
   readonly detail: Record<string, string>;
 }
 
-/** Everything one snapshot measured. */
 export interface InternalMeasurement {
   readonly snapshotAt: Date;
   readonly ledger: LedgerIntegrityReport;
   readonly reservations: ReservationIntegrityReport;
   readonly fxMismatches: readonly FxProvenanceMismatch[];
-  /** Account id → currency, for every account a finding names. */
   readonly accountCurrencies: ReadonlyMap<string, string>;
   readonly currencies: readonly string[];
 }
@@ -54,19 +51,6 @@ interface Finding {
 
 const absolute = (value: bigint): bigint => (value < 0n ? -value : value);
 
-/**
- * Internal reconciliation — the books against themselves (design §8.1), nightly.
- *
- * 1. ONE `REPEATABLE READ READ ONLY` snapshot, with the job's own statement timeout (Phase 9
- *    §H.7): the six checks of `LedgerChecksService` / `ReservationChecksService`, UNCHANGED, plus
- *    the FX provenance check. One snapshot ⇒ a posting that commits mid-run cannot produce a
- *    false "cached balance ≠ Σ entries".
- * 2. ONE writing transaction: every violation as a finding; the money-is-wrong ones as breaks
- *    (escalated — only a Phase 10 CORRECTION or forensics resolves them); live internal breaks
- *    this run no longer sees are annotated, never resolved; the run is finished CLEAN or
- *    BREAKS_FOUND. A crash anywhere before that commit leaves nothing: the run is redone.
- * 3. Metrics: drift per currency, hash-chain breaks, overdrafts, the overdue report.
- */
 @Injectable()
 export class InternalReconciliationJob {
   private readonly logger = new Logger(InternalReconciliationJob.name);
@@ -141,7 +125,6 @@ export class InternalReconciliationJob {
     return { runId: run.id, status, drift, breakIds: [...breakIds], hashChainBreaks, findingCount: findings.length };
   }
 
-  /** The read-only half: every check, one snapshot. Public so tests can prove its consistency. */
   async measure(): Promise<InternalMeasurement> {
     return this.unitOfWork.runReadOnlySnapshot(
       async (manager) => {
@@ -170,11 +153,7 @@ export class InternalReconciliationJob {
     );
   }
 
-  /**
-   * Every CONVERSION re-derived from its own snapshot, locally (zero provider budget): the
-   * reference rate is the triangulated mid of the snapshot's two USD rates, and the display rate
-   * is derived from — and reproduces — the posted amounts.
-   */
+ 
   private async fxProvenanceMismatches(manager: EntityManager): Promise<FxProvenanceMismatch[]> {
     const rows = (await manager.query(
       `SELECT transactions.id, transactions.source_currency, transactions.target_currency,
@@ -373,8 +352,7 @@ export class InternalReconciliationJob {
         candidate: money(BreakType.FX_PROVENANCE_MISMATCH, subjectKeys.transaction(mismatch.transactionId), mismatch.currency, 0n, {}, details),
       });
     }
-    // Reports, not breaks: an overdraft is a state to investigate (design §6.4); an overdue
-    // reservation is liveness — money locked, never wrong (Phase 3 decision 11).
+  
     for (const account of ledger.overdrawnAccounts) {
       findings.push({
         kind: 'OVERDRAWN_ACCOUNT',
@@ -398,11 +376,7 @@ export class InternalReconciliationJob {
     return findings;
   }
 
-  /**
-   * Live internal breaks this run did not see again: the books no longer show the problem, but
-   * nothing NAMED a cause (only an approved CORRECTION would be one — Phase 10). They are left
-   * live and annotated; "it went away" is not a resolution.
-   */
+
   private async annotateNoLongerDetected(run: ClaimedRun, seen: ReadonlySet<string>): Promise<void> {
     const types = (Object.keys(BREAK_POLICIES) as BreakType[]).filter((type) => BREAK_POLICIES[type].rederivedBy === 'INTERNAL');
     for (const live of await this.breaks.live(types)) {

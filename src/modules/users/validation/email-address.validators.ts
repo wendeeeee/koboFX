@@ -2,7 +2,6 @@ import { Transform } from 'class-transformer';
 import { ValidationOptions, registerDecorator } from 'class-validator';
 import { isDisposableEmailAddress, isSupportedEmailAddress, normalizeEmailAddress } from '../email-address';
 
-/** Normalise an email before validation (the DTO then only ever holds the normalised form). */
 export function NormalizeEmailAddress(): PropertyDecorator {
   return Transform(({ value }) => (typeof value === 'string' ? normalizeEmailAddress(value) : value));
 }

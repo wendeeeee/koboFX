@@ -17,7 +17,7 @@ import { isPaystackFundingState, paystackFundingStatusOf } from '../paystack-fun
 import { Clock } from '../../../common/clock';
 import { FundingNotFoundError } from './funding.errors';
 
-/** `202` body of `POST /wallet/fund`: stored and replayed byte for byte by the idempotency barrier. */
+
 export interface FundingAccepted {
   readonly fundingId: string;
   readonly status: 'PENDING';
@@ -25,14 +25,12 @@ export interface FundingAccepted {
   readonly currency: string;
 }
 
-/** The hosted checkout of a Paystack funding, while the customer can still pay on it. */
 export interface FundingCheckoutView {
   readonly authorizationUrl: string;
-  /** OUR checkout window's end (a policy, not Paystack's). */
   readonly expiresAt: string;
 }
 
-/** `GET /wallet/fund/:fundingId`. `provider` and `checkout` are additive (PAYSTACK_PLAN.md C10). */
+
 export interface FundingView {
   readonly fundingId: string;
   readonly status: FundingStatus;
@@ -46,11 +44,6 @@ export interface FundingView {
   readonly updatedAt: string;
 }
 
-/**
- * Starts funding flows and reads them back (design §7.5, §12). Starting one is a
- * database-only unit — it runs inside the idempotency barrier's transaction, and the
- * PSP is only ever called by the worker, after this commits.
- */
 @Injectable()
 export class FundingService {
   constructor(
@@ -71,7 +64,6 @@ export class FundingService {
     return this.unitOfWork.run(async (manager) => {
       const [wallet] = (await manager.query(`SELECT id FROM wallets WHERE user_id = $1`, [userId])) as { id: string }[];
       if (!wallet) throw new InvariantViolationError('An active user has no wallet.', { userId });
-      // Opening an account is not a balance change: it opens at zero (idempotent).
       const account = await this.chartOfAccounts.openUserAccount(wallet.id, amount.currency);
       const flow = await this.flows.create(FlowType.FUNDING, userId, FundingState.INITIATED);
       await this.payments.insert({
@@ -93,7 +85,6 @@ export class FundingService {
     });
   }
 
-  /** Scoped by the caller in the WHERE clause: another user's funding is simply not found. */
   async find(userId: string, fundingId: string): Promise<FundingView> {
     const [row] = (await this.unitOfWork.manager.query(
       `SELECT flow_instances.id, flow_instances.flow_type, flow_instances.state,
@@ -125,7 +116,6 @@ export class FundingService {
     if (paystack && isPaystackFundingState(row.state)) status = paystackFundingStatusOf(row.state);
     else if (!paystack && isFundingState(row.state)) status = fundingStatusOf(row.state);
     else throw new InvariantViolationError(`Unknown funding state ${row.state}.`);
-    // The URL only while the customer can still pay on it: ready, and inside OUR window.
     const checkoutOpen =
       paystack && row.state === 'CHECKOUT_READY' && row.checkout_authorization_url !== null && row.checkout_expires_at !== null &&
       row.checkout_expires_at.getTime() > this.clock.now().getTime();

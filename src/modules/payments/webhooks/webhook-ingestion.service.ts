@@ -8,7 +8,6 @@ import { parseWebhookHint } from './webhook-payload';
 import { WEBHOOK_SIGNATURE_HEADER, verifyWebhookSignature } from './webhook-signature';
 import { WebhookMetrics } from './webhook-metrics';
 
-/** Headers kept as evidence. Never `Authorization` or cookies; the signature is not a secret. */
 const STORED_HEADERS = ['content-type', 'content-length', 'user-agent', WEBHOOK_SIGNATURE_HEADER];
 
 export interface IngestionResult {
@@ -17,13 +16,6 @@ export interface IngestionResult {
   readonly duplicate: boolean;
 }
 
-/**
- * Receives a PSP webhook (design §7.3): verify the HMAC over the RAW bytes, persist the
- * raw payload verbatim with `signature_valid`, dedupe on the provider's event id — among
- * VALID events only, so a forged event can never suppress the genuine one — and record
- * the delivery in `provider_calls`, all in one transaction. Nothing here acts on the
- * content: the worker's processor does, by asking the PSP's API.
- */
 @Injectable()
 export class WebhookIngestionService {
   private readonly logger = new Logger(WebhookIngestionService.name);

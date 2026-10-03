@@ -7,7 +7,7 @@ import {
 } from '../../users/validation/email-address.validators';
 import { IsAcceptablePassword, MAXIMUM_PASSWORD_LENGTH } from '../passwords/password-policy';
 
-/** Bounds a credential string without applying the registration policy (login must accept old passwords). */
+
 const MAXIMUM_CREDENTIAL_LENGTH = MAXIMUM_PASSWORD_LENGTH * 4;
 
 const EMAIL_DESCRIPTION = 'Trimmed and lower-cased; ASCII only (non-ASCII is refused, never mapped).';

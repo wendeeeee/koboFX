@@ -1,11 +1,6 @@
 import { ErrorCode } from '../common/errors';
 
-/**
- * The HTTP status each stable error code is sent with (design §12.1). Exhaustive by type: a new `ErrorCode`
- * without a status fails `tsc`. `error-codes.openapi.spec.ts` proves every `DomainError` subclass agrees, and the
- * three codes raised only by `buildErrorResponse` (`HTTP_ERROR`, `INTERNAL_ERROR`, `PAYLOAD_TOO_LARGE`) are pinned
- * there too.
- */
+
 export const ERROR_CODE_HTTP_STATUS: Readonly<Record<ErrorCode, number>> = {
   [ErrorCode.VALIDATION_FAILED]: 400,
   [ErrorCode.INVALID_AMOUNT]: 400,
@@ -73,11 +68,9 @@ export const ERROR_CODE_HTTP_STATUS: Readonly<Record<ErrorCode, number>> = {
   [ErrorCode.REVERSAL_MISMATCH]: 500,
   [ErrorCode.INVALID_RESERVATION]: 500,
   [ErrorCode.INTERNAL_ERROR]: 500,
-  // A 4xx HttpException with no dedicated code (e.g. 405, 406); the status on the wire is that exception's own.
   [ErrorCode.HTTP_ERROR]: 400,
 };
 
-/** What each code means to a client: what to do next. Rendered into the `ErrorCode` schema. Exhaustive by type. */
 export const ERROR_CODE_DESCRIPTIONS: Readonly<Record<ErrorCode, string>> = {
   [ErrorCode.VALIDATION_FAILED]: 'The request is malformed. A body/query DTO failure lists `details.violations`; fix the request.',
   [ErrorCode.INVALID_AMOUNT]: 'The amount is not a positive whole number of minor units in range.',
@@ -141,7 +134,6 @@ export const ERROR_CODE_DESCRIPTIONS: Readonly<Record<ErrorCode, string>> = {
   [ErrorCode.HTTP_ERROR]: 'An HTTP-level refusal without a dedicated code.',
 };
 
-/** Codes that are ALWAYS transient (retry; an idempotent route stores nothing for them). */
 export const TRANSIENT_ERROR_CODES: readonly ErrorCode[] = [
   ErrorCode.REQUEST_IN_PROGRESS,
   ErrorCode.RATE_LIMITED,

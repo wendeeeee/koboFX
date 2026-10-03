@@ -16483,6 +16483,655 @@
         ]
       }
     },
+    "/api/v1/wallet/fund/paystack": {
+      "post": {
+        "description": "Starts a Paystack funding and answers `202 PENDING` at once: the API never calls Paystack — the worker initializes the checkout after this commits. Poll `GET /wallet/fund/{fundingId}` until `checkout.authorizationUrl` appears and send the customer there. The balance is credited only when Paystack's verify API confirms the payment with the same amount and currency; the browser's return to your callback page proves nothing.\n\n**Access:** an authenticated ACTIVE user (verified, not suspended).\n\n**Idempotent:** requires `Idempotency-Key`; retries replay the stored outcome.\n\n**Rate limit:** 100 per 60s per ip (`global`).",
+        "operationId": "PaystackFundingController_fund",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/IdempotencyKey"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PaystackFundWalletRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PaystackFundingAccepted"
+                }
+              }
+            },
+            "headers": {
+              "X-Correlation-Id": {
+                "description": "The request's correlation id (yours, or a generated UUID). Also in every error body.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Idempotent-Replayed": {
+                "description": "Present (`true`) when this is the stored outcome of an earlier request with the same `Idempotency-Key`.",
+                "schema": {
+                  "type": "string",
+                  "enum": [
+                    "true"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`VALIDATION_FAILED`: The request is malformed. A body/query DTO failure lists `details.violations`; fix the request.\n\n`INVALID_AMOUNT`: The amount is not a positive whole number of minor units in range.\n\n`UNSUPPORTED_CURRENCY`: The currency is not supported for this operation.\n\n`IDEMPOTENCY_KEY_REQUIRED`: This route needs an `Idempotency-Key` header.\n\n`IDEMPOTENCY_KEY_INVALID`: `Idempotency-Key` must be 16–128 characters of `[A-Za-z0-9_-]`.",
+            "headers": {
+              "X-Correlation-Id": {
+                "description": "The request's correlation id (yours, or a generated UUID). Also in every error body.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Idempotent-Replayed": {
+                "description": "Present (`true`) when this is the stored outcome of an earlier request with the same `Idempotency-Key`.",
+                "schema": {
+                  "type": "string",
+                  "enum": [
+                    "true"
+                  ]
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ErrorResponse"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "statusCode": {
+                          "type": "integer",
+                          "enum": [
+                            400
+                          ]
+                        },
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "VALIDATION_FAILED",
+                            "INVALID_AMOUNT",
+                            "UNSUPPORTED_CURRENCY",
+                            "IDEMPOTENCY_KEY_REQUIRED",
+                            "IDEMPOTENCY_KEY_INVALID"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                },
+                "examples": {
+                  "VALIDATION_FAILED": {
+                    "value": {
+                      "statusCode": 400,
+                      "code": "VALIDATION_FAILED",
+                      "message": "Request validation failed.",
+                      "details": {
+                        "violations": [
+                          "amount must be a positive whole number of minor units, as a string"
+                        ]
+                      },
+                      "correlationId": "6f1d2c3b-4a5e-4f60-8a7b-9c0d1e2f3a4b",
+                      "timestamp": "2026-09-10T11:04:22.114Z"
+                    }
+                  },
+                  "INVALID_AMOUNT": {
+                    "value": {
+                      "statusCode": 400,
+                      "code": "INVALID_AMOUNT",
+                      "message": "The amount is not a positive whole number of minor units in range.",
+                      "correlationId": "6f1d2c3b-4a5e-4f60-8a7b-9c0d1e2f3a4b",
+                      "timestamp": "2026-09-10T11:04:22.114Z"
+                    }
+                  },
+                  "UNSUPPORTED_CURRENCY": {
+                    "value": {
+                      "statusCode": 400,
+                      "code": "UNSUPPORTED_CURRENCY",
+                      "message": "The currency is not supported for this operation.",
+                      "correlationId": "6f1d2c3b-4a5e-4f60-8a7b-9c0d1e2f3a4b",
+                      "timestamp": "2026-09-10T11:04:22.114Z"
+                    }
+                  },
+                  "IDEMPOTENCY_KEY_REQUIRED": {
+                    "value": {
+                      "statusCode": 400,
+                      "code": "IDEMPOTENCY_KEY_REQUIRED",
+                      "message": "This route needs an `Idempotency-Key` header.",
+                      "correlationId": "6f1d2c3b-4a5e-4f60-8a7b-9c0d1e2f3a4b",
+                      "timestamp": "2026-09-10T11:04:22.114Z"
+                    }
+                  },
+                  "IDEMPOTENCY_KEY_INVALID": {
+                    "value": {
+                      "statusCode": 400,
+                      "code": "IDEMPOTENCY_KEY_INVALID",
+                      "message": "`Idempotency-Key` must be 16–128 characters of `[A-Za-z0-9_-]`.",
+                      "correlationId": "6f1d2c3b-4a5e-4f60-8a7b-9c0d1e2f3a4b",
+                      "timestamp": "2026-09-10T11:04:22.114Z"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`UNAUTHENTICATED`: No valid credentials: missing/expired/revoked access token, a refused refresh token, or a bad webhook signature.",
+            "headers": {
+              "X-Correlation-Id": {
+                "description": "The request's correlation id (yours, or a generated UUID). Also in every error body.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ErrorResponse"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "statusCode": {
+                          "type": "integer",
+                          "enum": [
+                            401
+                          ]
+                        },
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "UNAUTHENTICATED"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                },
+                "examples": {
+                  "UNAUTHENTICATED": {
+                    "value": {
+                      "statusCode": 401,
+                      "code": "UNAUTHENTICATED",
+                      "message": "Authentication is required.",
+                      "correlationId": "6f1d2c3b-4a5e-4f60-8a7b-9c0d1e2f3a4b",
+                      "timestamp": "2026-09-10T11:04:22.114Z"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`ACCOUNT_SUSPENDED`: The account is suspended.\n\n`EMAIL_NOT_VERIFIED`: Verify the email address first.",
+            "headers": {
+              "X-Correlation-Id": {
+                "description": "The request's correlation id (yours, or a generated UUID). Also in every error body.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ErrorResponse"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "statusCode": {
+                          "type": "integer",
+                          "enum": [
+                            403
+                          ]
+                        },
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "ACCOUNT_SUSPENDED",
+                            "EMAIL_NOT_VERIFIED"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                },
+                "examples": {
+                  "ACCOUNT_SUSPENDED": {
+                    "value": {
+                      "statusCode": 403,
+                      "code": "ACCOUNT_SUSPENDED",
+                      "message": "The account is suspended.",
+                      "correlationId": "6f1d2c3b-4a5e-4f60-8a7b-9c0d1e2f3a4b",
+                      "timestamp": "2026-09-10T11:04:22.114Z"
+                    }
+                  },
+                  "EMAIL_NOT_VERIFIED": {
+                    "value": {
+                      "statusCode": 403,
+                      "code": "EMAIL_NOT_VERIFIED",
+                      "message": "Verify the email address first.",
+                      "correlationId": "6f1d2c3b-4a5e-4f60-8a7b-9c0d1e2f3a4b",
+                      "timestamp": "2026-09-10T11:04:22.114Z"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`IDEMPOTENCY_KEY_REUSE`: This key was used with a different request body on this route. Use a new key.\n\n`REQUEST_IN_PROGRESS`: The same key is being processed right now. Retry after `Retry-After` with the same key.",
+            "headers": {
+              "X-Correlation-Id": {
+                "description": "The request's correlation id (yours, or a generated UUID). Also in every error body.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Retry-After": {
+                "description": "Seconds to wait before retrying.",
+                "schema": {
+                  "type": "integer",
+                  "minimum": 0
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ErrorResponse"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "statusCode": {
+                          "type": "integer",
+                          "enum": [
+                            409
+                          ]
+                        },
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "IDEMPOTENCY_KEY_REUSE",
+                            "REQUEST_IN_PROGRESS"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                },
+                "examples": {
+                  "IDEMPOTENCY_KEY_REUSE": {
+                    "value": {
+                      "statusCode": 409,
+                      "code": "IDEMPOTENCY_KEY_REUSE",
+                      "message": "This key was used with a different request body on this route. Use a new key.",
+                      "correlationId": "6f1d2c3b-4a5e-4f60-8a7b-9c0d1e2f3a4b",
+                      "timestamp": "2026-09-10T11:04:22.114Z"
+                    }
+                  },
+                  "REQUEST_IN_PROGRESS": {
+                    "value": {
+                      "statusCode": 409,
+                      "code": "REQUEST_IN_PROGRESS",
+                      "message": "The same key is being processed right now. Retry after `Retry-After` with the same key.",
+                      "correlationId": "6f1d2c3b-4a5e-4f60-8a7b-9c0d1e2f3a4b",
+                      "timestamp": "2026-09-10T11:04:22.114Z"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "`PAYLOAD_TOO_LARGE`: The body exceeds 100 KB.",
+            "headers": {
+              "X-Correlation-Id": {
+                "description": "The request's correlation id (yours, or a generated UUID). Also in every error body.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ErrorResponse"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "statusCode": {
+                          "type": "integer",
+                          "enum": [
+                            413
+                          ]
+                        },
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "PAYLOAD_TOO_LARGE"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                },
+                "examples": {
+                  "PAYLOAD_TOO_LARGE": {
+                    "value": {
+                      "statusCode": 413,
+                      "code": "PAYLOAD_TOO_LARGE",
+                      "message": "The body exceeds 100 KB.",
+                      "correlationId": "6f1d2c3b-4a5e-4f60-8a7b-9c0d1e2f3a4b",
+                      "timestamp": "2026-09-10T11:04:22.114Z"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "`AMOUNT_TOO_SMALL`: Below the minimum for this currency or pair.\n\n`AMOUNT_TOO_LARGE`: Above the per-operation maximum.",
+            "headers": {
+              "X-Correlation-Id": {
+                "description": "The request's correlation id (yours, or a generated UUID). Also in every error body.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Idempotent-Replayed": {
+                "description": "Present (`true`) when this is the stored outcome of an earlier request with the same `Idempotency-Key`.",
+                "schema": {
+                  "type": "string",
+                  "enum": [
+                    "true"
+                  ]
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ErrorResponse"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "statusCode": {
+                          "type": "integer",
+                          "enum": [
+                            422
+                          ]
+                        },
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "AMOUNT_TOO_SMALL",
+                            "AMOUNT_TOO_LARGE"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                },
+                "examples": {
+                  "AMOUNT_TOO_SMALL": {
+                    "value": {
+                      "statusCode": 422,
+                      "code": "AMOUNT_TOO_SMALL",
+                      "message": "Below the minimum for this currency or pair.",
+                      "correlationId": "6f1d2c3b-4a5e-4f60-8a7b-9c0d1e2f3a4b",
+                      "timestamp": "2026-09-10T11:04:22.114Z"
+                    }
+                  },
+                  "AMOUNT_TOO_LARGE": {
+                    "value": {
+                      "statusCode": 422,
+                      "code": "AMOUNT_TOO_LARGE",
+                      "message": "Above the per-operation maximum.",
+                      "correlationId": "6f1d2c3b-4a5e-4f60-8a7b-9c0d1e2f3a4b",
+                      "timestamp": "2026-09-10T11:04:22.114Z"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "`RATE_LIMITED`: Too many requests. Retry after `Retry-After` seconds.",
+            "headers": {
+              "X-Correlation-Id": {
+                "description": "The request's correlation id (yours, or a generated UUID). Also in every error body.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Retry-After": {
+                "description": "Seconds to wait before retrying.",
+                "schema": {
+                  "type": "integer",
+                  "minimum": 0
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ErrorResponse"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "statusCode": {
+                          "type": "integer",
+                          "enum": [
+                            429
+                          ]
+                        },
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "RATE_LIMITED"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                },
+                "examples": {
+                  "RATE_LIMITED": {
+                    "value": {
+                      "statusCode": 429,
+                      "code": "RATE_LIMITED",
+                      "message": "Too many requests. Retry after the time given in the Retry-After header.",
+                      "details": {
+                        "retryAfterSeconds": 42
+                      },
+                      "correlationId": "6f1d2c3b-4a5e-4f60-8a7b-9c0d1e2f3a4b",
+                      "timestamp": "2026-09-10T11:04:22.114Z"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`INVARIANT_VIOLATION`: Our bug, failed loudly. Quote the `correlationId`.\n\n`INTERNAL_ERROR`: Unexpected error. Quote the `correlationId`.",
+            "headers": {
+              "X-Correlation-Id": {
+                "description": "The request's correlation id (yours, or a generated UUID). Also in every error body.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ErrorResponse"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "statusCode": {
+                          "type": "integer",
+                          "enum": [
+                            500
+                          ]
+                        },
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "INVARIANT_VIOLATION",
+                            "INTERNAL_ERROR"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                },
+                "examples": {
+                  "INVARIANT_VIOLATION": {
+                    "value": {
+                      "statusCode": 500,
+                      "code": "INVARIANT_VIOLATION",
+                      "message": "An unexpected error occurred.",
+                      "correlationId": "6f1d2c3b-4a5e-4f60-8a7b-9c0d1e2f3a4b",
+                      "timestamp": "2026-09-10T11:04:22.114Z"
+                    }
+                  },
+                  "INTERNAL_ERROR": {
+                    "value": {
+                      "statusCode": 500,
+                      "code": "INTERNAL_ERROR",
+                      "message": "An unexpected error occurred.",
+                      "correlationId": "6f1d2c3b-4a5e-4f60-8a7b-9c0d1e2f3a4b",
+                      "timestamp": "2026-09-10T11:04:22.114Z"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "`RESOURCE_BUSY`: Transient lock or statement timeout. Retry with the SAME `Idempotency-Key`.",
+            "headers": {
+              "X-Correlation-Id": {
+                "description": "The request's correlation id (yours, or a generated UUID). Also in every error body.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Retry-After": {
+                "description": "Seconds to wait before retrying.",
+                "schema": {
+                  "type": "integer",
+                  "minimum": 0
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ErrorResponse"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "statusCode": {
+                          "type": "integer",
+                          "enum": [
+                            503
+                          ]
+                        },
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "RESOURCE_BUSY"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                },
+                "examples": {
+                  "RESOURCE_BUSY": {
+                    "value": {
+                      "statusCode": 503,
+                      "code": "RESOURCE_BUSY",
+                      "message": "The resource is busy. Retry the request with the same Idempotency-Key.",
+                      "details": {
+                        "reason": "lock_timeout"
+                      },
+                      "correlationId": "6f1d2c3b-4a5e-4f60-8a7b-9c0d1e2f3a4b",
+                      "timestamp": "2026-09-10T11:04:22.114Z"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "summary": "Fund the wallet through Paystack",
+        "tags": [
+          "wallet"
+        ],
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "x-authentication": "active-user",
+        "x-idempotent": true,
+        "x-rate-limits": [
+          {
+            "name": "global",
+            "subject": "ip",
+            "limit": 100,
+            "windowSeconds": 60
+          }
+        ]
+      }
+    },
     "/api/v1/health/live": {
       "get": {
         "description": "The process is up. Reports the build's git SHA.\n\n**Access:** public (no bearer token).\n\n**Rate limit:** none.",
@@ -17068,6 +17717,370 @@
         ],
         "description": "**Access:** an authenticated ACTIVE user (verified, not suspended).\n\n**Rate limit:** 100 per 60s per ip (`global`)."
       }
+    },
+    "/api/v1/webhooks/paystack": {
+      "post": {
+        "description": "Called by Paystack (the URL is set in the Paystack dashboard), not by API clients. Authenticated by `X-Paystack-Signature` (HMAC-SHA512 of the raw body with the secret key) and, when configured, by Paystack's published source addresses. The event is stored before anything else — even when refused (a security signal, answered with a generic 401) — then acknowledged `200`; processing is asynchronous.\n\n**Access:** public (no bearer token).\n\n**Rate limit:** 1200 per 60s per ip (`paystack-webhook`).",
+        "operationId": "PaystackWebhookController_receive",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": true,
+                "description": "Paystack's event, verified over the RAW bytes (do not re-serialise). Only `event`, `data.id`, `data.status` and `data.reference` (`data.transaction` for disputes) are read; amounts never are — the event is a hint, Paystack's verify API is the fact.",
+                "properties": {
+                  "event": {
+                    "type": "string",
+                    "maxLength": 64,
+                    "example": "charge.success"
+                  },
+                  "data": {
+                    "type": "object",
+                    "properties": {
+                      "id": {
+                        "type": "integer",
+                        "example": 2009945086
+                      },
+                      "status": {
+                        "type": "string",
+                        "example": "success"
+                      },
+                      "reference": {
+                        "type": "string",
+                        "maxLength": 128,
+                        "example": "3c9a1f2e-7b4d-4e6a-9f80-1a2b3c4d5e6f"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WebhookReceived"
+                }
+              }
+            },
+            "headers": {
+              "X-Correlation-Id": {
+                "description": "The request's correlation id (yours, or a generated UUID). Also in every error body.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`UNAUTHENTICATED`: No valid credentials: missing/expired/revoked access token, a refused refresh token, or a bad webhook signature.",
+            "headers": {
+              "X-Correlation-Id": {
+                "description": "The request's correlation id (yours, or a generated UUID). Also in every error body.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ErrorResponse"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "statusCode": {
+                          "type": "integer",
+                          "enum": [
+                            401
+                          ]
+                        },
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "UNAUTHENTICATED"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                },
+                "examples": {
+                  "UNAUTHENTICATED": {
+                    "value": {
+                      "statusCode": 401,
+                      "code": "UNAUTHENTICATED",
+                      "message": "Authentication is required.",
+                      "correlationId": "6f1d2c3b-4a5e-4f60-8a7b-9c0d1e2f3a4b",
+                      "timestamp": "2026-09-10T11:04:22.114Z"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "`PAYLOAD_TOO_LARGE`: The body exceeds 100 KB.",
+            "headers": {
+              "X-Correlation-Id": {
+                "description": "The request's correlation id (yours, or a generated UUID). Also in every error body.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ErrorResponse"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "statusCode": {
+                          "type": "integer",
+                          "enum": [
+                            413
+                          ]
+                        },
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "PAYLOAD_TOO_LARGE"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                },
+                "examples": {
+                  "PAYLOAD_TOO_LARGE": {
+                    "value": {
+                      "statusCode": 413,
+                      "code": "PAYLOAD_TOO_LARGE",
+                      "message": "The body exceeds 100 KB.",
+                      "correlationId": "6f1d2c3b-4a5e-4f60-8a7b-9c0d1e2f3a4b",
+                      "timestamp": "2026-09-10T11:04:22.114Z"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "`RATE_LIMITED`: Too many requests. Retry after `Retry-After` seconds.",
+            "headers": {
+              "X-Correlation-Id": {
+                "description": "The request's correlation id (yours, or a generated UUID). Also in every error body.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Retry-After": {
+                "description": "Seconds to wait before retrying.",
+                "schema": {
+                  "type": "integer",
+                  "minimum": 0
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ErrorResponse"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "statusCode": {
+                          "type": "integer",
+                          "enum": [
+                            429
+                          ]
+                        },
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "RATE_LIMITED"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                },
+                "examples": {
+                  "RATE_LIMITED": {
+                    "value": {
+                      "statusCode": 429,
+                      "code": "RATE_LIMITED",
+                      "message": "Too many requests. Retry after the time given in the Retry-After header.",
+                      "details": {
+                        "retryAfterSeconds": 42
+                      },
+                      "correlationId": "6f1d2c3b-4a5e-4f60-8a7b-9c0d1e2f3a4b",
+                      "timestamp": "2026-09-10T11:04:22.114Z"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`INVARIANT_VIOLATION`: Our bug, failed loudly. Quote the `correlationId`.\n\n`INTERNAL_ERROR`: Unexpected error. Quote the `correlationId`.",
+            "headers": {
+              "X-Correlation-Id": {
+                "description": "The request's correlation id (yours, or a generated UUID). Also in every error body.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ErrorResponse"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "statusCode": {
+                          "type": "integer",
+                          "enum": [
+                            500
+                          ]
+                        },
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "INVARIANT_VIOLATION",
+                            "INTERNAL_ERROR"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                },
+                "examples": {
+                  "INVARIANT_VIOLATION": {
+                    "value": {
+                      "statusCode": 500,
+                      "code": "INVARIANT_VIOLATION",
+                      "message": "An unexpected error occurred.",
+                      "correlationId": "6f1d2c3b-4a5e-4f60-8a7b-9c0d1e2f3a4b",
+                      "timestamp": "2026-09-10T11:04:22.114Z"
+                    }
+                  },
+                  "INTERNAL_ERROR": {
+                    "value": {
+                      "statusCode": 500,
+                      "code": "INTERNAL_ERROR",
+                      "message": "An unexpected error occurred.",
+                      "correlationId": "6f1d2c3b-4a5e-4f60-8a7b-9c0d1e2f3a4b",
+                      "timestamp": "2026-09-10T11:04:22.114Z"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "`RESOURCE_BUSY`: Transient lock or statement timeout. Retry with the SAME `Idempotency-Key`.",
+            "headers": {
+              "X-Correlation-Id": {
+                "description": "The request's correlation id (yours, or a generated UUID). Also in every error body.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Retry-After": {
+                "description": "Seconds to wait before retrying.",
+                "schema": {
+                  "type": "integer",
+                  "minimum": 0
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ErrorResponse"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "statusCode": {
+                          "type": "integer",
+                          "enum": [
+                            503
+                          ]
+                        },
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "RESOURCE_BUSY"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                },
+                "examples": {
+                  "RESOURCE_BUSY": {
+                    "value": {
+                      "statusCode": 503,
+                      "code": "RESOURCE_BUSY",
+                      "message": "The resource is busy. Retry the request with the same Idempotency-Key.",
+                      "details": {
+                        "reason": "lock_timeout"
+                      },
+                      "correlationId": "6f1d2c3b-4a5e-4f60-8a7b-9c0d1e2f3a4b",
+                      "timestamp": "2026-09-10T11:04:22.114Z"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "paystackSignature": []
+          }
+        ],
+        "summary": "Paystack event hint (machine-to-machine)",
+        "tags": [
+          "webhooks"
+        ],
+        "x-machine-to-machine": true,
+        "x-authentication": "public",
+        "x-idempotent": false,
+        "x-rate-limits": [
+          {
+            "name": "paystack-webhook",
+            "subject": "ip",
+            "limit": 1200,
+            "windowSeconds": 60
+          }
+        ]
+      }
     }
   },
   "info": {
@@ -17132,6 +18145,12 @@
         "in": "header",
         "name": "X-Psp-Signature",
         "description": "`t=<unix seconds>,v1=<hex HMAC-SHA256(secret, \"t.\" + raw body bytes)>`, at most 300 seconds old. Up to two secrets are accepted (rotation)."
+      },
+      "paystackSignature": {
+        "type": "apiKey",
+        "in": "header",
+        "name": "X-Paystack-Signature",
+        "description": "Paystack's webhook signature: hex HMAC-SHA512 of the raw body bytes, keyed with the Paystack secret key."
       }
     },
     "schemas": {
@@ -17513,6 +18532,27 @@
           "currency"
         ]
       },
+      "FundingCheckout": {
+        "type": "object",
+        "properties": {
+          "authorizationUrl": {
+            "type": "string",
+            "format": "uri",
+            "example": "https://checkout.paystack.com/0peioxfhpn",
+            "description": "Paystack's hosted checkout for this funding. Redirect the customer here; the return to your callback page carries no authority — poll this route."
+          },
+          "expiresAt": {
+            "type": "string",
+            "format": "date-time",
+            "example": "2026-09-29T10:00:00.000Z",
+            "description": "The end of OUR checkout window: after it, an unpaid funding FAILS (a later payment is caught by reconciliation, never lost)."
+          }
+        },
+        "required": [
+          "authorizationUrl",
+          "expiresAt"
+        ]
+      },
       "Funding": {
         "type": "object",
         "properties": {
@@ -17545,11 +18585,31 @@
             "example": "NGN",
             "description": "ISO 4217 code."
           },
+          "provider": {
+            "type": "string",
+            "enum": [
+              "simulated",
+              "paystack"
+            ],
+            "example": "simulated",
+            "description": "Which provider takes the payment (`POST /wallet/fund` = simulated, `POST /wallet/fund/paystack` = paystack)."
+          },
+          "checkout": {
+            "nullable": true,
+            "example": null,
+            "description": "Paystack only, and only while the customer can still pay: ready and inside the checkout window. Otherwise null.",
+            "type": "object",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/FundingCheckout"
+              }
+            ]
+          },
           "failureCode": {
             "type": "string",
             "nullable": true,
             "example": null,
-            "description": "Why it FAILED: the PSP's status, with its decline code when given (e.g. `DECLINED:insufficient_funds`), or `USER_SUSPENDED`. Never card data."
+            "description": "Why it FAILED: the PSP's status, with its decline code when given (e.g. `DECLINED:insufficient_funds`), or `USER_SUSPENDED`; Paystack: `CHECKOUT_EXPIRED:{status}`, `CHECKOUT_UNRECOVERABLE`, `PAYSTACK_REVERSED`. Never card data."
           },
           "transactionReference": {
             "type": "string",
@@ -17575,6 +18635,8 @@
           "status",
           "amount",
           "currency",
+          "provider",
+          "checkout",
           "failureCode",
           "transactionReference",
           "createdAt",
@@ -20613,6 +21675,72 @@
           "generatedAt",
           "holders",
           "discrepancies"
+        ]
+      },
+      "PaystackFundWalletRequest": {
+        "type": "object",
+        "properties": {
+          "amount": {
+            "type": "string",
+            "maxLength": 19,
+            "pattern": "^[1-9]\\d{0,17}$",
+            "example": "150000",
+            "description": "How much to fund. Within the currency's funding limits (default NGN ₦100 – ₦1,000,000). A whole number of minor units, as a string (never a JSON number). The scale is the currency's `minorUnit`: NGN 2 (`\"150000\"` = ₦1,500.00), USD 2, JPY 0 (`\"1500\"` = ¥1,500), KWD 3 (`\"1500\"` = 1.500 KWD)."
+          },
+          "currency": {
+            "type": "string",
+            "pattern": "^[A-Z]{3}$",
+            "example": "NGN",
+            "description": "ISO 4217 code of a Paystack funding currency (default: NGN only)."
+          }
+        },
+        "required": [
+          "amount",
+          "currency"
+        ]
+      },
+      "PaystackFundingAccepted": {
+        "type": "object",
+        "properties": {
+          "fundingId": {
+            "type": "string",
+            "format": "uuid",
+            "example": "3c9a1f2e-7b4d-4e6a-9f80-1a2b3c4d5e6f",
+            "description": "Poll `GET /wallet/fund/{fundingId}` until `checkout.authorizationUrl` appears (normally within a second or two), then send the customer there."
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "PENDING"
+            ],
+            "example": "PENDING"
+          },
+          "amount": {
+            "type": "string",
+            "pattern": "^-?\\d+$",
+            "example": "150000",
+            "description": "As requested. A whole number of minor units, as a string (never a JSON number). The scale is the currency's `minorUnit`: NGN 2 (`\"150000\"` = ₦1,500.00), USD 2, JPY 0 (`\"1500\"` = ¥1,500), KWD 3 (`\"1500\"` = 1.500 KWD)."
+          },
+          "currency": {
+            "type": "string",
+            "pattern": "^[A-Z]{3}$",
+            "example": "NGN",
+            "description": "ISO 4217 code."
+          },
+          "provider": {
+            "type": "string",
+            "enum": [
+              "paystack"
+            ],
+            "example": "paystack"
+          }
+        },
+        "required": [
+          "fundingId",
+          "status",
+          "amount",
+          "currency",
+          "provider"
         ]
       },
       "Version": {

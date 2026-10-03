@@ -1,4 +1,7 @@
-import 'dotenv/config';
+import * as dotenv from 'dotenv';
+
+dotenv.config();
+
 import { ProviderCallRecord, ProviderCallRecorder } from '../src/common/http/provider-call-recorder';
 import { ProviderHttpClient } from '../src/common/http/provider-http-client';
 import { dec } from '../src/common/money';

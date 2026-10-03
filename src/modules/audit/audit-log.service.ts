@@ -57,44 +57,31 @@ export type AuditActor =
   | { readonly type: 'OPERATOR'; readonly id: string }
   | { readonly type: 'SYSTEM' };
 
-/**
- * The ONLY fields an audit row may carry in `before`/`after`. Typed on purpose:
- * `audit_logs` can never be deleted, so it must never hold personal data (design
- * §9.5) — no email, no IP address, no password, one-time password or token.
- */
+
 export interface AuditState {
   readonly status?: UserStatus;
   readonly role?: UserRole;
   readonly verified?: boolean;
   readonly revoked?: boolean;
   readonly revocationReason?: RefreshTokenRevocationReason;
-  /** A flow's state machine state (design §7.5). */
   readonly flowState?: string;
-  /** Why a flow failed: a PSP decline code or our own reason — never card or personal data. */
   readonly failureCode?: string;
-  /** The ledger transaction a step posted (an opaque id). */
   readonly transactionId?: string;
-  /** Reconciliation (Phase 9): a break's type and lifecycle status — ids and codes only. */
   readonly breakType?: string;
   readonly breakStatus?: string;
   readonly resolutionKind?: string;
-  /** A settlement batch's outcome (`POSTED` / `REJECTED`) and why it was refused. */
   readonly settlementStatus?: string;
   readonly rejectionCode?: string;
-  /** Controls (Phase 10): an approval's type, status and links — ids and codes only. */
   readonly actionType?: string;
   readonly approvalStatus?: string;
   readonly approvalId?: string;
   readonly breakGlass?: boolean;
   readonly breakId?: string;
-  /** A currency pair's pricing before/after a SPREAD_CHANGE (not personal data). */
   readonly currencyPair?: string;
   readonly spreadBasisPoints?: number;
   readonly minimumSourceAmountMinor?: string;
-  /** A rate override's snapshots. */
   readonly snapshotId?: string;
   readonly overriddenSnapshotId?: string;
-  /** A closed period, `[start, end)`. */
   readonly periodStart?: string;
   readonly periodEnd?: string;
   readonly periodLockId?: string;
@@ -106,12 +93,11 @@ export interface AuditEntry {
   readonly subject: { readonly type: AuditSubjectType; readonly id: string };
   readonly before?: AuditState;
   readonly after?: AuditState;
-  /** The *why* (handbook: audits and audit trails). */
   readonly reason: string;
 }
 
 /**
- * Writes `audit_logs` (design §9.3). Must run inside the transaction that makes the
+ * Writes `audit_logs`. This action is transaction scoped and must run inside a transaction that makes the
  * change, so the change and its trail commit or roll back together.
  */
 @Injectable()

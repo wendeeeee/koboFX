@@ -1,9 +1,8 @@
 import { AccountType, EntryDirection, NormalSide } from '../ledger.types';
 
 /**
- * Data-driven sign logic (design §5.1): an entry on its account's normal side
- * increases the balance; on the opposite side it decreases it. Which side is normal
- * is a column on the account, never a convention remembered by a handler.
+ * Data-driven sign logic. an entry on its account's normal side
+ * increases the balance; on the opposite side it decreases it. 
  */
 export function signedBalanceChange(
   normalSide: NormalSide,

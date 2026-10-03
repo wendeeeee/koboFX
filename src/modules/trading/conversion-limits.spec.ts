@@ -47,7 +47,6 @@ describe('conversion limits (Phase 7 §D.5)', () => {
         sourceAmount: '1000000',
       },
     });
-    // Already past the limit (a lowered configuration): nothing remains, never a negative.
     expect(failure(() => assertWithinDailyLimit(config, 'USD', 2_000_000n, 1n))).toMatchObject({ details: { remainingMinor: '0' } });
   });
 

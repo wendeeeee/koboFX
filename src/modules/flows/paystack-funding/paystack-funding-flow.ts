@@ -26,23 +26,17 @@ import {
   isPaystackHintSatisfied,
 } from './paystack-funding-transitions';
 
-/** The system account a Paystack capture debits (PAYSTACK_PLAN.md C6). */
 export const PAYSTACK_RECEIVABLE = 'PAYSTACK_RECEIVABLE';
 export const PAYSTACK_FUNDING_INITIATED_BY = 'job:paystack-funding-flow';
 
-/** Verify polling while the customer is on the checkout: 5 s doubling to a minute. */
 const POLL_BASE_SECONDS = 5;
 const POLL_MAXIMUM_SECONDS = 60;
-/** After the window, money still in flight is re-checked slowly (and pages through `flows_stalled`). */
+
 const IN_FLIGHT_AFTER_WINDOW_SECONDS = 300;
-/** A partial dispute waits for a human (a Phase 10 CORRECTION); re-check it rarely. */
 const PARKED_RETRY_SECONDS = 3600;
 const LOST_DISPUTE_RESOLUTION = 'merchant-accepted';
 
-/**
- * Why a verified transaction may NOT be credited, as the list of fields that disagree with our funding. Empty =
- * creditable. The ONE rule, used to choose POSTED vs HELD and asserted again inside the posting's transaction.
- */
+
 export function creditProblems(transaction: PaystackTransaction, payment: FundingPayment, flowId: string): string[] {
   const problems: string[] = [];
   if (PAYSTACK_STATUS_MEANING[transaction.status] !== PaystackStatusMeaning.PAID) problems.push('status');
@@ -53,12 +47,7 @@ export function creditProblems(transaction: PaystackTransaction, payment: Fundin
   return problems;
 }
 
-/**
- * The Paystack funding flow (PAYSTACK_PLAN.md C1–C3), one step per state, driven by the shared `FlowRunner` and
- * resumer. Every Paystack call happens OUTSIDE any transaction; then ONE fenced, state-guarded commit
- * (`runtime.commit`: re-lock the flow, check state and lease) posts and records. Credit comes ONLY from `verify` —
- * never from a webhook — and only when status, reference, amount and currency all match ours.
- */
+
 @Injectable()
 export class PaystackFundingFlow implements FlowDefinition, OnModuleInit {
   readonly flowType = FlowType.PAYSTACK_FUNDING;
@@ -107,11 +96,11 @@ export class PaystackFundingFlow implements FlowDefinition, OnModuleInit {
     }
   }
 
-  // ── INITIATED ──────────────────────────────────────────────────────────────
+  // ── INITIATED ──
 
   private async initializeCheckout(flow: ClaimedFlow, payment: FundingPayment, runtime: FlowStepRuntime): Promise<StepOutcome> {
     const context = { flowId: flow.id };
-    // Read before write: a previous initialize may have been accepted with its answer lost.
+  
     let existing = await this.paystack.verify(flow.id, context);
     if (!existing) {
       const user = await this.users.findProfile(flow.userId);
@@ -124,7 +113,6 @@ export class PaystackFundingFlow implements FlowDefinition, OnModuleInit {
           {
             reference: flow.id,
             amount: payment.amount,
-            // The authenticated user's stored email — never anything a request body carried.
             email: user.email,
             callbackUrl: this.config.paystack.callbackUrl,
             metadata: { flowId: flow.id },
@@ -145,7 +133,6 @@ export class PaystackFundingFlow implements FlowDefinition, OnModuleInit {
         return { kind: 'TRANSITIONED', from: PaystackFundingState.INITIATED, to: PaystackFundingState.CHECKOUT_READY };
       } catch (error) {
         if (!(error instanceof PaystackDuplicateReferenceError)) throw error;
-        // Accepted before, answer lost: never a second transaction. Read it back.
         existing = await this.paystack.verify(flow.id, context);
         if (!existing) {
           throw new ProviderUnavailableError('Paystack reports a duplicate reference that verify cannot see yet', 'verify');
@@ -153,7 +140,7 @@ export class PaystackFundingFlow implements FlowDefinition, OnModuleInit {
       }
     }
     await runtime.checkpoint(FlowCheckpoint.AFTER_EXTERNAL_CALL);
-    // The checkout URL is never returned again (PAYSTACK_PLAN.md A10): only a payment that already happened can save it.
+
     if (existing.reference !== flow.id) {
       throw new ProviderPaymentMismatchError('Paystack answered verify with another reference.', { flowId: flow.id });
     }
@@ -168,7 +155,7 @@ export class PaystackFundingFlow implements FlowDefinition, OnModuleInit {
     });
   }
 
-  // ── CHECKOUT_READY ─────────────────────────────────────────────────────────
+  // ── CHECKOUT_READY ──
 
   private async confirmPayment(flow: ClaimedFlow, payment: FundingPayment, runtime: FlowStepRuntime): Promise<StepOutcome> {
     const checkout = payment.checkout;
@@ -216,7 +203,7 @@ export class PaystackFundingFlow implements FlowDefinition, OnModuleInit {
     };
   }
 
-  /** Paid at Paystack: credit when every field matches ours, else HOLD (no credit, a reconciliation break). */
+  /** Paid at Paystack. only credit when every field matches ours, else HOLD */
   private async settlePaid(
     flow: ClaimedFlow,
     payment: FundingPayment,
@@ -229,7 +216,6 @@ export class PaystackFundingFlow implements FlowDefinition, OnModuleInit {
     const paidAt = transaction.paidAt as Date;
     assertPaystackTransition(from, PaystackFundingState.POSTED);
     await runtime.commit(from, { to: PaystackFundingState.POSTED, complete: true }, async (manager) => {
-      // Under the flow lock: the facts we rely on are checked again, right before money moves.
       const recheck = creditProblems(transaction, payment, flow.id);
       if (recheck.length > 0) {
         throw new ProviderPaymentMismatchError('A Paystack credit no longer matches the funding.', { flowId: flow.id, mismatched: recheck });
@@ -292,7 +278,7 @@ export class PaystackFundingFlow implements FlowDefinition, OnModuleInit {
     return { kind: 'TRANSITIONED', from, to: PaystackFundingState.HELD };
   }
 
-  // ── POSTED / SETTLED ───────────────────────────────────────────────────────
+  // ── POSTED / SETTLED ──
 
   private async checkForLostDispute(
     flow: ClaimedFlow,
@@ -305,7 +291,7 @@ export class PaystackFundingFlow implements FlowDefinition, OnModuleInit {
     if (!transactionId || !fundingTransactionId) {
       throw new InvariantViolationError('A posted Paystack funding has no transaction ids.', { flowId: flow.id });
     }
-    // Already booked by an approved partial-chargeback CORRECTION (Phase 10): nothing left for the flow.
+  
     if (payment.chargebackTransactionId) return { kind: 'IDLE', state };
     const lost = await this.findLostDispute(flow, payment, transactionId);
     await runtime.checkpoint(FlowCheckpoint.AFTER_EXTERNAL_CALL);
@@ -344,7 +330,6 @@ export class PaystackFundingFlow implements FlowDefinition, OnModuleInit {
     return { kind: 'TRANSITIONED', from: state, to: PaystackFundingState.REVERSED };
   }
 
-  /** A dispute on this transaction resolved against us (`resolved` + `merchant-accepted`; PAYSTACK_PLAN.md A14). */
   private async findLostDispute(flow: ClaimedFlow, payment: FundingPayment, transactionId: string): Promise<PaystackDispute | null> {
     const from = new Date((payment.createdAt ?? flow.stateChangedAt).getTime() - 24 * 3600 * 1000);
     const to = new Date(this.clock.now().getTime() + 24 * 3600 * 1000);
@@ -361,7 +346,7 @@ export class PaystackFundingFlow implements FlowDefinition, OnModuleInit {
     throw new ProviderUnavailableError('Paystack dispute list did not end', 'list-disputes');
   }
 
-  // ── shared ─────────────────────────────────────────────────────────────────
+  // ── shared ──
 
   private async fail(
     flow: ClaimedFlow,

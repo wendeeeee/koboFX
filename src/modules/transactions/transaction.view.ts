@@ -3,17 +3,7 @@ import { dec } from '../../common/money';
 import { displayRate } from '../fx/pricing';
 import { HistoryInitiator, HistoryStatus, initiatorOf, statusOfTransaction, statusOfUnpostedFunding } from './history-status';
 
-/**
- * History on the wire (design §7.8, Phase 8 decisions). "No invented data": every figure is a
- * stored one — amounts are the ledger entries' minor units as strings, rates the stored display
- * and reference rates formatted by `displayRate()` (never recomputed from a current rate).
- *
- * Hidden, always: internal legs (FX_POSITION, REVENUE, PSP_RECEIVABLE, EXPENSE — the position's
- * target leg is the mid value, and mid value − credit is our revenue), `metadata`,
- * `external_reference`, the initiator's identity.
- */
 
-/** One of the USER's own legs. `direction` is the ledger's, which on a user (liability) account reads like a bank statement: DEBIT = out. */
 export interface LegView {
   readonly currency: string;
   readonly minorUnit: number;
@@ -21,7 +11,7 @@ export interface LegView {
   readonly amount: string;
 }
 
-/** On the detail only: the account's balance after this booking (in booking order, not value order). */
+
 export interface DetailLegView extends LegView {
   readonly balanceAfter: string;
 }
@@ -32,25 +22,18 @@ export interface AmountView {
   readonly amount: string;
 }
 
-/**
- * A correction link. `{ internal: true }` when the other end is one of our internal transactions (a
- * settlement a CORRECTION reattributed money from, Phase 10): the user learns that, never its content.
- */
 export type LinkView = { readonly reference: string; readonly type: string } | { readonly internal: true };
 
 export interface ListRateView {
-  /** The effective client rate, derived from the two amounts at posting (display only; the amounts are authoritative). */
+
   readonly rateDisplay: string;
-  /** The quote a trade executed; null for a market conversion. */
   readonly quoteId: string | null;
 }
 
 export interface DetailRateView extends ListRateView {
-  /** The reference mid priced off (target per source), as a display string. */
   readonly referenceRate: string;
   readonly spreadBasisPoints: number;
   readonly provider: string;
-  /** The provider's publication time of the rate. */
   readonly asOf: string;
   readonly fetchedAt: string;
   readonly snapshotId: string;
@@ -61,9 +44,7 @@ export interface TransactionListItemView {
   readonly type: string;
   readonly status: HistoryStatus;
   readonly reasonCode: string | null;
-  /** The user's own legs; empty for a funding that never posted (nothing moved). */
   readonly legs: readonly LegView[];
-  /** What a funding that never posted asked for; null once money moved (see `legs`). */
   readonly requested: AmountView | null;
   readonly rate: ListRateView | null;
   readonly failureCode: string | null;
@@ -82,7 +63,6 @@ export interface TransactionDetailView extends Omit<TransactionListItemView, 'le
 
 export type HistorySource = 'TRANSACTION' | 'FUNDING';
 
-/** A leg as the repository's JSON aggregate returns it. */
 export interface LegRow {
   readonly currency: string;
   readonly minorUnit: number;
@@ -91,14 +71,12 @@ export interface LegRow {
   readonly balanceAfter: string;
 }
 
-/** One history row, as `TransactionHistoryRepository` selects it (snake_case, raw from `pg`). */
 export interface HistoryRow {
   readonly source: HistorySource;
   readonly id: string;
   readonly position_microseconds: string;
   readonly reference: string;
   readonly type: string;
-  /** `transactions.status`, or the funding flow's state for an unposted funding. */
   readonly status: string;
   readonly reason_code: string | null;
   readonly initiated_by: string;
@@ -114,7 +92,6 @@ export interface HistoryRow {
   readonly rate_snapshot_id: string | null;
   readonly spread_basis_points: number | null;
   readonly quote_id: string | null;
-  /** The raw link ids: a link whose row the caller-scoped join did not return is a broken assumption. */
   readonly corrects_transaction_id: string | null;
   readonly corrected_by_transaction_id: string | null;
   readonly corrects_reference: string | null;
@@ -125,16 +102,13 @@ export interface HistoryRow {
   readonly requested_currency: string | null;
   readonly requested_minor_unit: number | null;
   readonly requested_amount: string | null;
-  /** The corrected original is an internal transaction (`user_id` NULL). */
   readonly corrects_internal?: boolean;
-  // Admin view only (`HistoryScope.view = 'ADMIN'`).
   readonly metadata?: Record<string, unknown> | null;
   readonly external_reference?: string | null;
   readonly correction_subject?: string | null;
   readonly all_legs?: readonly AdminLegRow[] | null;
 }
 
-/** Every leg of a transaction, as the admin view's aggregate returns it. */
 export interface AdminLegRow extends LegRow {
   readonly accountCode: string;
   readonly bucket: number;
@@ -147,10 +121,7 @@ export interface AdminLegView extends DetailLegView {
   readonly owner: 'USER' | 'INTERNAL';
 }
 
-/**
- * The admin history item (Phase 10 plan §E.9): the detail view plus the internal legs, `metadata`,
- * `external_reference`, the initiator's identity and the correction subject. User ids only — never an email.
- */
+
 export interface AdminTransactionView extends Omit<TransactionDetailView, 'legs'> {
   readonly legs: readonly AdminLegView[];
   readonly initiatedByIdentity: string;
@@ -240,7 +211,7 @@ function requestedOf(row: HistoryRow): AmountView {
   return { currency: row.requested_currency, minorUnit: row.requested_minor_unit, amount: row.requested_amount };
 }
 
-/** A conversion's rate, from its stored provenance (the CHECK guarantees every field is present). */
+
 function rateOf(row: HistoryRow): DetailRateView | null {
   if (row.rate_display === null) return null;
   if (
@@ -261,10 +232,6 @@ function rateOf(row: HistoryRow): DetailRateView | null {
   };
 }
 
-/**
- * Both ends of a correction belong to the same user (a reversal copies the original's `user_id`) — or the
- * original is internal (Phase 10). Anything else is a broken assumption: fail loudly, never "no link".
- */
 function linkOf(transactionId: string | null, reference: string | null, type: string | null, internal: boolean): LinkView | null {
   if (transactionId === null) return null;
   if ((reference === null || type === null) && internal) return { internal: true };

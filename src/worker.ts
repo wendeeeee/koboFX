@@ -1,5 +1,5 @@
 import 'reflect-metadata';
-import 'dotenv/config';
+import * as dotenv from 'dotenv';
 import { NestFactory } from '@nestjs/core';
 import { Logger } from 'nestjs-pino';
 import { ConfigValidationError } from './config/configuration';
@@ -11,6 +11,7 @@ import { ReconciliationScheduler } from './modules/reconciliation/reconciliation
 import { ReservationSweeper } from './modules/reservations/reservation-sweeper';
 import { WorkerModule } from './worker.module';
 import { AdminMonitor } from './modules/admin/break-glass/admin-monitor';
+dotenv.config()
 
 async function bootstrap(): Promise<void> {
   const worker = await NestFactory.createApplicationContext(WorkerModule.forRoot(), { bufferLogs: true });
@@ -19,8 +20,6 @@ async function bootstrap(): Promise<void> {
   for (const loop of loops) loop.start();
 
   const shutdown = async () => {
-    // Each loop finishes its in-flight batch. Anything interrupted anyway (a hard kill)
-    // is picked up after its lease lapses: every step and handler is idempotent.
     await Promise.all(loops.map((loop) => loop.stop()));
     await worker.close();
     process.exit(0);

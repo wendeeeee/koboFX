@@ -116,11 +116,10 @@ describe('FxRateService: the read path', () => {
     expect((await service.current())!.source).toBe('REDIS');
     state.redis = snapshot('second');
     const served = await service.current();
-    expect(served).toMatchObject({ source: 'MEMORY', snapshot: { id: 'first' } }); // within the bound
+    expect(served).toMatchObject({ source: 'MEMORY', snapshot: { id: 'first' } });
     await sleep(90);
     expect(await service.current()).toMatchObject({ source: 'REDIS', snapshot: { id: 'second' } });
     expect(calls.redisReads).toBe(2);
-    // With Redis down, the copy bounds database reads to one per interval.
     state.redis = new DependencyUnavailableError('down');
     state.database = snapshot('db');
     await sleep(90);
@@ -194,7 +193,7 @@ describe('FxRateService: display, execution and the catch-up', () => {
     const prepared = await service.prepareExecutable();
     expect(prepared!.freshness.tier).toBe(RateTier.EXECUTABLE);
     expect(service.requireExecutable(prepared).freshness.tier).toBe(RateTier.EXECUTABLE);
-    clock.current = at(361); // aged out between preparation and use
+    clock.current = at(361);
     expect(() => service.requireExecutable(prepared)).toThrow(
       expect.objectContaining({ code: ErrorCode.FX_RATE_STALE, retryAfterSeconds: 30, details: expect.objectContaining({ rateAgeSeconds: 421 }) }),
     );

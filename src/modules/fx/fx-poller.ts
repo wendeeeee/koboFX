@@ -15,20 +15,6 @@ export type PollTickResult =
   | { readonly fetched: false; readonly reseeded: boolean }
   | { readonly fetched: true; readonly reseeded: boolean; readonly outcome: FetchOutcome };
 
-/**
- * The worker's FX poller (design §7.4, §14 `fx-poller.ts`; Phase 6 §5.3). Every
- * `FX_POLL_INTERVAL_MILLISECONDS` it:
- *
- * 1. re-seeds Redis from the latest ACCEPTED database snapshot when Redis is empty,
- *    flushed or older (request handlers never write the cache);
- * 2. asks the pure schedule whether a new publication can exist yet (just after the
- *    provider's announced `time_next_update`, with jitter; the late-provider retry), and
- *    only then fetches — through the fetcher's lock, breaker and budget, so two workers
- *    running at once still make one call and never interleave a snapshot.
- *
- * Quota-aware by construction: the schedule never fetches faster than the provider
- * publishes, and the budget caps every attempt.
- */
 @Injectable()
 export class FxPoller {
   private readonly logger = new Logger(FxPoller.name);
@@ -70,7 +56,6 @@ export class FxPoller {
     return { fetched: true, reseeded, outcome };
   }
 
-  /** Put the latest accepted snapshot back into Redis if Redis lost it or holds an older one. */
   private async reseedCache(): Promise<boolean> {
     const latest = await this.snapshots.latestServable(this.config.fx.providerName);
     if (!latest) return false;

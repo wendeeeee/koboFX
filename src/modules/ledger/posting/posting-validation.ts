@@ -91,13 +91,7 @@ function validateConversion(conversion: ConversionProvenance, request: PostingRe
   if (sourceDebits !== conversion.sourceAmountMinor) fail('the source amount must equal the source-currency debits.');
 }
 
-/**
- * Everything about a posting that can be checked without the database (design §6.1,
- * "at runtime"). Runs BEFORE any write, so a rejected posting leaves no trace.
- *
- * The balance rule is per currency, never global: an NGN debit of 100 and a USD
- * credit of 100 is unbalanced, because they are different units (design §5.6).
- */
+
 export function validatePostingRequest(request: PostingRequest): void {
   const { transaction, entries } = request;
 

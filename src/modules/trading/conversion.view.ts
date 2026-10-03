@@ -1,19 +1,13 @@
 import { Dec } from '../../common/money';
 import { PricedCurrency, QuoteAmountMode, displayRate } from '../fx/pricing';
 
-/** One leg of a conversion on the wire: a string of minor units, with the currency's scale. */
 export interface ConversionLegView {
   readonly currency: string;
   readonly minorUnit: number;
   readonly amount: string;
 }
 
-/**
- * `201` body of `POST /wallet/convert` and `POST /wallet/trade`. Stored by the idempotency
- * barrier and replayed byte for byte, even after the rate moves. Amounts are authoritative
- * (minor-unit strings); rates are display strings (12 significant digits). Revenue and mid
- * value stay internal, as on quotes.
- */
+
 export interface ConversionView {
   readonly transactionId: string;
   readonly reference: string;

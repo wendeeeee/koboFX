@@ -11,27 +11,17 @@ import { configureSwagger } from './openapi/swagger.setup';
 
 export const API_PREFIX = 'api/v1';
 
-/** Body cap (design §9.1). */
 export const BODY_LIMIT = '100kb';
 
-/** The one route that needs the verbatim request bytes (design §7.3: HMAC over the raw body). */
 export const PSP_WEBHOOK_PATH = `/${API_PREFIX}/webhooks/psp`;
-/** Paystack's webhook: HMAC-SHA512 over the raw body (PAYSTACK_PLAN.md A6). Mounted always; the route exists only when enabled. */
 export const PAYSTACK_WEBHOOK_PATH = `/${API_PREFIX}/webhooks/paystack`;
 
-/**
- * HTTP pipeline shared by `main.ts` and the e2e harness, so tests exercise the real
- * one. The app must be created with `{ bodyParser: false }`.
- */
+
 export function configureApp(app: NestExpressApplication): void {
-  // First: everything downstream runs inside the request's correlation context.
   app.use(correlationIdMiddleware);
   app.useLogger(app.get(Logger));
   app.use(helmet());
-  // `req.ip` — the rate limiter's key — honours X-Forwarded-For only through our own proxies.
   app.set('trust proxy', app.get<AppConfig>(APP_CONFIG).trustProxyHops);
-  // The webhook's bytes are read raw (a Buffer, same cap) BEFORE the JSON parser, which
-  // then skips the already-consumed stream. Every other route parses JSON exactly as before.
   app.use(PSP_WEBHOOK_PATH, raw({ type: () => true, limit: BODY_LIMIT }));
   app.use(PAYSTACK_WEBHOOK_PATH, raw({ type: () => true, limit: BODY_LIMIT }));
   app.useBodyParser('json', { limit: BODY_LIMIT });
@@ -41,6 +31,5 @@ export function configureApp(app: NestExpressApplication): void {
   );
   app.useGlobalFilters(new AllExceptionsFilter());
   app.enableShutdownHooks();
-  // The OpenAPI contract (Phase 11): docs UI + JSON under the prefix, when enabled. Documents, never changes, the API.
   configureSwagger(app, API_PREFIX);
 }

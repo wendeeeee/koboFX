@@ -12,11 +12,6 @@ import { RatesView, ratesView } from './fx-rates.view';
 import { QuoteService, QuoteView } from './quote.service';
 import { PreparedRateSnapshot, RateSnapshotGuard } from './rate-snapshot.guard';
 
-/**
- * FX (design §12). `GET /fx/rates` needs a session but not a verified one (§12: "✔");
- * quotes need a verified user (the global guard chain). Serving either costs no provider
- * call: rates come from the cache or the database snapshot.
- */
 @ApiTags('fx')
 @Controller('fx')
 export class FxController {
@@ -42,7 +37,6 @@ export class FxController {
     return ratesView(served, await this.pairs.active());
   }
 
-  /** 30s, single-use, directional; behind the idempotency barrier. The rate is prepared before it. */
   @Post('quotes')
   @UseGuards(RateSnapshotGuard)
   @Idempotent()

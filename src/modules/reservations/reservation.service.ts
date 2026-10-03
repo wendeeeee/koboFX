@@ -41,19 +41,11 @@ const columns = (source: string) => `
   ${source}.resolved_at, accounts.currency_code`;
 
 /**
- * Funds reservation — hold, settle, release, expire (design §6.3).
+ * Funds reservation — hold, settle, release, expire .
  *
  * Every operation runs in ONE transaction (the ambient UnitOfWork, or its own) and
  * takes its locks in the global order:
- *   user accounts `FOR UPDATE ORDER BY id` → the reservation row `FOR UPDATE`
- *   → (inside `post()`) internal accounts.
- * `reserved_minor` is written ONLY here, always under the account's row lock and in
- * the same transaction as the reservation row change, so `reserved = Σ ACTIVE` holds
- * at every commit. Balances are never touched here; settlement moves money through
- * `LedgerService.post()`, the one write path.
- *
- * Transitions are decided from the state read under lock (`transitions.ts`), so every
- * operation is idempotent even out of order (design §6.5).
+ .
  */
 @Injectable()
 export class ReservationService {
@@ -65,18 +57,7 @@ export class ReservationService {
     private readonly metrics: ReservationMetrics,
   ) {}
 
-  /**
-   * Hold `amount` of the account's AVAILABLE balance for `flowId`. Linearizable: the
-   * check and the hold happen under the account's row lock, the same lock a posting
-   * takes (design §6.3 property 1).
-   *
-   * Idempotent: a reservation for the same (flow, account) is returned as it is, in
-   * whatever state — never a second hold (handbook: "keep putting the funds on hold
-   * idempotent even if they were already released"). The original `expiresAt` stands.
-   * The same (flow, account) with a different amount is `RESERVATION_CONFLICT`.
-   *
-   * Refused holds raise `INSUFFICIENT_FUNDS` or `FUNDS_RESERVED` and write nothing.
-   */
+ 
   async reserve(request: ReserveRequest): Promise<Reservation> {
     if (!request.amount.isPositive()) {
       throw new InvalidReservationError('A reservation amount must be positive.', {
@@ -133,28 +114,7 @@ export class ReservationService {
     });
   }
 
-  /**
-   * Post the ACTUAL amount through `LedgerService.post()`, record it, and give back
-   * the whole hold — in one transaction. The actual is the posting's net reduction of
-   * the reserved account: less than the estimate releases the remainder; more is booked
-   * as an overdraft, never refused (design §16, "Settlement exceeds reservation").
-   *
-   * The posting is `SYSTEM_DRIVEN`: the spend was authorized when it was reserved.
-   * Because that skips the gate, the posting may not reduce any other user account.
-   *
-   * By state, under lock:
-   * - ACTIVE → SETTLED: release the hold, post.
-   * - EXPIRED → SETTLED: a late settlement. The hold is already gone; post. Logged.
-   * - SETTLED: a retry. Same actual ⇒ the original settlement, nothing posted;
-   *   a different actual ⇒ `RESERVATION_CONFLICT`.
-   * - RELEASED: `RESERVATION_NOT_ACTIVE`. If money moved anyway, that is a
-   *   compensating system-driven posting, not a settlement.
-   *
-   * Lock order: every user account the posting touches, plus the reserved one, in ONE
-   * batch; then the reservation row. When this joins a unit that already locked some
-   * of them (e.g. reserve → settle in one transaction), lock the full set up front with
-   * `LedgerService.lockUserAccounts`.
-   */
+  
   async settle(reservationId: string, posting: SettlementPosting): Promise<Reservation> {
     const transaction = posting.transaction as SettlementPosting['transaction'] & {
       authorization?: unknown;
@@ -231,11 +191,7 @@ export class ReservationService {
     });
   }
 
-  /**
-   * Give the whole hold back to available. ACTIVE → RELEASED; in any other state the
-   * goal — no hold remains — already holds, so it succeeds as a no-op and returns the
-   * reservation unchanged (design §6.5, out-of-order retries).
-   */
+
   async release(reservationId: string): Promise<Reservation> {
     return this.unitOfWork.run(async (manager) => {
       const accountId = await this.findAccountId(manager, reservationId);
@@ -256,16 +212,7 @@ export class ReservationService {
     });
   }
 
-  /**
-   * The safety net beneath each flow's own resolution (design §6.3 property 3): expire
-   * up to `batchSize` ACTIVE reservations whose `expires_at <= now`, giving their holds
-   * back. `now` is a parameter so the clock is controllable.
-   *
-   * It never blocks and never double-processes: accounts and reservations are taken
-   * `FOR UPDATE SKIP LOCKED`. An account busy with a settle, release or another
-   * sweeper is simply left for the next run, and every row is re-checked under lock.
-   * Locks still follow the global order (accounts, then reservations).
-   */
+
   async expireDue(now: Date, batchSize: number): Promise<ExpiryResult> {
     if (!Number.isInteger(batchSize) || batchSize <= 0) {
       throw new InvalidReservationError('batchSize must be a positive integer.', { batchSize });
@@ -360,7 +307,6 @@ export class ReservationService {
     return row ? toReservation(row) : null;
   }
 
-  /** The reservation's account, read WITHOUT a lock — `account_id` is immutable, so it cannot go stale. */
   private async findAccountId(manager: EntityManager, reservationId: string): Promise<string> {
     const [row] = (await manager.query(`SELECT account_id FROM reservations WHERE id = $1`, [reservationId])) as {
       account_id: string;
@@ -369,7 +315,6 @@ export class ReservationService {
     return row.account_id;
   }
 
-  /** Level 3 of the lock order. Callers hold the reservation's account lock already. */
   private async lockReservation(manager: EntityManager, reservationId: string): Promise<Reservation> {
     const [row] = (await manager.query(
       `SELECT ${columns('reservations')} FROM reservations JOIN accounts ON accounts.id = reservations.account_id
@@ -381,7 +326,6 @@ export class ReservationService {
     return toReservation(row);
   }
 
-  /** The only write to `reserved_minor`. The caller holds the account's row lock. */
   private async adjustReserved(manager: EntityManager, accountId: string, deltaMinor: bigint): Promise<void> {
     const rows = (await manager.query(
       `WITH updated AS (

@@ -2,11 +2,6 @@ import { ApiSchema, ApiProperty } from '@nestjs/swagger';
 import { IsString, Matches, MaxLength } from 'class-validator';
 import { ApiCurrency, ApiMinorUnits, MINOR_UNITS_PATTERN_18 } from '../../../../openapi/properties';
 
-/**
- * `POST /wallet/fund` (design §12). The amount is a string of minor units (never a JSON
- * number). The client never sends card data: it sends a single-use token obtained
- * from the PSP's client SDK, so card numbers never reach this API (no PCI scope).
- */
 @ApiSchema({ name: 'FundWalletRequest' })
 export class FundWalletDto {
   @ApiMinorUnits('How much to fund. Within the currency\'s funding limits (default NGN ₦100 – ₦1,000,000).', '150000', MINOR_UNITS_PATTERN_18, { maxLength: 19 })

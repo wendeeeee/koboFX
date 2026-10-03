@@ -13,7 +13,6 @@ export enum ReconciliationRunStatus {
 export interface ReconciliationRun {
   readonly id: string;
   readonly kind: ReconciliationRunKind;
-  /** Null: the configured simulated PSP (and INTERNAL). Otherwise the provider an external run reconciles. */
   readonly provider: string | null;
   readonly periodKey: string;
   readonly status: ReconciliationRunStatus;
@@ -24,7 +23,6 @@ export interface ReconciliationRun {
   readonly lastError: string | null;
 }
 
-/** A run this worker holds the lease on; `leaseToken` fences every write that finishes it. */
 export interface ClaimedRun extends ReconciliationRun {
   readonly leaseToken: string;
 }
@@ -63,14 +61,7 @@ function toRun(row: RunRow): ReconciliationRun {
   };
 }
 
-/**
- * `reconciliation_runs`: one run per `(kind, period)`, claimed like a flow.
- *
- * - `claim` inserts the run (`ON CONFLICT DO NOTHING`); if it already exists, RUNNING, and its
- *   lease has lapsed (a dead worker), the claim takes it over — the run is RESUMED, and every
- *   step it re-runs is idempotent. Two workers never both hold one run.
- * - `finish` and `release` are fenced by the lease token.
- */
+
 @Injectable()
 export class ReconciliationRunRepository {
   constructor(private readonly unitOfWork: UnitOfWork) {}
@@ -104,7 +95,6 @@ export class ReconciliationRunRepository {
     return resumed ? { ...toRun(resumed), leaseToken: resumed.lease_token as string } : null;
   }
 
-  /** Periods left RUNNING by a dead worker (lease lapsed), oldest first: resumed before new work. */
   async abandonedPeriods(kind: ReconciliationRunKind, provider: string | null = null): Promise<string[]> {
     const rows = (await this.unitOfWork.manager.query(
       `SELECT period_key FROM reconciliation_runs
@@ -115,7 +105,6 @@ export class ReconciliationRunRepository {
     return rows.map((row) => row.period_key);
   }
 
-  /** Keep the lease while a long run works (fenced). */
   async heartbeat(run: ClaimedRun, leaseSeconds: number): Promise<void> {
     const rows = (await this.unitOfWork.manager.query(
       `WITH updated AS (
@@ -128,7 +117,6 @@ export class ReconciliationRunRepository {
     if (rows.length !== 1) throw new ReconciliationRunLeaseLostError(run.id);
   }
 
-  /** Finish the run (fenced, in the ambient transaction when there is one). */
   async finish(
     run: ClaimedRun,
     status: ReconciliationRunStatus.CLEAN | ReconciliationRunStatus.BREAKS_FOUND,
@@ -148,7 +136,6 @@ export class ReconciliationRunRepository {
     if (rows.length !== 1) throw new ReconciliationRunLeaseLostError(run.id);
   }
 
-  /** Give the lease back after a failure; the run stays RUNNING and is resumed on a later tick. */
   async release(run: ClaimedRun, error: string): Promise<void> {
     await this.unitOfWork.manager.query(
       `UPDATE reconciliation_runs SET leased_until = NULL, lease_token = NULL, last_error = $3
@@ -157,7 +144,6 @@ export class ReconciliationRunRepository {
     );
   }
 
-  /** A period nobody ran, recorded so the gap is explicit (never "clean"). */
   async recordMissed(kind: ReconciliationRunKind, periodKey: string, provider: string | null = null): Promise<void> {
     await this.unitOfWork.manager.query(
       `INSERT INTO reconciliation_runs (kind, period_key, status, finished_at, summary, provider)
@@ -167,7 +153,6 @@ export class ReconciliationRunRepository {
     );
   }
 
-  /** The latest period of this kind that has a row (run, running or missed). */
   async latestPeriod(kind: ReconciliationRunKind, provider: string | null = null): Promise<string | null> {
     const [row] = (await this.unitOfWork.manager.query(
       `SELECT period_key FROM reconciliation_runs WHERE kind = $1 AND provider IS NOT DISTINCT FROM $2 ORDER BY period_key DESC LIMIT 1`,

@@ -25,15 +25,9 @@ import {
   sameHeader,
 } from './psp-settlement-responses';
 
-/** A report with more line pages than this is refused rather than read forever. */
 const MAXIMUM_LINE_PAGES = 10_000;
 
-/**
- * The adapter for the simulated PSP (`src/mock-psp/`) — a real HTTP API, so the
- * adapter really sees timeouts, 5xx, `200`s carrying errors and malformed bodies
- * (design §15 item 5: "funding is simulated behind a real port"). A real provider
- * would be another adapter behind the same port.
- */
+
 export class SimulatedPspAdapter extends PaymentProvider {
   constructor(
     readonly name: string,
@@ -149,11 +143,7 @@ export class SimulatedPspAdapter extends PaymentProvider {
     return parseSettlementSummaryPage(response.body, 'list-settlements');
   }
 
-  /**
-   * Read every line page of one report. Each page's raw text is recorded (the evidence); the
-   * header must read identically on every page, or the report changed while we read it and
-   * the read fails (retried later) rather than mixing two versions.
-   */
+  
   async getSettlementBatch(batchId: string): Promise<ProviderSettlementBatch> {
     const operation = 'get-settlement';
     let header: SettlementBatchHeader | undefined;

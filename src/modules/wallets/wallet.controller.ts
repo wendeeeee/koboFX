@@ -9,10 +9,7 @@ import { FundingAccepted, FundingService, FundingView } from '../flows/funding/f
 import { WalletBalance, WalletBalancesService } from './wallet-balances.service';
 import { FundingAcceptedDocument, FundingDocument, WalletDocument } from './wallet.responses';
 
-/**
- * The wallet (design §12). Every query is scoped by the authenticated caller's id in its
- * WHERE clause; ids from the path only ever narrow within the caller's own data.
- */
+
 @ApiTags('wallet')
 @Controller('wallet')
 export class WalletController {
@@ -21,7 +18,6 @@ export class WalletController {
     private readonly funding: FundingService,
   ) {}
 
-  /** Total, reserved and available per currency, as strings of minor units. */
   @Get()
   @ApiOperation({ summary: 'My balances', description: 'Total, reserved and available per currency, as strings of minor units (design §12).' })
   @ApiOkResponse({ type: WalletDocument })
@@ -29,7 +25,6 @@ export class WalletController {
     return { balances: await this.balances.balancesOf(user.id) };
   }
 
-  /** Starts a funding flow; `202 PENDING`. The PSP is called by the worker, after this commits. */
   @Post('fund')
   @HttpCode(HttpStatus.ACCEPTED)
   @Idempotent({ flowIdField: 'fundingId' })

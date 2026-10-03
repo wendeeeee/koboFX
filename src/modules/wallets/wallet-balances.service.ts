@@ -1,7 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { UnitOfWork } from '../../database/transaction/unit-of-work';
 
-/** One currency of a wallet (design §12: total, reserved and available). Strings of minor units. */
 export interface WalletBalance {
   readonly currency: string;
   readonly minorUnit: number;
@@ -10,16 +9,11 @@ export interface WalletBalance {
   readonly available: string;
 }
 
-/**
- * The `GET /wallet` read model. Read-only: balances come from the ledger's cached
- * `balance_minor` / `reserved_minor` (both maintained under row locks), and
- * `available = total − reserved` is computed in SQL on BIGINTs — never a JS number.
- */
+
 @Injectable()
 export class WalletBalancesService {
   constructor(private readonly unitOfWork: UnitOfWork) {}
 
-  /** Scoped by the caller in the WHERE clause. */
   async balancesOf(userId: string): Promise<WalletBalance[]> {
     const rows = (await this.unitOfWork.manager.query(
       `SELECT accounts.currency_code, currencies.minor_unit,

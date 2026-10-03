@@ -1,28 +1,6 @@
 import { Dec, MoneyDecimal } from '../../common/money';
 import { ParsedRates } from './providers/exchange-rate-api.responses';
 
-/**
- * Sanity checks on a fetched snapshot (design §7.4, Phase 6 decision §5.5). With one
- * provider there is no cross-check, so plausibility and history are the only defences
- * (accepted risk, recorded: §16's "providers disagree" row no longer applies).
- *
- * The whole fetch is rejected if any rule fails — a response with one broken rate is
- * evidence that the response is broken. A rejected fetch is stored as a REJECTED snapshot
- * and alerted, never served; the last accepted snapshot keeps ageing honestly.
- *
- * - base must be USD and USD must be exactly 1;
- * - every ACTIVE currency present, a number, > 0 and inside its configured bounds (loose,
- *   order-of-magnitude; required for every active currency);
- * - the provider's publication time is not in the future (60s skew) and not older than
- *   the last accepted one (time never runs backwards); its announced next publication is
- *   after it and within two cadences (a garbage "next" would keep a rate current forever);
- * - no active currency moved more than the jump threshold (global, or a per-currency
- *   override) from the last ACCEPTED snapshot. The first fetch has no history: bounds only.
- *   A genuine move beyond the threshold is NEVER auto-accepted (not even when repeated —
- *   a persistently broken provider would pass that test): the currency halts until a
- *   four-eyes RATE_OVERRIDE (Phase 10).
- * Inactive currencies are not judged ("a rate for a currency we don't use is ignored").
- */
 export interface SanityContext {
   readonly now: Date;
   readonly activeCurrencies: readonly string[];
@@ -30,15 +8,12 @@ export interface SanityContext {
   readonly maximumJumpRatio: Dec;
   readonly jumpRatioOverrides: ReadonlyMap<string, Dec>;
   readonly cadenceSeconds: number;
-  /** The last ACCEPTED snapshot, if any. */
   readonly previous?: { readonly providerUpdatedAt: Date; readonly rates: ReadonlyMap<string, Dec> };
 }
 
 export interface SanityVerdict {
   readonly accepted: boolean;
-  /** Stable reason codes, `CODE` or `CODE:CURRENCY`, stored on a REJECTED snapshot. */
   readonly reasons: readonly string[];
-  /** `|new / previous − 1|` per active currency with history (`fx_provider_deviation_ratio`). */
   readonly deviations: ReadonlyMap<string, Dec>;
 }
 

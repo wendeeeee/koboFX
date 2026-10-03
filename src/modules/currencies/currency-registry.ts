@@ -5,14 +5,7 @@ import { UnitOfWork } from '../../database/transaction/unit-of-work';
 import { CurrencyEntity } from './currency.entity';
 
 /**
- * The controlled currency set (design §4.2), loaded from the `currencies` table.
- *
- * - `require()` admits only ACTIVE currencies: the boundary check for new operations.
- * - `lookup()` also returns inactive ones: historical records in a since-deactivated
- *   currency still need their minor unit to be displayed correctly.
- *
- * Currencies change rarely and only by migration or admin action (which calls
- * `refresh()`), so the set is cached in memory.
+ * The controlled currency set loaded from the `currencies` table.
  */
 @Injectable()
 export class CurrencyRegistry implements OnApplicationBootstrap {
@@ -43,14 +36,12 @@ export class CurrencyRegistry implements OnApplicationBootstrap {
     this.byCode = next;
   }
 
-  /** An active currency, or `400 UNSUPPORTED_CURRENCY`. Use at every input boundary. */
   require(code: string): Currency {
     const currency = this.lookup(code);
     if (!currency?.isActive) throw new UnsupportedCurrencyError(code);
     return currency;
   }
 
-  /** Any known currency, active or not; `undefined` if unknown. */
   lookup(code: string): Currency | undefined {
     if (typeof code !== 'string' || !CURRENCY_CODE_PATTERN.test(code)) return undefined;
     return this.byCode.get(code);

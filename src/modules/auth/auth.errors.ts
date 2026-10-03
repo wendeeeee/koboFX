@@ -1,10 +1,6 @@
 import { DomainError, ErrorCode } from '../../common/errors';
 
-/**
- * Login failed. ONE error and ONE message for an unknown email, a wrong password, an
- * unverified account and a suspended one (decision #6): distinguishing them would tell
- * an attacker which emails exist and which passwords are right.
- */
+
 export class InvalidCredentialsError extends DomainError {
   readonly code = ErrorCode.INVALID_CREDENTIALS;
   readonly httpStatus = 401;
@@ -14,7 +10,7 @@ export class InvalidCredentialsError extends DomainError {
   }
 }
 
-/** Verification failed — for every reason alike (wrong, expired, exhausted, unknown email). */
+/** Verification failed. */
 export class VerificationFailedError extends DomainError {
   readonly code = ErrorCode.VERIFICATION_FAILED;
   readonly httpStatus = 400;

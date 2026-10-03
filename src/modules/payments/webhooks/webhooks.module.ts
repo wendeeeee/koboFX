@@ -7,7 +7,6 @@ import { WebhookMetrics } from './webhook-metrics';
 import { WebhookProcessor } from './webhook-processor';
 import { WebhookResolverRegistry } from './webhook-resolvers';
 
-/** PSP webhooks (design §7.3): ingestion in the API, processing in the worker. */
 @Module({
   imports: [PaymentsModule, FlowsModule],
   controllers: [PspWebhookController],

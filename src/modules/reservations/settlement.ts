@@ -2,12 +2,7 @@ import { LedgerEntryDraft, NormalSide } from '../ledger/ledger.types';
 import { signedBalanceChange } from '../ledger/posting/sign';
 import { InvalidReservationError } from './reservation.errors';
 
-/**
- * Each user account's NET balance change in a settlement posting, judged the same way
- * the posting engine judges it (design §6.2). `userAccounts` maps each locked
- * balance-authorizing account to its normal side; entries on other accounts (internal
- * ones, by template or by id) are not user money and are ignored.
- */
+
 export function netUserAccountChanges(
   entries: readonly LedgerEntryDraft[],
   userAccounts: ReadonlyMap<string, { readonly normalSide: NormalSide }>,
@@ -24,16 +19,7 @@ export function netUserAccountChanges(
   return changes;
 }
 
-/**
- * The actual amount a settlement posting spends from the reserved account: its net
- * reduction there. Settlement is posted `SYSTEM_DRIVEN` (the spend was authorized at
- * reserve time), so the shape is checked here instead of by the gate:
- *
- * - it must reduce the reserved account by more than zero — a zero actual is a
- *   release, not a settlement;
- * - it must not reduce any OTHER user account: that spend was never reserved, and
- *   skipping the gate for it would let unauthorized money move.
- */
+
 export function settledAmountMinor(reservationAccountId: string, changes: ReadonlyMap<string, bigint>): bigint {
   const reduction = -(changes.get(reservationAccountId) ?? 0n);
   if (reduction <= 0n) {
@@ -55,13 +41,11 @@ export function settledAmountMinor(reservationAccountId: string, changes: Readon
 }
 
 export interface SettlementArithmetic {
-  /** Hold released beyond what was spent: estimate − actual when the actual is smaller. */
   readonly releasedRemainderMinor: bigint;
-  /** Spent beyond the hold: actual − estimate when larger. Booked, never refused (design §16). */
   readonly excessOverEstimateMinor: bigint;
 }
 
-/** We reserve an estimate, settle the actual, and release the remainder (design §6.3 property 2). */
+
 export function settlementArithmetic(estimateMinor: bigint, actualMinor: bigint): SettlementArithmetic {
   return {
     releasedRemainderMinor: estimateMinor > actualMinor ? estimateMinor - actualMinor : 0n,

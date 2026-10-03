@@ -27,7 +27,10 @@
     "start:mock-psp:dev": "ts-node src/mock-psp/main.ts",
     "start:mock-fx:dev": "ts-node src/mock-exchange-rate-api/main.ts",
     "start:mock-paystack:dev": "ts-node src/mock-paystack/main.ts",
-    "paystack:smoke": "ts-node scripts/smoke-paystack.ts"
+    "paystack:smoke": "ts-node scripts/smoke-paystack.ts",
+    "docs:generate": "ts-node scripts/generate-openapi.ts",
+    "start:ui": "node ui/server.mjs",
+    "test:ui": "node --test ui/tests/*.test.mjs"
   },
   "dependencies": {
     "@nestjs/common": "^11.2.6",

@@ -1,26 +1,19 @@
 import { createHash } from 'node:crypto';
 import { InvalidCursorError } from './transactions.errors';
 
-/** Which time a history is ordered (and range-filtered) by (design §7.8). */
 export enum HistorySort {
-  /** When it happened: the default, what the user and the business mean by "when". */
   VALUE_TIME = 'valueTime',
-  /** When we recorded it: support, traceability, and "never miss a row" consumers. */
   BOOKING_TIME = 'bookingTime',
 }
 
-/** The normalised query a cursor belongs to. Two queries are "the same" iff these are equal. */
 export interface HistoryQuery {
   readonly sort: HistorySort;
   readonly type: string | null;
   readonly currency: string | null;
-  /** Inclusive lower bound on the sort's time, epoch µs. */
   readonly fromMicroseconds: bigint | null;
-  /** Exclusive upper bound on the sort's time, epoch µs. */
   readonly toMicroseconds: bigint | null;
 }
 
-/** A keyset position: the last row of a page, `(time, id)` in the query's sort. */
 export interface HistoryPosition {
   readonly timeMicroseconds: bigint;
   readonly id: string;
@@ -33,7 +26,6 @@ const SORT_CODES: Readonly<Record<HistorySort, string>> = { [HistorySort.VALUE_T
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 const MICROSECONDS_PATTERN = /^(0|-?[1-9]\d{0,17})$/;
 const BASE64URL_PATTERN = /^[A-Za-z0-9_-]+$/;
-/** Postgres TIMESTAMPTZ spans 4713 BC … 294276 AD; history times are far inside ±(year 9999). */
 const MAXIMUM_ABSOLUTE_MICROSECONDS = 253_402_300_800_000_000n;
 
 interface CursorPayload {
@@ -44,11 +36,7 @@ interface CursorPayload {
   readonly f: string;
 }
 
-/**
- * A fingerprint of everything but the position: a cursor presented with another sort or other
- * filters would silently skip or repeat rows, so it is refused instead. `limit` is not part of it
- * (a client may change page size between pages).
- */
+
 export function queryFingerprint(query: HistoryQuery): string {
   const canonical = JSON.stringify([
     SORT_CODES[query.sort],
@@ -60,10 +48,6 @@ export function queryFingerprint(query: HistoryQuery): string {
   return createHash('sha256').update(canonical).digest('hex').slice(0, 16);
 }
 
-/**
- * Opaque to clients: base64url of canonical JSON `{v, s, t, i, f}`. Validated, not signed (Phase 8
- * decision 6): it only ever narrows rows already scoped to the caller in SQL.
- */
 export function encodeCursor(position: HistoryPosition, query: HistoryQuery): string {
   const payload: CursorPayload = {
     v: CURSOR_VERSION,
@@ -75,7 +59,6 @@ export function encodeCursor(position: HistoryPosition, query: HistoryQuery): st
   return Buffer.from(JSON.stringify(payload), 'utf8').toString('base64url');
 }
 
-/** The position a cursor encodes, if — and only if — it was minted for this very query. */
 export function decodeCursor(cursor: string, query: HistoryQuery): HistoryPosition {
   if (cursor.length === 0 || cursor.length > MAXIMUM_CURSOR_LENGTH) throw new InvalidCursorError('length');
   if (!BASE64URL_PATTERN.test(cursor)) throw new InvalidCursorError('encoding');

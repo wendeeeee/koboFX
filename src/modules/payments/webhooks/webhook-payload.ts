@@ -1,11 +1,6 @@
 import { z } from 'zod';
 
-/**
- * The only fields of a PSP webhook we read (design §7.3): which event (for dedupe),
- * what kind (a hint of what to expect) and which payment (to find the flow). The rest
- * — status, amount — is deliberately ignored: the authoritative state comes from the
- * PSP's API, never from the webhook.
- */
+
 const webhookSchema = z.object({
   id: z.string().min(1).max(128),
   type: z.string().min(1).max(64),
@@ -24,7 +19,6 @@ export interface WebhookHint {
   readonly reference: string | null;
 }
 
-/** Just the event id, for dedupe at ingestion. Undefined when the body is unusable. */
 export function extractProviderEventId(rawBody: Buffer): string | undefined {
   return parseWebhookHint(rawBody)?.providerEventId;
 }

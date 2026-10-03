@@ -9,17 +9,7 @@ import { ConversionReason, ConversionService } from './conversion.service';
 import { ConversionView } from './conversion.view';
 import { TradeDto } from './dto/trade.dto';
 
-/**
- * `POST /wallet/trade` — execute a quote (design §7.7). No current rate is needed: the
- * quote locked every amount, and they are posted VERBATIM, with the quote's own provenance
- * (its snapshot, provider times, spread and mid).
- *
- * The quote is consumed inside the conversion's transaction, after the user row lock, so a
- * trade that then fails (`INSUFFICIENT_FUNDS`, `FUNDS_RESERVED`, suspended, a limit) rolls
- * the consumption back: that key stores the refusal, and the quote stays usable with a new
- * key until it expires. Absent or another user's → `404 QUOTE_NOT_FOUND`; used →
- * `409 QUOTE_ALREADY_USED`; expired → `409 QUOTE_EXPIRED`.
- */
+
 @Injectable()
 export class TradeService {
   constructor(
@@ -30,7 +20,6 @@ export class TradeService {
   ) {}
 
   async trade(userId: string, request: TradeDto, idempotencyKey: string | undefined): Promise<ConversionView> {
-    // Until the quote is read, a refusal has no currencies to count under.
     const pair = { from: 'UNKNOWN', to: 'UNKNOWN' };
     return this.conversions.execute(userId, idempotencyKey, pair, async () => {
       const quote = await this.quotes.consume(request.quoteId, userId);
@@ -62,11 +51,7 @@ export class TradeService {
     });
   }
 
-  /**
-   * Don't trust even our own row: the quote's four amounts must be exactly what pricing
-   * gives from the quote's own USD mids, spread, mode and stated amount. A mismatch is our
-   * bug (or tampering) — `INVARIANT_VIOLATION`, nothing posted, the quote left unconsumed.
-   */
+
   private assertQuoteReproduces(quote: Quote): void {
     const source = this.currencies.require(quote.sourceCurrency);
     const target = this.currencies.require(quote.targetCurrency);

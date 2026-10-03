@@ -24,17 +24,12 @@ import { ConversionState, assertConversionTransition } from './conversion-transi
 import { ConversionView, conversionView } from './conversion.view';
 import { TradingMetrics } from './trading-metrics';
 
-/** Why a conversion was booked (`transactions.reason_code`). */
 export enum ConversionReason {
   MARKET_CONVERSION = 'MARKET_CONVERSION',
   QUOTED_TRADE = 'QUOTED_TRADE',
 }
 
-/**
- * Everything the primitive posts, already priced: by `convert` from the prepared snapshot,
- * or by `trade` verbatim from the consumed quote. The provenance is what it was priced off
- * — for a trade, the QUOTE's snapshot and times, never the current one.
- */
+
 export interface ConversionOrder {
   readonly source: PricedCurrency;
   readonly target: PricedCurrency;
@@ -51,28 +46,10 @@ export interface ConversionOrder {
   readonly reason: ConversionReason;
 }
 
-/**
- * The hold only has to outlive this transaction (it is settled before commit); the expiry
- * is the design's safety net (§6.3 property 3), never reached in practice.
- */
+
 const RESERVATION_SAFETY_NET_MILLISECONDS = 5 * 60_000;
 
-/**
- * THE conversion primitive shared by `/wallet/convert` and `/wallet/trade` (design §7.7).
- * Database-only: it runs inside the idempotency barrier's transaction (or its own), and the
- * rate was prepared before the barrier.
- *
- * Lock order (extends the global order): user row `FOR SHARE` → [quote row, taken by the
- * trade's `loadOrder`] → the new flow row → user accounts ascending, in ONE batch →
- * reservation row → internal accounts by blind UPDATE (inside `post()`).
- *
- * Steps: suspension check → load the order → per-conversion maximum, display rate and
- * amount invariants (pure) → open the target account if absent → lock both user accounts
- * → rolling 24-hour limit → flow `CONVERSION/INITIATED` → reserve the source (the gate:
- * `INSUFFICIENT_FUNDS` / `FUNDS_RESERVED`) → settle with the §5.6 entries (posted inside,
- * with full provenance) → flow `POSTED` → outbox `ConversionPosted.v1` + audit → response.
- * Any failure rolls the whole unit back: a failed trade leaves its quote unconsumed.
- */
+
 @Injectable()
 export class ConversionService {
   private readonly logger = new Logger(ConversionService.name);
@@ -90,11 +67,7 @@ export class ConversionService {
     @Inject(APP_CONFIG) private readonly config: AppConfig,
   ) {}
 
-  /**
-   * `loadOrder` runs after the user row is locked and before any account lock — where the
-   * trade consumes its quote. `pair` labels the metric when the conversion is refused; it is
-   * read only then, so `loadOrder` may fill it in (a trade learns its pair from the quote).
-   */
+ 
   async execute(
     userId: string,
     idempotencyKey: string | undefined,
@@ -128,9 +101,7 @@ export class ConversionService {
 
     const [wallet] = (await manager.query(`SELECT id FROM wallets WHERE user_id = $1`, [userId])) as { id: string }[];
     if (!wallet) throw new InvariantViolationError('An active user has no wallet.', { userId });
-    // Opening is not a balance change (zero, idempotent); a refused conversion rolls it back.
-    // In currency-code order: two opposite conversions by one user, each inserting an account
-    // the other then waits on, would otherwise deadlock.
+ 
     const opened = new Map<string, { id: string }>();
     for (const code of [source.code, target.code].sort()) opened.set(code, await this.chartOfAccounts.openUserAccount(wallet.id, code));
     const sourceAccount = opened.get(source.code) as { id: string };
@@ -152,9 +123,7 @@ export class ConversionService {
       expiresAt: new Date(Date.now() + RESERVATION_SAFETY_NET_MILLISECONDS),
     });
 
-    // A synchronous internal conversion takes effect when it is recorded: value time is the
-    // database's now(), the same instant as booking time. The Clock is for rate freshness and
-    // quote expiry only; it never reaches the ledger.
+ 
     const [{ now: valueTime }] = (await manager.query(`SELECT now() AS now`)) as { now: Date }[];
     const reference = `conversion:${flow.id}`;
     const settled = await this.reservations.settle(reservation.id, {
@@ -251,11 +220,7 @@ export class ConversionService {
     });
   }
 
-  /**
-   * First lock of the unit (design §7.7: "user suspended mid-flight → 403, checked inside the
-   * transaction"). `FOR SHARE`: a concurrent suspension waits for this conversion to commit,
-   * or this conversion sees it.
-   */
+ 
   private async lockUserForShare(manager: EntityManager, userId: string): Promise<void> {
     const [user] = (await manager.query(`SELECT status FROM users WHERE id = $1 FOR SHARE`, [userId])) as { status: UserStatus }[];
     if (!user) throw new InvariantViolationError('An authenticated user does not exist.', { userId });
@@ -263,7 +228,7 @@ export class ConversionService {
     if (user.status !== UserStatus.ACTIVE) throw new EmailNotVerifiedError();
   }
 
-  /** What the user converted from this currency in the last 24 hours (database time), POSTED only. */
+ 
   private async convertedInWindow(manager: EntityManager, userId: string, sourceCurrency: string): Promise<bigint> {
     const [row] = (await manager.query(
       `SELECT coalesce(sum(source_amount_minor), 0)::text AS total

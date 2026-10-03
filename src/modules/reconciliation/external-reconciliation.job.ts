@@ -22,7 +22,6 @@ import { BreakOwnership } from './provider-reconciliation';
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const DAY = 24 * 3600 * 1000;
 const MAXIMUM_PAGES = 10_000;
-/** PSP statuses under which money was taken from the cardholder. */
 const CAPTURED_AT_PSP = new Set([ProviderPaymentStatus.CAPTURED, ProviderPaymentStatus.CHARGED_BACK]);
 
 export interface ExternalRunResult {
@@ -77,7 +76,6 @@ function toDeposit(row: DepositRow): Deposit {
   };
 }
 
-/** Tracks what one run saw, for its status, its "no longer detected" sweep and its summary. */
 class RunLedger {
   readonly detected = new Set<string>();
   readonly resolved = new Set<string>();
@@ -89,33 +87,7 @@ class RunLedger {
   }
 }
 
-/**
- * External reconciliation — our books against the PSP's (design §8.2; handbook: reconciliation,
- * Flow 2 step 5). Verifies the PSP against us AND us against the PSP; never edits a row to make
- * the two agree.
- *
- * DAILY:
- * 1. Settlements: every PAID batch settled in the lookback window (a late batch keeps its
- *    settlement date, so the window re-reads it) → `SettlementIngestionService`. Then any
- *    deposit already settled whose flow is still POSTED is finished.
- * 2. Completeness, both ways, on the PSP's own ids: captured payments we never booked
- *    (`MISSING_IN_LEDGER` → drive the flow; `PAYMENT_WITHOUT_FLOW`) and deposits we booked that
- *    the PSP does not have captured (`MISSING_AT_PSP`) — payments by creation date; and
- *    chargebacks we have not reversed (→ drive the completed flow) — by the CHARGEBACK's creation
- *    date, since a dispute lands months after its payment, outside any payment lookback.
- * 3. Timing: a booked deposit with no settlement line past its T+X window is
- *    `UNSETTLED_PAST_WINDOW`; one settled late (or reversed) resolves with that line (or reversal).
- * 4. `UNMATCHED` webhooks: the stored raw payload is reprocessed.
- * 5. The receivable proof (Phase 9 plan §E), in one read-only snapshot.
- * 6. Live breaks of the re-derived types that this run no longer saw, with no named cause, are
- *    escalated as "no longer detected" — never silently resolved.
- *
- * HOURLY: funding flows unresolved for longer than `RECONCILIATION_UNRESOLVED_FLOW_AGE_MINUTES`
- * are checked against the PSP and driven (the webhook that never arrived), and automatic
- * resolutions of live breaks are retried.
- *
- * Every step is idempotent, so a run that dies half-way is resumed by re-running it.
- */
+
 @Injectable()
 export class ExternalReconciliationJob {
   private readonly logger = new Logger(ExternalReconciliationJob.name);
@@ -152,7 +124,7 @@ export class ExternalReconciliationJob {
     await this.checkSettlementWindows(run, now, seen);
     await this.reprocessUnmatchedWebhooks(run, seen);
     await this.proveReceivables(run, seen);
-    // A cause may exist by now (a resumer posted the flow): look for it BEFORE calling anything stale.
+    
     await this.retryAutomaticResolutions(seen);
     await this.escalateNoLongerDetected(run, seen);
     return this.finish(run, seen, { ...settlement, settledFlows });
@@ -166,7 +138,7 @@ export class ExternalReconciliationJob {
     return this.finish(run, seen, { unresolvedFlowsDriven: driven, settledFlows });
   }
 
-  // ── 1. settlements ─────────────────────────────────────────────────────────
+  // ── 1. settlements ──
 
   private async ingestSettlements(run: ClaimedRun, since: Date, now: Date, seen: RunLedger): Promise<Record<string, number>> {
     const counts = { batchesListed: 0, batchesPosted: 0, batchesRejected: 0, batchesChanged: 0, batchesUnchanged: 0 };
@@ -182,7 +154,6 @@ export class ExternalReconciliationJob {
           batch = await this.provider.getSettlementBatch(summary.batchId);
         } catch (error) {
           if (!(error instanceof ProviderResponseInvalidError)) throw error;
-          // Unreadable after every retry: nothing enters the system; a human is told.
           const detection = await this.breaks.detectAndRecord(run.id, {
             type: BreakType.SETTLEMENT_REPORT_REJECTED,
             subjectKey: subjectKeys.batch(this.providerName, summary.batchId),
@@ -218,7 +189,7 @@ export class ExternalReconciliationJob {
     return counts;
   }
 
-  // ── 2. completeness ────────────────────────────────────────────────────────
+  // ── 2. completeness ──
 
   private async checkCompleteness(run: ClaimedRun, since: Date, now: Date, seen: RunLedger): Promise<void> {
     const cutoff = new Date(now.getTime() - this.config.reconciliation.unresolvedFlowAgeMinutes * 60_000);
@@ -234,8 +205,7 @@ export class ExternalReconciliationJob {
       cursor = listed.nextCursor;
     }
 
-    // Our side: deposits we booked in the window that the PSP's list did not show — confirm
-    // with a direct read before calling them missing (lists can lag or paginate oddly).
+   
     const booked = (await this.unitOfWork.manager.query(
       `SELECT ${DEPOSIT_COLUMNS}
          FROM funding_payments JOIN flow_instances ON flow_instances.id = funding_payments.flow_id
@@ -257,7 +227,6 @@ export class ExternalReconciliationJob {
       if (deposit?.fundingTransactionId) await this.missingAtPsp(run, deposit, payment, seen);
       return;
     }
-    // Still inside the normal webhook/resumer window: the flow's own business, not a break.
     if (!payment.capturedAt || payment.capturedAt.getTime() > cutoff.getTime()) return;
 
     if (!deposit) {
@@ -296,10 +265,6 @@ export class ExternalReconciliationJob {
     if (!deposit.fundingTransactionId) await this.missingInLedger(run, deposit, payment, seen);
   }
 
-  /**
-   * Every chargeback the PSP opened in the lookback (by ITS date) against a deposit we booked
-   * and have not reversed — once old enough that its webhook should have been processed.
-   */
   private async checkChargebacks(run: ClaimedRun, since: Date, now: Date, seen: RunLedger): Promise<void> {
     const cutoff = new Date(now.getTime() - this.config.reconciliation.unresolvedFlowAgeMinutes * 60_000);
     let cursor: string | undefined;
@@ -314,7 +279,6 @@ export class ExternalReconciliationJob {
           [this.providerName, chargeback.paymentId],
         )) as DepositRow[];
         const deposit = row ? toDeposit(row) : null;
-        // A chargeback on a payment we never booked is that payment's own break (completeness).
         if (!deposit?.fundingTransactionId || deposit.chargebackTransactionId) continue;
         await this.chargebackNotReversed(run, deposit, chargeback, seen);
       }
@@ -323,7 +287,6 @@ export class ExternalReconciliationJob {
     }
   }
 
-  /** The deposit a PSP payment belongs to: by its id, else by our reference (the flow id). */
   private async depositForPsp(payment: ProviderPayment): Promise<Deposit | null> {
     const [row] = (await this.unitOfWork.manager.query(
       `SELECT ${DEPOSIT_COLUMNS}
@@ -356,11 +319,7 @@ export class ExternalReconciliationJob {
     seen.note(detection, BreakType.MISSING_AT_PSP);
   }
 
-  /**
-   * Captured at the PSP long enough ago, not in our ledger: the webhook never came and the
-   * resumer has not caught up. Recorded, then resolved by driving the flow — the flow asks the
-   * PSP itself (a hint, even from us, is never a fact).
-   */
+ 
   private async missingInLedger(run: ClaimedRun, deposit: Deposit, payment: ProviderPayment, seen: RunLedger): Promise<void> {
     const detection = await this.breaks.detectAndRecord(run.id, {
       type: BreakType.MISSING_IN_LEDGER,
@@ -408,18 +367,14 @@ export class ExternalReconciliationJob {
     await this.driveAndResolve(detection.breakId, deposit.flowId, seen);
   }
 
-  /**
-   * Drive a flow through `FlowRunner` (completed flows included: a chargeback reverses a POSTED
-   * or SETTLED funding), then resolve its break if — and only if — the row that proves it now
-   * exists: the funding posting (`FLOW_ADVANCED`) or the chargeback's reversal (`REVERSAL_POSTED`).
-   */
+ 
   private async driveAndResolve(breakId: string, flowId: string, seen: RunLedger): Promise<boolean> {
     const current = await this.breaks.findById(breakId);
     if (!current || current.status === BreakStatus.RESOLVED) return false;
     await this.runner.advance(flowId, { includeCompleted: true });
     const payment = await this.fundingPayments.findByFlowId(flowId);
     if (current.type === BreakType.MISSING_IN_LEDGER && payment?.fundingTransactionId) {
-      if (current.details.settledIntoClearing === true) return false; // its money is in CLEARING: Phase 10
+      if (current.details.settledIntoClearing === true) return false; 
       await this.breaks.resolve(breakId, RECONCILIATION_INITIATED_BY, ResolutionKind.FLOW_ADVANCED, payment.fundingTransactionId, 'flow driven: funding posted');
       seen.resolved.add(breakId);
       return true;
@@ -432,10 +387,9 @@ export class ExternalReconciliationJob {
     return false;
   }
 
-  // ── 3. timing ──────────────────────────────────────────────────────────────
+  // ── 3. timing ──
 
   private async checkSettlementWindows(run: ClaimedRun, now: Date, seen: RunLedger): Promise<void> {
-    // First, the live ones: settled late or reversed since ⇒ a named cause.
     for (const live of await this.breaks.live([BreakType.UNSETTLED_PAST_WINDOW])) {
       if (!live.flowId) continue;
       const payment = await this.fundingPayments.findByFlowId(live.flowId);
@@ -467,7 +421,6 @@ export class ExternalReconciliationJob {
       if (!window || !deposit.capturedAt || !deposit.providerPaymentId) continue;
       if (!isPastSettlementWindow(deposit.capturedAt, window, now)) continue;
       const subjectKey = subjectKeys.payment(this.providerName, deposit.providerPaymentId);
-      // One discrepancy, one break: a deposit a mismatch already explains is not ALSO late.
       const [owned] = (await this.unitOfWork.manager.query(
         `SELECT 1 FROM reconciliation_breaks WHERE subject_key = $1 AND status <> 'RESOLVED' AND type <> 'UNSETTLED_PAST_WINDOW' LIMIT 1`,
         [subjectKey],
@@ -492,13 +445,7 @@ export class ExternalReconciliationJob {
     }
   }
 
-  // ── 4. unmatched webhooks ──────────────────────────────────────────────────
 
-  /**
-   * `UNMATCHED` webhook events are evidence (Phase 5 decision 6), never dropped: each becomes a
-   * break, and its STORED raw payload is reprocessed (ids only). A flow that now matches is
-   * driven and the break resolved `WEBHOOK_REPROCESSED`; otherwise a human is told.
-   */
   private async reprocessUnmatchedWebhooks(run: ClaimedRun, seen: RunLedger): Promise<void> {
     const events = (await this.unitOfWork.manager.query(
       `SELECT webhook_events.id, webhook_events.raw_payload
@@ -543,13 +490,7 @@ export class ExternalReconciliationJob {
     }
   }
 
-  // ── 5. the receivable proof ────────────────────────────────────────────────
-
-  /**
-   * `PSP_RECEIVABLE` per currency (every bucket) must equal what the deposits' own facts say is
-   * owed to us: + each booked deposit, − each settled, − what each booked chargeback took from the receivable
-   * (all of it for a reversal, the disputed part for a partial CORRECTION), + each deduction the PSP made. Measured in ONE read-only snapshot, so a concurrent posting cannot fake a gap.
-   */
+  // receivable proof ──
   private async proveReceivables(run: ClaimedRun, seen: RunLedger): Promise<void> {
     const rows = await this.unitOfWork.runReadOnlySnapshot(
       async (manager) =>
@@ -600,13 +541,13 @@ export class ExternalReconciliationJob {
     }
   }
 
-  // ── 6. no longer detected ──────────────────────────────────────────────────
+
 
   private async escalateNoLongerDetected(run: ClaimedRun, seen: RunLedger): Promise<void> {
     const types = (Object.keys(BREAK_POLICIES) as BreakType[]).filter((type) => BREAK_POLICIES[type].rederivedBy === 'EXTERNAL_DAILY');
     for (const live of await this.breaks.live(types)) {
       if (seen.detected.has(live.id) || seen.resolved.has(live.id)) continue;
-      // Another provider's break is its own run's business (PAYSTACK_PLAN.md C7): never swept from here.
+     
       const owner = await this.ownership.providerOf(live);
       if (owner !== null && owner !== this.providerName) continue;
       const note = `No longer detected by external run ${run.id} (${run.periodKey}); not resolved: no cause was named.`;
@@ -614,12 +555,10 @@ export class ExternalReconciliationJob {
     }
   }
 
-  // ── hourly ─────────────────────────────────────────────────────────────────
+  // ── hourly ──
 
   /**
-   * Funding flows still unresolved after the configured age (design §10 pages on "PENDING funding
-   * older than 1h"): ask the PSP. Captured there long enough ago ⇒ the webhook never arrived ⇒ a
-   * `MISSING_IN_LEDGER` break, resolved by driving the flow. Otherwise the flow is just driven.
+   * Funding flows still unresolved after the configured age, ask the PSP.
    */
   private async driveUnresolvedFlows(run: ClaimedRun, now: Date, seen: RunLedger): Promise<number> {
     const cutoff = new Date(now.getTime() - this.config.reconciliation.unresolvedFlowAgeMinutes * 60_000);
@@ -646,7 +585,6 @@ export class ExternalReconciliationJob {
     return rows.length;
   }
 
-  /** Live breaks an automatic resolution may still close: drive their flows again. */
   private async retryAutomaticResolutions(seen: RunLedger): Promise<void> {
     const live: ReconciliationBreak[] = await this.breaks.live([BreakType.MISSING_IN_LEDGER, BreakType.CHARGEBACK_NOT_REVERSED]);
     for (const candidate of live) {
@@ -655,7 +593,7 @@ export class ExternalReconciliationJob {
     }
   }
 
-  // ── bookkeeping ────────────────────────────────────────────────────────────
+  // ── bookkeeping ──
 
   private async heartbeat(run: ClaimedRun): Promise<void> {
     await this.runs.heartbeat(run, this.config.reconciliation.leaseSeconds);
@@ -681,7 +619,6 @@ export class ExternalReconciliationJob {
     return { runId: run.id, status, detectedBreakIds: [...seen.detected], resolvedBreakIds: [...seen.resolved], summary };
   }
 
-  /** External drift: Σ amount of LIVE money breaks, per currency (never across currencies). */
   private async externalDrift(): Promise<Map<string, bigint>> {
     const moneyTypes = (Object.keys(BREAK_POLICIES) as BreakType[]).filter(
       (type) => BREAK_POLICIES[type].severity === 'MONEY' && BREAK_POLICIES[type].rederivedBy !== 'INTERNAL',

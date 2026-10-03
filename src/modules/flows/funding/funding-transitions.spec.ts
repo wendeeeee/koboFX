@@ -44,7 +44,6 @@ describe('funding transition table (design §7.5)', () => {
       for (const to of FUNDING_STATES) expect(canTransition(terminal, to)).toBe(false);
     }
     for (const from of FUNDING_STATES) expect(canTransition(from, FundingState.INITIATED)).toBe(false);
-    // Nothing is credited before capture: the only way into POSTED is from CAPTURED.
     expect(FUNDING_STATES.filter((from) => canTransition(from, FundingState.POSTED))).toEqual([FundingState.CAPTURED]);
   });
 

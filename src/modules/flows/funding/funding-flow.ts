@@ -13,7 +13,6 @@ import { FundingPayment, FundingPaymentRepository, FundingPaymentUpdate } from '
 import { FundingState, assertTransition, isFundingHintSatisfied, isFundingState } from './funding-transitions';
 import { ProviderPaymentMismatchError } from './funding.errors';
 
-/** PSP statuses after which the money never moves: the flow fails, nothing is posted. */
 const NOT_CAPTURED_FINAL = new Set([
   ProviderPaymentStatus.DECLINED,
   ProviderPaymentStatus.EXPIRED,
@@ -21,30 +20,13 @@ const NOT_CAPTURED_FINAL = new Set([
   ProviderPaymentStatus.CAPTURE_FAILED,
 ]);
 
-/** Polling interval while the PSP finishes a capture; a webhook usually arrives first. */
 const CAPTURE_PENDING_RETRY_SECONDS = 5;
-/** A partial chargeback waits for a human (Phase 10 CORRECTION); re-check it rarely. */
 const PARKED_RETRY_SECONDS = 3600;
 
 export const FUNDING_INITIATED_BY = 'job:funding-flow';
 
 /**
- * The funding flow (design §7.5; handbook Appendix B, Flow 2), one step per state:
- *
- * - INITIATED — find the payment at the PSP by our reference (the flow id); only if it
- *   does not exist, authorize with `Idempotency-Key: authorize:{flowId}`. Authorized →
- *   AUTHORIZED; declined/expired/voided → FAILED. **Nothing is credited.**
- * - AUTHORIZED — read the payment. Captured (per the PSP's API, never a webhook) →
- *   CAPTURED; failed → FAILED; still authorized → request capture with
- *   `Idempotency-Key: capture:{flowId}` (or void it, for a suspended user); pending → wait.
- * - CAPTURED — database only: post DEBIT `PSP_RECEIVABLE` / CREDIT the user, gross, as
- *   `funding:{flowId}` (UNIQUE), in the same transaction as → POSTED.
- * - POSTED — (a webhook hint, or a chargeback seen before posting) read the payment; a
- *   full chargeback is a `REVERSAL` mirroring the funding posting → REVERSED. It may
- *   drive the balance negative, which is recorded, never clamped.
- *
- * Every step re-reads before it re-sends, commits through the fenced, state-guarded
- * `runtime.commit`, and may be re-run at any point after a crash.
+ * The funding flow follows one step per state
  */
 @Injectable()
 export class FundingFlow implements FlowDefinition, OnModuleInit {
@@ -82,7 +64,6 @@ export class FundingFlow implements FlowDefinition, OnModuleInit {
         return this.postFunding(flow, payment, runtime);
       case FundingState.POSTED:
       case FundingState.SETTLED:
-        // A chargeback usually lands AFTER settlement (Phase 5 decision 2): SETTLED → REVERSED.
         return this.checkForChargeback(flow, payment, runtime, state);
       case FundingState.FAILED:
       case FundingState.REVERSED:
@@ -158,7 +139,6 @@ export class FundingFlow implements FlowDefinition, OnModuleInit {
     if (NOT_CAPTURED_FINAL.has(result.status)) {
       return this.fail(flow, runtime, FundingState.AUTHORIZED, failureCodeOf(result), { providerStatus: result.status });
     }
-    // Capture requested and pending at the PSP (or the PSP's read still lags our request).
     if (payment.captureRequestedAt && payment.providerStatus === result.status) {
       return { kind: 'WAITING', state: FundingState.AUTHORIZED, reason: `PSP status ${result.status}; capture pending`, retryInSeconds: CAPTURE_PENDING_RETRY_SECONDS };
     }
@@ -175,7 +155,6 @@ export class FundingFlow implements FlowDefinition, OnModuleInit {
     const paymentId = requirePaymentId(flow, payment);
     if (!payment.capturedAt) throw new InvariantViolationError('A captured funding has no capture time.', { flowId: flow.id });
     const capturedAt = payment.capturedAt;
-    // A chargeback seen before posting keeps the flow open, so the resumer reverses it next.
     const complete = payment.providerStatus !== ProviderPaymentStatus.CHARGED_BACK;
     await runtime.commit(FundingState.CAPTURED, { to: FundingState.POSTED, complete }, async (manager) => {
       const posted = await this.ledger.post({
@@ -215,8 +194,7 @@ export class FundingFlow implements FlowDefinition, OnModuleInit {
     await runtime.checkpoint(FlowCheckpoint.AFTER_EXTERNAL_CALL);
 
     const chargeback = result.status === ProviderPaymentStatus.CHARGED_BACK ? result.chargeback : null;
-    // Already booked — by an approved partial-chargeback CORRECTION (Phase 10): nothing left for the flow to do.
-    // (A full chargeback moves the flow to REVERSED and never gets here again.)
+   
     if (chargeback && payment.chargebackTransactionId) return { kind: 'IDLE', state };
     if (!chargeback) {
       if (flow.completedAt) return { kind: 'IDLE', state };
@@ -324,7 +302,6 @@ export class FundingFlow implements FlowDefinition, OnModuleInit {
     return user?.status === UserStatus.SUSPENDED;
   }
 
-  /** The PSP's payment must be the one we asked for — same reference, id, amount and currency. */
   private assertMatches(flow: ClaimedFlow, payment: FundingPayment, result: ProviderPayment): void {
     const problems: string[] = [];
     if (result.reference !== flow.id) problems.push('reference');
@@ -346,7 +323,6 @@ function requirePaymentId(flow: ClaimedFlow, payment: FundingPayment): string {
   return payment.providerPaymentId;
 }
 
-/** `DECLINED:insufficient_funds`, or the status itself. Never card data. */
 function failureCodeOf(result: ProviderPayment): string {
   return result.declineCode ? `${result.status}:${result.declineCode}` : result.status;
 }

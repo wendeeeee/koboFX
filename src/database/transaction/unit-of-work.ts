@@ -6,16 +6,13 @@ import { translateDatabaseError } from '../database-errors';
 import { registerUnitOfWork, unregisterUnitOfWork } from './transactional.decorator';
 
 /**
- * The transaction boundary, carried implicitly through async calls (design §14).
- *
- * - `run()` opens ONE transaction at READ COMMITTED (design §6.6). Session timeouts
+ * - This is the transaction boundary, carried implicitly through async calls.
+ * - `run()` opens ONE transaction at READ COMMITTED. Session timeouts
  *   (`lock_timeout`, `statement_timeout`) are set on every pooled connection.
  * - A nested `run()` joins the ambient transaction; it never opens a second one.
- *   A failure anywhere inside aborts the whole unit — there are no partial commits.
+ * - A failure anywhere inside aborts the whole unit, there are no partial commits.
  * - Repositories read `manager`, so the same code works inside and outside a unit.
- *
- * Never call a third-party API inside `run()`: a DB transaction must not be held
- * open across a network call we don't control.
+ * -`run()` is never called across a network call to a third-party API
  */
 @Injectable()
 export class UnitOfWork implements OnModuleInit, OnModuleDestroy {
@@ -55,9 +52,7 @@ export class UnitOfWork implements OnModuleInit, OnModuleDestroy {
   /**
    * ONE `REPEATABLE READ READ ONLY` transaction: every statement inside sees the same snapshot,
    * so a check made of several queries cannot be fooled by a posting that commits between two
-   * of them (Phase 9 §H.7). A read-only snapshot takes no row locks — writers never wait on it —
-   * so it may raise its own `statement_timeout` for a long walk without touching the hot path's
-   * 10s control. Never nested inside another unit.
+   * of them.
    */
   async runReadOnlySnapshot<T>(work: (manager: EntityManager) => Promise<T>, options: { statementTimeoutMilliseconds: number }): Promise<T> {
     if (this.storage.getStore()) {

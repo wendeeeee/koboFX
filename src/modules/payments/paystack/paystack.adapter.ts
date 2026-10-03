@@ -14,11 +14,7 @@ import { PaystackDuplicateReferenceError } from './paystack.errors';
 
 const PAGE_SIZE = 100;
 
-/**
- * The Paystack adapter (https://paystack.com/docs/api). Only the four calls we use: initialize, verify, list
- * transactions, list disputes. The amount goes out as a digit string (Paystack documents `amount` as a String in the
- * subunit) — never a float; it comes back as a JSON number, read losslessly.
- */
+
 export class PaystackAdapter extends PaystackGateway {
   constructor(
     readonly name: string,

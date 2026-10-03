@@ -18,20 +18,8 @@ import { OneTimePasswordChallengeStore } from './one-time-password-challenge.sto
 export type DispatchOutcome = 'SENT' | 'NOT_PENDING';
 
 /**
- * Issues and emails a one-time password (decision #2). Runs in the WORKER, when an
- * `EmailVerificationRequested.v1` outbox event is handled — never in the API — so the
- * plaintext code exists only in this process's memory: not in Postgres, not in the
- * outbox payload, not in a log line.
- *
- * Steps:
- * 1. One short transaction, under the user's row lock (so issuances for one user
- *    serialise and Redis always holds the challenge the database says is open):
- *    close the previous challenge, record the new one, store its HMAC in Redis.
- * 2. After commit, send the email. No transaction is held across SMTP.
- *
- * At-least-once: a redelivered event issues a fresh challenge that supersedes the
- * first, so at worst the user gets two emails and only the newer code works. The TTL
- * starts when the email is sent, not when the user registered.
+ * Issues and emails a one-time password. Runs in the separate WORKER, when an
+ * `EmailVerificationRequested.v1` outbox event is handled.
  */
 @Injectable()
 export class GenerateAndDispatchOneTimePasswordService {

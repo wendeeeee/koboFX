@@ -61,7 +61,6 @@ describe('ExchangeRate-API adapter against the simulated provider (real HTTP)', 
     expect(result.rates.rates.get('NGN')?.toFixed()).toBe('1530.123456789012345');
     expect([...result.rates.rates.keys()].sort()).toEqual(['EUR', 'GBP', 'NGN', 'USD']);
     expect(result.providerCallId).toBe('1');
-    // The evidence keeps every digit (raw text → JSONB) and never the key.
     expect(recorder.calls[0].responseBodyText).toContain('1530.123456789012345');
   });
 

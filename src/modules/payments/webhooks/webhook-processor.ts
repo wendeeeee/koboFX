@@ -39,19 +39,6 @@ const RETRY_BASE_SECONDS = 2;
 const RETRY_MAXIMUM_SECONDS = 300;
 const MAXIMUM_ERROR_LENGTH = 500;
 
-/**
- * Turns stored webhooks into flow progress (design §7.3) — as HINTS only:
- *
- * 1. Claim unprocessed, validly-signed events (`FOR UPDATE SKIP LOCKED`; the claim
- *    pushes `next_attempt_at` out as a lease, as in the outbox).
- * 2. Find the flow from the payment id (or our reference). Unknown → `UNMATCHED`, kept
- *    for reconciliation (Phase 9), never dropped.
- * 3. If the flow already got as far as the hint suggests → `NO_CHANGE` (duplicates,
- *    stale and out-of-order deliveries end here: state never moves backwards).
- * 4. Otherwise advance the flow through `FlowRunner` — which asks the PSP's API for the
- *    truth. If the API has not caught up (it can lag the webhook), retry the event with
- *    backoff; after `WEBHOOK_MAX_ATTEMPTS`, `UNCONFIRMED` (the resumer still owns the flow).
- */
 @Injectable()
 export class WebhookProcessor {
   private readonly logger = new Logger(WebhookProcessor.name);
@@ -90,7 +77,6 @@ export class WebhookProcessor {
     return { claimed: events.length, finished, retried: events.length - finished };
   }
 
-  /** Returns true when the event reached a final outcome. */
   private async process(event: ClaimedWebhookEvent): Promise<boolean> {
     try {
       const resolved = await this.resolve(event);
@@ -125,7 +111,7 @@ export class WebhookProcessor {
     }
   }
 
-  /** The configured PSP's events are read exactly as before; any other provider's by its registered resolver. */
+
   private async resolve(event: ClaimedWebhookEvent): Promise<ResolvedWebhook | undefined | 'NO_RESOLVER'> {
     if (event.provider === this.config.paymentProvider.name) {
       const hint = parseWebhookHint(event.rawPayload);
@@ -140,8 +126,7 @@ export class WebhookProcessor {
   private async findFlowId(hint: WebhookHint): Promise<string | null> {
     const byPayment = await this.fundingPayments.findFlowIdByProviderPayment(this.config.paymentProvider.name, hint.paymentId);
     if (byPayment) return byPayment;
-    // The authorization response may have been lost before we recorded the payment id:
-    // our reference (the flow id) still finds it. The flow then asks the PSP itself.
+   
     return hint.reference && UUID.test(hint.reference) ? hint.reference : null;
   }
 

@@ -15,13 +15,7 @@ import { ConversionView } from './conversion.view';
 import { ConvertDto } from './dto/convert.dto';
 import { PriceLimitExceededError } from './trading.errors';
 
-/**
- * `POST /wallet/convert` — a market conversion (design §7.7). Validates the request, prices
- * it ONCE from the snapshot `RateSnapshotGuard` prepared before the barrier (judged
- * executable at the moment of use, else `503 FX_RATE_STALE` — transient, nothing stored),
- * applies the pair minimum, the per-conversion maximum and the caller's price bound, then
- * hands the priced order to the shared primitive.
- */
+
 @Injectable()
 export class ConvertService {
   constructor(
@@ -57,7 +51,6 @@ export class ConvertService {
           this.rounding,
         );
       } catch (error) {
-        // A TARGET amount so large its debit leaves the BIGINT range: too large, not malformed.
         if (error instanceof InvalidAmountError) {
           throw new AmountTooLargeError('The amount is too large to convert.', { currency: source.code }, { cause: error });
         }
@@ -103,7 +96,6 @@ export class ConvertService {
     });
   }
 
-  /** Exactly one amount; at most the bound that matches its mode. */
   private validate(request: ConvertDto): { mode: QuoteAmountMode; amountMinor: bigint; bound: bigint | undefined } {
     if ((request.sourceAmount === undefined) === (request.targetAmount === undefined)) {
       throw new ValidationError('Give exactly one of sourceAmount or targetAmount.', { fields: ['sourceAmount', 'targetAmount'] });

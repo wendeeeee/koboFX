@@ -16,10 +16,7 @@ import type {
 } from './transaction.view';
 import type { TransactionPage } from './transaction-history.service';
 
-/**
- * OpenAPI documentation of history (Phase 11). Never instantiated: `implements` keeps each class in step with the
- * view the code returns. Every figure on the wire is a stored one (amounts as minor-unit strings).
- */
+
 const FUNDING_REFERENCE = 'funding:3c9a1f2e-7b4d-4e6a-9f80-1a2b3c4d5e6f';
 
 @ApiSchema({ name: 'TransactionLeg' })

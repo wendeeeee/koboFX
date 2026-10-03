@@ -13,10 +13,7 @@ import { TradeDto } from './dto/trade.dto';
 import { TradeService } from './trade.service';
 import { ConversionDocument } from './trading.responses';
 
-/**
- * What posting a conversion can refuse with, whichever route: the user re-checked under its row lock (suspended
- * mid-flight), the gate, the limits, a broken invariant.
- */
+
 const POSTING_ERRORS = [
   ErrorCode.ACCOUNT_SUSPENDED,
   ErrorCode.EMAIL_NOT_VERIFIED,
@@ -30,12 +27,7 @@ const POSTING_ERRORS = [
   ErrorCode.INVALID_RESERVATION,
 ] as const;
 
-/**
- * Conversion and trading (design §7.7, §12), under `wallet/` but in their own controller so
- * `wallets/` stays balances and funding. Both are behind the idempotency barrier and are
- * database-only inside it; both answer `201` with the same body shape, stored and replayed
- * byte for byte, and link the posted transaction on the key row.
- */
+
 @ApiTags('trading')
 @Controller('wallet')
 export class TradingController {
@@ -44,7 +36,7 @@ export class TradingController {
     private readonly tradeService: TradeService,
   ) {}
 
-  /** A market conversion. The executable rate is prepared BEFORE the barrier opens its transaction. */
+
   @Post('convert')
   @UseGuards(RateSnapshotGuard)
   @Idempotent({ transactionIdField: 'transactionId' })
@@ -91,7 +83,6 @@ export class TradingController {
     return this.convertService.convert(user.id, body, prepared, idempotencyKey);
   }
 
-  /** Execute a quote: its locked amounts, verbatim. Needs no current rate, so no guard. */
   @Post('trade')
   @Idempotent({ transactionIdField: 'transactionId' })
   @ApiOperation({

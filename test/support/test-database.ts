@@ -12,21 +12,14 @@ const APP_PASSWORD = 'app_test_pw';
 const DB_NAME = 'kobofx_test';
 
 export interface TestDatabase {
-  /** Environment for `loadConfig` / `AppModule.forRoot`, pointing at the container. */
   readonly env: Record<string, string>;
-  /** A raw client as the schema owner, for setup and assertions outside the app role. */
   ownerClient(): Promise<Client>;
-  /** A raw client as the runtime role — what the application actually connects as. */
   appClient(): Promise<Client>;
-  /** The container's superuser — for tamper tests that must get past triggers and grants. */
   superuserClient(): Promise<Client>;
   stop(): Promise<void>;
 }
 
-/**
- * A real Postgres 16, bootstrapped exactly like dev: roles from
- * docker/postgres/roles.sql, then every migration as fx_owner.
- */
+
 export async function startTestDatabase(overrides: Record<string, string> = {}): Promise<TestDatabase> {
   const container: StartedPostgreSqlContainer = await new PostgreSqlContainer('postgres:16-alpine')
     .withDatabase(DB_NAME)
@@ -45,6 +38,8 @@ export async function startTestDatabase(overrides: Record<string, string> = {}):
   const env: Record<string, string> = {
     NODE_ENV: 'test',
     LOG_LEVEL: 'silent',
+    PAYSTACK_ENABLED: 'false',
+    PAYSTACK_BASE_URL: 'http://127.0.0.1:9',
     DB_HOST: container.getHost(),
     DB_PORT: String(container.getPort()),
     DB_NAME,

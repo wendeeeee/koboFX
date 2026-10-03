@@ -2,10 +2,8 @@ import { createHash } from 'node:crypto';
 import { InvariantViolationError } from '../../../common/errors';
 
 /**
- * The hot-row fix (design §6.6): each internal account exists as `bucketCount` rows,
- * and a posting picks one by `hash(transactionId) % bucketCount`. Deterministic, so
- * the bucket a transaction touched can always be recomputed; spread uniformly, so no
- * single row serialises the platform.
+ * each internal account exists as `bucketCount` rows,
+ * and a posting picks one by `hash(transactionId) % bucketCount`.
  */
 export function bucketForTransaction(transactionId: string, bucketCount: number): number {
   if (!Number.isInteger(bucketCount) || bucketCount < 1) {

@@ -11,7 +11,6 @@ import { TransactionDetailView } from './transaction.view';
 import { TRANSACTION_REFERENCE_PATTERN } from './reference';
 import { TransactionDetailDocument, TransactionPageDocument } from './transactions.responses';
 
-/** `:reference` (Phase 8 decision 10), shared with the admin route. */
 export const ApiTransactionReference = (): MethodDecorator =>
   ApiParam({
     name: 'reference',
@@ -20,18 +19,10 @@ export const ApiTransactionReference = (): MethodDecorator =>
     description: 'A reference (`{kind}:{uuid}`, the colon raw or `%3A`) or a bare transaction id. Anything else is `400 VALIDATION_FAILED`.',
   });
 
-/**
- * Per user, shared by both routes (Phase 8 decision 12), on top of the global 100/min/IP. Every
- * page is a bounded index scan, so this caps a client that pages from many addresses.
- */
+
 export const HISTORY_RATE_LIMIT_RULE: RateLimitRule = { name: 'transaction-history', subject: 'user', limit: 120, windowSeconds: 60 };
 
-/**
- * Transaction history (design §7.8, §12). Default guard set — ACTIVE users only (Phase 8
- * decision 9: NOT `@AllowUnverified()`, which would let a suspended user's live session through;
- * an unverified user has no transactions anyway). Scoped by the caller in every WHERE clause.
- * Rate limits fail OPEN: history stays up without Redis (design §16).
- */
+
 @ApiTags('transactions')
 @Controller('transactions')
 @RateLimit({ rules: [HISTORY_RATE_LIMIT_RULE], whenUnavailable: 'fail-open' })

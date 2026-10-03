@@ -43,17 +43,7 @@ function toClaimed(row: FlowRow): ClaimedFlow {
   return { ...toFlow(row), leaseToken: row.lease_token as string };
 }
 
-/**
- * `flow_instances` persistence, including the claim protocol (generalised from the
- * outbox dispatcher):
- *
- * - A claim takes rows `FOR UPDATE SKIP LOCKED` and sets `leased_until` + a fresh
- *   `lease_token` in ONE statement, then commits. No transaction is held while the
- *   step talks to the PSP.
- * - A lease that lapses (a dead worker) makes the flow claimable again.
- * - Every commit re-locks the row and checks the lease token (fencing) and the state
- *   (state guard), so a stale worker can never apply a result.
- */
+
 @Injectable()
 export class FlowRepository {
   constructor(private readonly unitOfWork: UnitOfWork) {}
@@ -79,12 +69,6 @@ export class FlowRepository {
     return row ? toFlow(row) : null;
   }
 
-  /**
-   * Move a SYNCHRONOUS flow (one created and finished inside the caller's transaction, e.g. a
-   * conversion) to its completion state. No lease is involved: nobody else can hold a row
-   * this transaction inserted. The state guard still applies, and the database trigger
-   * checks the transition.
-   */
   async completeSynchronous(flowId: string, expectedState: string, completionState: string): Promise<void> {
     const rows = (await this.unitOfWork.requireTransaction().query(
       `WITH updated AS (
@@ -99,7 +83,7 @@ export class FlowRepository {
     if (rows.length !== 1) throw new StaleFlowStateError(flowId, expectedState, 'unknown');
   }
 
-  /** The resumer's claim: due, incomplete, unleased flows; never blocks on another worker's rows. */
+
   async claimDue(batchSize: number, leaseSeconds: number): Promise<ClaimedFlow[]> {
     const rows = (await this.unitOfWork.manager.query(
       `WITH due AS (
@@ -123,12 +107,7 @@ export class FlowRepository {
     return rows.map(toClaimed);
   }
 
-  /**
-   * Claim one specific flow now (a webhook hint), whether or not it is due — a flow
-   * backing off may be advanced early — but never one leased by someone else.
-   * `includeCompleted` lets a hint reach a completed flow that still has transitions
-   * (POSTED → REVERSED on a chargeback).
-   */
+
   async claimOne(flowId: string, leaseSeconds: number, includeCompleted: boolean): Promise<ClaimedFlow | null> {
     const [row] = (await this.unitOfWork.manager.query(
       `WITH target AS (
@@ -150,7 +129,6 @@ export class FlowRepository {
     return row ? toClaimed(row) : null;
   }
 
-  /** See `FlowStepRuntime.commit`. The flow row is the first lock in the global order. */
   async commit(
     flow: ClaimedFlow,
     expectedState: string,
@@ -182,7 +160,6 @@ export class FlowRepository {
     });
   }
 
-  /** Give the lease back without a state change: the step waits or failed; try again later. */
   async release(flow: ClaimedFlow, retryInSeconds: number, note: string | null): Promise<void> {
     await this.unitOfWork.manager.query(
       `UPDATE flow_instances

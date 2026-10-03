@@ -2,10 +2,6 @@ import { Column, CreateDateColumn, Entity, PrimaryColumn, UpdateDateColumn } fro
 import { bigintTransformer } from '../../../database/bigint.transformer';
 import { AccountType, NormalSide } from '../ledger.types';
 
-/**
- * Read model of `accounts` (design §5.2). Balances are a cached projection of the
- * ledger, written ONLY by `LedgerService.post()`; never save this entity to change one.
- */
 @Entity('accounts')
 export class AccountEntity {
   @PrimaryColumn({ type: 'uuid' })
@@ -44,7 +40,6 @@ export class AccountEntity {
   @Column({ name: 'authorizes_balance', type: 'boolean' })
   authorizesBalance!: boolean;
 
-  /** smallint bucket index (design §6.6): a count, not an amount, so `number` is correct. */
   @Column({ type: 'smallint' })
   bucket!: number;
 

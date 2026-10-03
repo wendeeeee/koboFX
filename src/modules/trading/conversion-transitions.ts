@@ -1,12 +1,6 @@
 import { InvariantViolationError } from '../../common/errors';
 
-/**
- * The conversion flow (Phase 7, handbook Flow 3 steps 1 and 5): a conversion creates its
- * flow, reserves, settles and completes it inside ONE transaction, so `INITIATED` is never
- * committed and the resumer never sees a conversion. The flow row exists to own the hold
- * (`reservations.flow_id`). The SQL mirror is `flow_transition_allowed('CONVERSION', …)`,
- * tested equal.
- */
+
 export enum ConversionState {
   INITIATED = 'INITIATED',
   POSTED = 'POSTED',

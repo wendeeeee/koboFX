@@ -11,13 +11,6 @@ import {
 import { ProviderResponseInvalidError } from './payment.errors';
 import { parsePaymentList } from './psp-responses';
 
-/**
- * Boundary schemas for the PSP's settlement reports (Phase 9; design §7.2 point 1): ONLY the
- * fields we use; unknown keys are ignored, so a field we don't read can never be our outage.
- * Amounts must be digit strings (a JSON number has already passed through a float and is
- * refused); `net` alone may be negative. A line type we don't know fails the WHOLE report:
- * we will not post money we cannot classify.
- */
 const minorUnits = z.string().regex(/^(0|[1-9]\d{0,17})$/, 'amount must be a string of minor units');
 const signedMinorUnits = z.string().regex(/^(0|-?[1-9]\d{0,17})$/, 'amount must be a string of (signed) minor units');
 const timestamp = z.string().datetime({ offset: true });
@@ -59,7 +52,6 @@ const chargebackPageSchema = z.object({
   next_cursor: cursor,
 });
 
-/** The batch header — must read identically on every page of one report. */
 export interface SettlementBatchHeader {
   readonly batchId: string;
   readonly currency: string;
@@ -158,7 +150,6 @@ export function parseChargebackPage(body: unknown, operation: string): ProviderP
   };
 }
 
-/** Two pages of one report must agree on the header, or the report changed while we read it. */
 export function sameHeader(first: SettlementBatchHeader, other: SettlementBatchHeader): boolean {
   return (
     first.batchId === other.batchId &&

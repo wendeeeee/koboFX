@@ -16,7 +16,6 @@ import { existingAccountEmail } from './email/email-templates';
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
-/** Don't trust the payload's shape, even our own (events outlive code). */
 export function userIdOf(event: ClaimedOutboxEvent): string {
   const userId = (event.payload as Partial<UserEventPayload> | null)?.userId;
   if (typeof userId !== 'string' || !UUID.test(userId) || userId !== event.aggregateId) {
@@ -25,7 +24,6 @@ export function userIdOf(event: ClaimedOutboxEvent): string {
   return userId;
 }
 
-/** `EmailVerificationRequested.v1` → issue a one-time password and email it. */
 @Injectable()
 export class EmailVerificationRequestedHandler implements OutboxEventHandler {
   readonly eventType = OutboxEventType.EMAIL_VERIFICATION_REQUESTED;
@@ -37,15 +35,9 @@ export class EmailVerificationRequestedHandler implements OutboxEventHandler {
   }
 }
 
-/** At most one "you already have an account" email per user per hour. */
 export const EXISTING_ACCOUNT_NOTICE_INTERVAL_SECONDS = 3600;
 
-/**
- * `ExistingAccountRegistrationAttempted.v1` → tell the owner (decision #5). Throttled
- * per user in Redis so registration attempts can't be used to spam a mailbox. The
- * throttle is claimed before sending: a crash in between loses at most one notice —
- * the right trade for a courtesy email.
- */
+
 @Injectable()
 export class ExistingAccountRegistrationAttemptedHandler implements OutboxEventHandler {
   readonly eventType = OutboxEventType.EXISTING_ACCOUNT_REGISTRATION_ATTEMPTED;
@@ -75,7 +67,6 @@ export class ExistingAccountRegistrationAttemptedHandler implements OutboxEventH
   }
 }
 
-/** Don't trust the payload's shape: ids only, the aggregate is the transaction. */
 export function conversionPostedOf(event: ClaimedOutboxEvent): ConversionPostedPayload {
   const payload = (event.payload ?? {}) as Partial<ConversionPostedPayload>;
   const isId = (value: unknown): value is string => typeof value === 'string' && UUID.test(value);
@@ -89,11 +80,7 @@ export function conversionPostedOf(event: ClaimedOutboxEvent): ConversionPostedP
   return { transactionId: payload.transactionId, userId: payload.userId, flowId: payload.flowId, quoteId: payload.quoteId };
 }
 
-/**
- * `ConversionPosted.v1` → acknowledged (Phase 7: no conversion notification is in scope).
- * A no-op by design, registered so the dispatcher does not retry an unknown type loudly
- * and dead-letter it; a receipt email or push would be added here. Idempotent.
- */
+
 @Injectable()
 export class ConversionPostedHandler implements OutboxEventHandler {
   readonly eventType = OutboxEventType.CONVERSION_POSTED;
@@ -105,7 +92,6 @@ export class ConversionPostedHandler implements OutboxEventHandler {
   }
 }
 
-/** Don't trust the payload's shape: ids only, the aggregate is the funding transaction. */
 export function fundingPostedOf(event: ClaimedOutboxEvent): FundingPostedPayload {
   const payload = (event.payload ?? {}) as Partial<FundingPostedPayload>;
   const isId = (value: unknown): value is string => typeof value === 'string' && UUID.test(value);
@@ -119,10 +105,7 @@ export function fundingPostedOf(event: ClaimedOutboxEvent): FundingPostedPayload
   return { transactionId: payload.transactionId, userId: payload.userId, flowId: payload.flowId, provider: payload.provider };
 }
 
-/**
- * `FundingPosted.v1` → acknowledged (Paystack funding; no deposit notification is in scope yet). Registered so the
- * dispatcher never dead-letters a known type; a receipt email would be added here. Idempotent.
- */
+
 @Injectable()
 export class FundingPostedHandler implements OutboxEventHandler {
   readonly eventType = OutboxEventType.FUNDING_POSTED;

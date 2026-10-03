@@ -6,11 +6,10 @@ export type DatabaseRole = 'app' | 'migration';
 
 /**
  * Connection options per role. The app role gets session-level timeouts on every
- * pooled connection (design §6.6); migrations run without them, as the schema owner.
+ * pooled connection; migrations run without them, as the schema owner.
  *
  * `synchronize` is off everywhere: the schema changes only through reviewed migrations.
- * BIGINT and NUMERIC come back from `pg` as strings by default — we rely on that and
- * never enable numeric parsing, so no amount ever passes through a JS number.
+ * BIGINT and NUMERIC come back from `pg` as strings by default. Numeric parsing is disabled so no amount ever passes through a JS number.
  */
 export function buildDataSourceOptions(
   db: DatabaseConfig,

@@ -2,7 +2,7 @@ import { Column, Entity, PrimaryColumn } from 'typeorm';
 import { bigintTransformer } from '../../../database/bigint.transformer';
 import { TransactionStatus, TransactionType } from '../ledger.types';
 
-/** Read model of `transactions` (design §5.4). Rows are written only by `LedgerService.post()`. */
+/** Read model of `transactions`. */
 @Entity('transactions')
 export class TransactionEntity {
   @PrimaryColumn({ type: 'uuid' })
@@ -32,7 +32,6 @@ export class TransactionEntity {
   @Column({ name: 'target_amount_minor', type: 'bigint', nullable: true, transformer: bigintTransformer })
   targetAmountMinor!: bigint | null;
 
-  /** NUMERIC stays a string: rates never pass through a float. */
   @Column({ name: 'rate_display', type: 'numeric', precision: 24, scale: 12, nullable: true })
   rateDisplay!: string | null;
 

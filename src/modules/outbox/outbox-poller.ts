@@ -4,7 +4,6 @@ import { APP_CONFIG } from '../../config/config.module';
 import { AppConfig } from '../../config/configuration';
 import { OutboxDispatcher } from './outbox-dispatcher';
 
-/** The worker's outbox loop: dispatch, sleep, repeat; drains a full batch without sleeping. */
 @Injectable()
 export class OutboxPoller {
   private readonly loop: PollingLoop;

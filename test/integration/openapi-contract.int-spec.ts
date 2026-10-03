@@ -10,6 +10,7 @@ import request from 'supertest';
 import { AppModule } from '../../src/app.module';
 import { API_PREFIX, configureApp } from '../../src/app.setup';
 import { buildOpenApiDocument } from '../../src/openapi/openapi-document';
+import { signPaystackWebhook } from '../../src/modules/payments/paystack/webhooks/paystack-webhook-signature';
 import { Administrators, FxHarness, HARNESS_USER_PASSWORD, LedgerHarness, PaymentsHarness, SignedUpUser, startLedgerHarness } from '../support/ledger-harness';
 import { OpenApiValidator, documentedCodes, matchOperation } from '../support/openapi-validation';
 
@@ -63,7 +64,7 @@ describe('OpenAPI contract (integration)', () => {
           GBP: { maximum: '1000000', dailyMaximum: '5000000' },
         }),
       },
-      { fx: true },
+      { fx: true, paystack: true },
     );
     payments = harness.payments!;
     fx = harness.fx!;
@@ -98,7 +99,7 @@ describe('OpenAPI contract (integration)', () => {
         );
       const documented = operations().map(({ method, path }) => `${method.toUpperCase()} ${path}`);
       expect([...documented].sort()).toEqual([...new Set(served)].sort());
-      expect(documented).toHaveLength(36);
+      expect(documented).toHaveLength(38);
     });
 
     it('is a valid OpenAPI 3 document', async () => {
@@ -165,7 +166,7 @@ describe('OpenAPI contract (integration)', () => {
         if (security.some((requirement) => 'bearer' in requirement)) {
           expect({ where, status: response.status, code: response.body.code }).toEqual({ where, status: 401, code: 'UNAUTHENTICATED' });
           expectDocumented(method, url, response);
-        } else if (security.some((requirement) => 'pspSignature' in requirement)) {
+        } else if (security.some((requirement) => 'pspSignature' in requirement || 'paystackSignature' in requirement)) {
           expect({ where, status: response.status }).toEqual({ where, status: 401 });
           expectDocumented(method, url, response);
         } else {
@@ -226,6 +227,33 @@ describe('OpenAPI contract (integration)', () => {
   });
 
   describe('real responses match the documented schemas (closed)', () => {
+    it('Paystack: pending, checkout, signed webhook, completed and unsigned refusal', async () => {
+      const paystack = payments.paystack!;
+      const user = await payments.signUp();
+      const started = await paystack.fund(user, { amount: '150000', currency: 'NGN' }).expect(202);
+      expectDocumented('post', `${PREFIX}/wallet/fund/paystack`, started);
+      const fundingId = started.body.fundingId as string;
+      const statusUrl = `${PREFIX}/wallet/fund/${fundingId}`;
+      expectDocumented('get', statusUrl, await paystack.status(user, fundingId).expect(200));
+      await payments.runner.advance(fundingId);
+      const ready = await paystack.status(user, fundingId).expect(200);
+      expect(ready.body.checkout.authorizationUrl).toEqual(expect.any(String));
+      expectDocumented('get', statusUrl, ready);
+      paystack.mock.pay(fundingId);
+      const body = Buffer.from(JSON.stringify({ event: 'charge.success', data: {
+        id: paystack.mock.find(fundingId)!.id, status: 'success', reference: fundingId,
+      } }));
+      const webhookUrl = `${PREFIX}/webhooks/paystack`;
+      const delivered = await http().post(webhookUrl).set('Content-Type', 'application/json')
+        .set('X-Paystack-Signature', signPaystackWebhook(paystack.secretKey, body)).send(body.toString()).expect(200);
+      expectDocumented('post', webhookUrl, delivered);
+      await payments.drive();
+      const completed = await paystack.status(user, fundingId).expect(200);
+      expect(completed.body).toMatchObject({ status: 'COMPLETED', provider: 'paystack', checkout: null });
+      expectDocumented('get', statusUrl, completed);
+      expectDocumented('post', webhookUrl, await http().post(webhookUrl).send({}).expect(401));
+    });
+
     it('auth: register 201, login 200, refresh 200, resend-otp 202, verify 400, logout 204', async () => {
       const email = `contract-${randomUUID().slice(0, 8)}@example.com`;
       expectDocumented('post', `${PREFIX}/auth/register`, await http().post(`${PREFIX}/auth/register`).send({ email, password: HARNESS_USER_PASSWORD }).expect(201));
@@ -418,7 +446,7 @@ describe('OpenAPI contract (integration)', () => {
     it('every request example passes its route\'s own validation (sent through the real pipeline)', async () => {
       const user = await payments.signUp();
       const checked: string[] = [];
-      for (const { method, path, operation } of operations().filter(({ path }) => !path.endsWith('/webhooks/psp'))) {
+      for (const { method, path, operation } of operations().filter(({ path }) => !path.includes('/webhooks/'))) {
         for (const example of examplesOf(operation)) {
           await payments.clearRateLimits();
           const roles = (operation['x-roles'] as string[] | undefined) ?? [];
@@ -435,7 +463,7 @@ describe('OpenAPI contract (integration)', () => {
         }
       }
       // auth ×5, fund, quote ×2, convert ×2, trade, approvals ×9, reject, review.
-      expect(checked.length).toBe(22);
+      expect(checked.length).toBe(23);
     });
 
     it('every admin payload example matches its documented payload schema', () => {

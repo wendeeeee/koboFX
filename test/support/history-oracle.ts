@@ -1,13 +1,8 @@
 import { DataSource } from 'typeorm';
 
-/** `GET /transactions` parameters, as strings (what a client sends). */
 export type HistoryQueryParameters = Record<string, string>;
 
-/**
- * The history a user SHOULD see, written independently of `TransactionHistoryRepository`: a plain
- * ordered query over the tables, no keyset, `EXISTS` for the currency filter instead of the
- * repository's DISTINCT entry stream. The oracle for the pagination and property suites.
- */
+
 export async function expectedHistory(dataSource: DataSource, userId: string, query: HistoryQueryParameters): Promise<string[]> {
   const time = query.sort === 'bookingTime' ? 'booking_time' : 'value_time';
   const parameters: unknown[] = [userId];
@@ -51,7 +46,7 @@ export async function expectedHistory(dataSource: DataSource, userId: string, qu
   return rows.map((row) => row.reference);
 }
 
-/** The user's own ledger legs per transaction reference, in the wire's order (debits first, then entry id). */
+
 export async function userLegsByReference(
   dataSource: DataSource,
   userId: string,
@@ -73,11 +68,7 @@ export async function userLegsByReference(
   return legs;
 }
 
-/**
- * A transaction with an entry on user U's account belongs to U (`user_id = U`). The plain list
- * (by `transactions.user_id`) and the currency stream (by the user's accounts) agree only while
- * this holds. Returns the violating references.
- */
+
 export async function transactionsOnForeignAccounts(dataSource: DataSource): Promise<string[]> {
   const rows = (await dataSource.query(
     `SELECT DISTINCT transactions.reference
