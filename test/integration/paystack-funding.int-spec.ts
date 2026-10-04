@@ -210,12 +210,16 @@ describe('Paystack funding (integration)', () => {
     expect(await paystack.mock.send(genuine, { signingKey: 'sk_test_attacker_guess_0000000000' })).toBe(401);
     expect(await paystack.mock.send(genuine, 'f'.repeat(128))).toBe(401);
     expect((await paystack.postWebhook(genuine, { 'content-type': 'application/json' })).status).toBe(401);
+    // W2 (WITHDRAWAL_PLAN.md §H): a refused delivery is stored SEALED; it is found by the digest of the exact bytes.
     const forged = (await harness.dataSource.query(
-      `SELECT signature_valid, outcome, provider_event_id, processed_at FROM webhook_events WHERE provider = 'paystack' AND raw_payload = $1`,
+      `SELECT signature_valid, outcome, provider_event_id, processed_at, payload_encoding FROM webhook_events
+        WHERE provider = 'paystack' AND payload_sha256 = sha256($1::bytea)`,
       [genuine],
-    )) as { signature_valid: boolean; outcome: string; provider_event_id: string | null; processed_at: Date | null }[];
+    )) as { signature_valid: boolean; outcome: string; provider_event_id: string | null; processed_at: Date | null; payload_encoding: string }[];
     expect(forged).toHaveLength(3);
-    for (const row of forged) expect(row).toMatchObject({ signature_valid: false, outcome: 'INVALID_SIGNATURE', provider_event_id: null });
+    for (const row of forged) {
+      expect(row).toMatchObject({ signature_valid: false, outcome: 'INVALID_SIGNATURE', provider_event_id: null, payload_encoding: 'SEALED_V1' });
+    }
     expect((await flowOf(fundingId)).state).toBe('CHECKOUT_READY');
     // The genuine delivery is still accepted and processed.
     expect(await paystack.mock.send(genuine)).toBe(200);

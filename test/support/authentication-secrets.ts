@@ -39,6 +39,22 @@ export function paymentProviderTestSecrets(): { secretKey: string; webhookSecret
 }
 
 
+const keyEncryptionKey = randomBytes(32).toString('base64');
+const fingerprintKey = randomBytes(32).toString('base64');
+const requestHashKey = randomBytes(32).toString('base64');
+
+/** Per-process key rings for protected envelopes (W2): a test never sees a real key. */
+export function protectionTestEnvironment(): Record<string, string> {
+  return {
+    WITHDRAWAL_KEY_ENCRYPTION_KEYS: JSON.stringify({ 'test-kek-1': keyEncryptionKey }),
+    WITHDRAWAL_KEY_ENCRYPTION_ACTIVE_KEY_ID: 'test-kek-1',
+    WITHDRAWAL_FINGERPRINT_KEYS: JSON.stringify({ 'test-fingerprint-1': fingerprintKey }),
+    WITHDRAWAL_FINGERPRINT_ACTIVE_KEY_ID: 'test-fingerprint-1',
+    IDEMPOTENCY_REQUEST_HASH_KEYS: JSON.stringify({ 'test-request-hash-1': requestHashKey }),
+    IDEMPOTENCY_REQUEST_HASH_ACTIVE_KEY_ID: 'test-request-hash-1',
+  };
+}
+
 export function authenticationTestEnvironment(): Record<string, string> {
   const pair = testKeyPair();
   return {
@@ -53,5 +69,6 @@ export function authenticationTestEnvironment(): Record<string, string> {
     PSP_SECRET_KEY: pspSecretKey,
     PSP_WEBHOOK_SECRETS: pspWebhookSecret,
     FX_RATE_BASE_URL: 'http://127.0.0.1:9/v6/latest',
+    ...protectionTestEnvironment(),
   };
 }

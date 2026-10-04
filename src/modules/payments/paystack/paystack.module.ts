@@ -9,6 +9,7 @@ import { PaystackHttpClient } from './paystack-http-client';
 import { PaystackAdapter } from './paystack.adapter';
 import { PaystackWebhookController } from './webhooks/paystack-webhook.controller';
 import { PaystackWebhookIngestionService } from './webhooks/paystack-webhook-ingestion.service';
+import { PaystackWebhookRouter } from './webhooks/paystack-webhook-router';
 
 
 @Module({
@@ -16,6 +17,7 @@ import { PaystackWebhookIngestionService } from './webhooks/paystack-webhook-ing
   controllers: [PaystackWebhookController],
   providers: [
     PaystackWebhookIngestionService,
+    PaystackWebhookRouter,
     {
       provide: PaystackGateway,
       inject: [APP_CONFIG, ProviderCallRecorder],
@@ -36,6 +38,6 @@ import { PaystackWebhookIngestionService } from './webhooks/paystack-webhook-ing
       },
     },
   ],
-  exports: [PaystackGateway],
+  exports: [PaystackGateway, PaystackWebhookRouter],
 })
 export class PaystackModule {}

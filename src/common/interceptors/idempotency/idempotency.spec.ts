@@ -8,6 +8,8 @@ const HASH = 'a'.repeat(64);
 const stored = (status: IdempotencyKeyStatus, requestHashValue = HASH) => ({
   status,
   requestHash: requestHashValue,
+  requestHashAlgorithm: 'SHA256_V1',
+  requestHashKeyId: null,
   responseStatusCode: status === IdempotencyKeyStatus.IN_PROGRESS ? null : 202,
   responseBody: status === IdempotencyKeyStatus.IN_PROGRESS ? null : '{"ok":true}',
 });

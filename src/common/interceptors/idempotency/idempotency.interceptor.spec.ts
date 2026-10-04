@@ -33,13 +33,13 @@ describe('IdempotencyInterceptor (unit edges)', () => {
 
   it('passes non-idempotent routes straight through', async () => {
     const reflector = { get: () => undefined } as unknown as Reflector;
-    const interceptor = new IdempotencyInterceptor(reflector, unitOfWork, store, new IdempotencyMetrics());
+    const interceptor = new IdempotencyInterceptor(reflector, unitOfWork, store, new IdempotencyMetrics(), { protection: { keyEncryption: null, fingerprint: null, requestHash: null } });
     await expect(lastValueFrom(interceptor.intercept(context(request()), { handle: () => of('raw') } as CallHandler))).resolves.toBe('raw');
   });
 
   it('fails loudly on a route without a path, and stores an empty body as JSON null', async () => {
     const reflector = { get: (key: string) => (key === 'idempotency:options' ? { flowIdField: 'fundingId' } : undefined) } as unknown as Reflector;
-    const interceptor = new IdempotencyInterceptor(reflector, unitOfWork, store, new IdempotencyMetrics());
+    const interceptor = new IdempotencyInterceptor(reflector, unitOfWork, store, new IdempotencyMetrics(), { protection: { keyEncryption: null, fingerprint: null, requestHash: null } });
     await expect(
       lastValueFrom(interceptor.intercept(context(request({ route: undefined })), { handle: () => of(1) } as CallHandler)),
     ).rejects.toThrow(/no route path/);

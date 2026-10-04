@@ -1,7 +1,9 @@
-import { CallHandler, ExecutionContext, HttpStatus, Injectable, NestInterceptor } from '@nestjs/common';
+import { CallHandler, ExecutionContext, HttpStatus, Inject, Injectable, NestInterceptor } from '@nestjs/common';
 import { HTTP_CODE_METADATA } from '@nestjs/common/constants';
 import { Reflector } from '@nestjs/core';
 import { Observable, from, lastValueFrom } from 'rxjs';
+import { APP_CONFIG } from '../../../config/config.module';
+import { AppConfig } from '../../../config/configuration';
 import { UnitOfWork } from '../../../database/transaction/unit-of-work';
 import { RequestContext } from '../../context';
 import { currentUserFrom } from '../../decorators/current-user.decorator';
@@ -18,7 +20,7 @@ import {
   RequestInProgressError,
   StoredResponse,
 } from './idempotency.errors';
-import { requestHash } from './request-hash';
+import { RequestHashAlgorithm, hashNewRequest, hashWith } from './request-hash';
 
 export const IDEMPOTENCY_KEY_HEADER = 'Idempotency-Key';
 export const IDEMPOTENT_REPLAYED_HEADER = 'Idempotent-Replayed';
@@ -54,6 +56,7 @@ export class IdempotencyInterceptor implements NestInterceptor {
     private readonly unitOfWork: UnitOfWork,
     private readonly store: IdempotencyKeyStore,
     private readonly metrics: IdempotencyMetrics,
+    @Inject(APP_CONFIG) private readonly config: Pick<AppConfig, 'protection'>,
   ) {}
 
   intercept(context: ExecutionContext, next: CallHandler): Observable<unknown> {
@@ -77,12 +80,18 @@ export class IdempotencyInterceptor implements NestInterceptor {
     const routePath = request.route?.path;
     if (!routePath) throw new InvariantViolationError('An @Idempotent() route has no route path.');
     const scope: IdempotencyScope = { userId: user.id, endpoint: `${request.method.toUpperCase()} ${routePath}`, key };
-    const hash = requestHash(scope.endpoint, request.body);
+    const ring = this.config.protection.requestHash;
+    const hashing = hashNewRequest(scope.endpoint, request.body, options.keyedRequestHash === true, ring);
 
     const outcome = await this.unitOfWork.run(async (manager): Promise<Outcome> => {
       if (!(await this.store.tryLock(manager, scope))) throw new RequestInProgressError();
-      const claimed = await this.store.claim(manager, scope, hash);
-      const decision = decide(claimed, claimed ? null : await this.store.find(manager, scope), hash);
+      const claimed = await this.store.claim(manager, scope, hashing);
+      const existing = claimed ? null : await this.store.find(manager, scope);
+      // Compare with the stored row's OWN algorithm and key: a replay stays a replay across key rotation.
+      const comparable = existing
+        ? hashWith(scope.endpoint, request.body, existing.requestHashAlgorithm as RequestHashAlgorithm, existing.requestHashKeyId, ring).hash
+        : hashing.hash;
+      const decision = decide(claimed, existing, comparable);
       switch (decision.kind) {
         case 'IN_PROGRESS':
           throw new RequestInProgressError();

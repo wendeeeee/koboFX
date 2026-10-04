@@ -9,7 +9,9 @@ import { FundingPaymentRepository } from '../flows/funding/funding-payment.repos
 import { PaystackFundingState } from '../flows/paystack-funding/paystack-funding-transitions';
 import { PaystackDispute, PaystackGateway, PaystackTransaction } from '../payments/paystack/paystack-gateway.port';
 import { PaystackTransactionStatus } from '../payments/paystack/paystack-status';
+import { eventTypeOf, familyOfEvent, PaystackEventFamily } from '../payments/paystack/webhooks/paystack-event-family';
 import { parsePaystackWebhookHint } from '../payments/paystack/webhooks/paystack-webhook-payload';
+import { STORED_PAYLOAD_COLUMNS, StoredWebhookPayloadReader, StoredWebhookPayloadRow } from '../payments/webhooks/stored-webhook-payload';
 import { BREAK_POLICIES, BreakType, subjectKeys } from './break-types';
 import { BreakStatus, ResolutionKind } from './break-transitions';
 import { BreakCandidate, BreakService } from './break.service';
@@ -85,6 +87,7 @@ export class PaystackReconciliationJob implements ProviderReconciliation, OnModu
     private readonly runs: ReconciliationRunRepository,
     private readonly registry: ProviderReconciliationRegistry,
     private readonly clock: Clock,
+    private readonly payloads: StoredWebhookPayloadReader,
     @Inject(APP_CONFIG) private readonly config: AppConfig,
   ) {
     this.provider = config.paystack.name;
@@ -293,9 +296,11 @@ export class PaystackReconciliationJob implements ProviderReconciliation, OnModu
 
   private async reprocessUnmatchedWebhooks(run: ClaimedRun, seen: Seen): Promise<void> {
     const events = (await this.unitOfWork.manager.query(
-      `SELECT webhook_events.id, webhook_events.raw_payload
+      `SELECT webhook_events.id, ${STORED_PAYLOAD_COLUMNS}
          FROM webhook_events
         WHERE webhook_events.outcome = 'UNMATCHED' AND webhook_events.provider = $1
+          -- Funding's events only: a valid charge event is never sealed; transfer events belong to withdrawals (§I.2).
+          AND webhook_events.payload_encoding = 'PLAINTEXT_V1'
           AND NOT EXISTS (SELECT 1 FROM reconciliation_breaks
                            WHERE reconciliation_breaks.type = 'UNMATCHED_WEBHOOK'
                              AND reconciliation_breaks.webhook_event_id = webhook_events.id
@@ -303,8 +308,12 @@ export class PaystackReconciliationJob implements ProviderReconciliation, OnModu
         ORDER BY webhook_events.received_at, webhook_events.id
         LIMIT 500`,
       [this.provider],
-    )) as { id: string; raw_payload: Buffer }[];
+    )) as StoredWebhookPayloadRow[];
     for (const event of events) {
+      const payload = await this.payloads.read(event);
+      const eventType = eventTypeOf(payload);
+      // A transfer id is never looked up among funding transactions: another family's event is not funding's to judge.
+      if (eventType !== null && familyOfEvent(eventType) !== PaystackEventFamily.CHARGE) continue;
       const breakId = await this.detect(run, seen, {
         type: BreakType.UNMATCHED_WEBHOOK,
         subjectKey: subjectKeys.webhook(event.id),
@@ -313,7 +322,7 @@ export class PaystackReconciliationJob implements ProviderReconciliation, OnModu
         webhookEventId: event.id,
         details: { webhookEventId: event.id, provider: this.provider },
       });
-      const hint = parsePaystackWebhookHint(event.raw_payload);
+      const hint = parsePaystackWebhookHint(payload);
       const deposit = hint ? await this.depositFor(hint.transactionId, hint.reference) : null;
       if (deposit) {
         await this.runner.advance(deposit.flowId, { includeCompleted: true });

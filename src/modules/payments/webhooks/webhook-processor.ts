@@ -11,6 +11,7 @@ import { FlowRepository } from '../../flows/flow.repository';
 import { FundingPaymentRepository } from '../../flows/funding/funding-payment.repository';
 import { WebhookHint, parseWebhookHint } from './webhook-payload';
 import { ResolvedWebhook, WebhookResolverRegistry } from './webhook-resolvers';
+import { STORED_PAYLOAD_COLUMNS, StoredWebhookPayloadReader, StoredWebhookPayloadRow } from './stored-webhook-payload';
 
 export enum WebhookEventOutcome {
   ADVANCED = 'ADVANCED',
@@ -23,7 +24,8 @@ export enum WebhookEventOutcome {
 interface ClaimedWebhookEvent {
   readonly id: string;
   readonly provider: string;
-  readonly rawPayload: Buffer;
+  /** The stored payload; read through `StoredWebhookPayloadReader` (it may be sealed). */
+  readonly stored: StoredWebhookPayloadRow;
   /** Including this one. */
   readonly attempts: number;
 }
@@ -51,6 +53,7 @@ export class WebhookProcessor {
     private readonly fundingPayments: FundingPaymentRepository,
     @Inject(APP_CONFIG) private readonly config: AppConfig,
     private readonly resolvers: WebhookResolverRegistry,
+    private readonly payloads: StoredWebhookPayloadReader,
   ) {
     this.loop = new PollingLoop(
       WebhookProcessor.name,
@@ -82,6 +85,10 @@ export class WebhookProcessor {
       const resolved = await this.resolve(event);
       if (resolved === 'NO_RESOLVER') return await this.retryOrGiveUp(event, `no webhook resolver for provider ${event.provider}`);
       if (!resolved) return await this.finish(event, WebhookEventOutcome.MALFORMED, null);
+      if (resolved.conflict) {
+        this.logger.warn({ webhookEventId: event.id, eventType: resolved.eventType, conflict: resolved.conflict }, 'Webhook identifiers conflict; routed nowhere');
+        return await this.finish(event, WebhookEventOutcome.UNMATCHED, `conflict: ${resolved.conflict}`);
+      }
       const hint = resolved;
       const flowId = resolved.flowId;
       const flow = flowId ? await this.flows.findById(flowId) : null;
@@ -113,14 +120,15 @@ export class WebhookProcessor {
 
 
   private async resolve(event: ClaimedWebhookEvent): Promise<ResolvedWebhook | undefined | 'NO_RESOLVER'> {
+    const rawPayload = await this.payloads.read(event.stored);
     if (event.provider === this.config.paymentProvider.name) {
-      const hint = parseWebhookHint(event.rawPayload);
+      const hint = parseWebhookHint(rawPayload);
       if (!hint) return undefined;
       return { eventType: hint.eventType, flowId: await this.findFlowId(hint) };
     }
     const resolver = this.resolvers.find(event.provider);
     if (!resolver) return 'NO_RESOLVER';
-    return resolver.resolve(event.rawPayload);
+    return resolver.resolve(rawPayload);
   }
 
   private async findFlowId(hint: WebhookHint): Promise<string | null> {
@@ -164,12 +172,12 @@ export class WebhookProcessor {
             SET attempts = webhook_events.attempts + 1, next_attempt_at = now() + make_interval(secs => $2)
            FROM due
           WHERE webhook_events.id = due.id
-         RETURNING webhook_events.id, webhook_events.provider, webhook_events.raw_payload, webhook_events.attempts,
+         RETURNING webhook_events.id, webhook_events.provider, ${STORED_PAYLOAD_COLUMNS}, webhook_events.attempts,
                    webhook_events.received_at
        )
        SELECT * FROM claimed ORDER BY received_at, id`,
       [batchSize, this.config.flows.leaseSeconds],
-    )) as { id: string; provider: string; raw_payload: Buffer; attempts: number }[];
-    return rows.map((row) => ({ id: row.id, provider: row.provider, rawPayload: row.raw_payload, attempts: row.attempts }));
+    )) as (StoredWebhookPayloadRow & { provider: string; attempts: number })[];
+    return rows.map((row) => ({ id: row.id, provider: row.provider, stored: row, attempts: row.attempts }));
   }
 }

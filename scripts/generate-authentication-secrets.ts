@@ -25,6 +25,12 @@ process.stdout.write(
     `ONE_TIME_PASSWORD_PEPPER=${randomBytes(32).toString('base64')}`,
     `PSP_SECRET_KEY=sk_dev_${randomBytes(24).toString('hex')}`,
     `PSP_WEBHOOK_SECRETS=${randomBytes(32).toString('base64')}`,
+    `WITHDRAWAL_KEY_ENCRYPTION_KEYS=${JSON.stringify({ 'dev-kek-1': randomBytes(32).toString('base64') })}`,
+    'WITHDRAWAL_KEY_ENCRYPTION_ACTIVE_KEY_ID=dev-kek-1',
+    `WITHDRAWAL_FINGERPRINT_KEYS=${JSON.stringify({ 'dev-fingerprint-1': randomBytes(32).toString('base64') })}`,
+    'WITHDRAWAL_FINGERPRINT_ACTIVE_KEY_ID=dev-fingerprint-1',
+    `IDEMPOTENCY_REQUEST_HASH_KEYS=${JSON.stringify({ 'dev-request-hash-1': randomBytes(32).toString('base64') })}`,
+    'IDEMPOTENCY_REQUEST_HASH_ACTIVE_KEY_ID=dev-request-hash-1',
     '',
   ].join('\n'),
 );

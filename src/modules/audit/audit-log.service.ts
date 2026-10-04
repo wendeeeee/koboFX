@@ -37,6 +37,8 @@ export enum AuditAction {
   PERIOD_CLOSED = 'PERIOD_CLOSED',
   CORRECTION_POSTED = 'CORRECTION_POSTED',
   WRITE_OFF_POSTED = 'WRITE_OFF_POSTED',
+  // Withdrawals (W2): a data key rewrapped under the active key-encryption key; the sealed facts are untouched.
+  DATA_KEY_REWRAPPED = 'DATA_KEY_REWRAPPED',
   /** Written by `bootstrap_first_administrators` itself (SQL), listed here so the vocabulary is complete. */
   ADMINISTRATORS_BOOTSTRAPPED = 'ADMINISTRATORS_BOOTSTRAPPED',
 }
@@ -50,6 +52,7 @@ export enum AuditSubjectType {
   APPROVAL = 'APPROVAL',
   EXCHANGE_RATE_SNAPSHOT = 'EXCHANGE_RATE_SNAPSHOT',
   TRANSACTION = 'TRANSACTION',
+  DATA_ENCRYPTION_KEY = 'DATA_ENCRYPTION_KEY',
 }
 
 export type AuditActor =
@@ -85,6 +88,7 @@ export interface AuditState {
   readonly periodStart?: string;
   readonly periodEnd?: string;
   readonly periodLockId?: string;
+  readonly keyEncryptionKeyId?: string;
 }
 
 export interface AuditEntry {

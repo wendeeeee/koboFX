@@ -10,6 +10,8 @@ export enum IdempotencyKeyStatus {
 export interface StoredIdempotencyKey {
   readonly status: IdempotencyKeyStatus;
   readonly requestHash: string;
+  readonly requestHashAlgorithm: string;
+  readonly requestHashKeyId: string | null;
   readonly responseStatusCode: number | null;
   readonly responseBody: string | null;
 }

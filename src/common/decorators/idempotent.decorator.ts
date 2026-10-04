@@ -7,6 +7,12 @@ export interface IdempotentOptions {
   readonly flowIdField?: string;
   /** A field of the success body holding the ledger transaction the request posted, linked on the key row. */
   readonly transactionIdField?: string;
+  /**
+   * The body carries PII (a beneficiary's account number): hash it with HMAC-SHA256 under the active
+   * `IDEMPOTENCY_REQUEST_HASH_KEYS` key, never a plain SHA-256 an attacker with the table could test guesses against
+   * (WITHDRAWAL_PLAN.md §H). Each key row records its algorithm and key; replays are checked with those, forever.
+   */
+  readonly keyedRequestHash?: boolean;
 }
 
 /**

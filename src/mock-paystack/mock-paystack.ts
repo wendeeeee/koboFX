@@ -4,6 +4,7 @@ import type { AddressInfo } from 'node:net';
 import express, { NextFunction, Request, Response } from 'express';
 import { LosslessNumber, stringify } from 'lossless-json';
 import { signPaystackWebhook } from '../modules/payments/paystack/webhooks/paystack-webhook-signature';
+import { MOCK_TRANSFER_OPERATIONS, MockPaystackTransfers, MockTransferOperation } from './mock-paystack-transfers';
 
 /**
  * A simulated Paystack (https://paystack.com/docs/api) for tests and local development (PAYSTACK_PLAN.md E). A real
@@ -21,7 +22,7 @@ import { signPaystackWebhook } from '../modules/payments/paystack/webhooks/payst
  */
 
 export type MockPaystackStatus = 'success' | 'failed' | 'abandoned' | 'ongoing' | 'pending' | 'processing' | 'queued' | 'reversed';
-export type MockPaystackOperation = 'initialize' | 'verify' | 'list_transactions' | 'list_disputes';
+export type MockPaystackOperation = 'initialize' | 'verify' | 'list_transactions' | 'list_disputes' | MockTransferOperation;
 export type MockPaystackFault =
   | 'server_error'
   | 'rate_limited'
@@ -99,7 +100,11 @@ export class MockPaystack {
   private readonly disputes: MockDispute[] = [];
   private readonly faults = new Map<MockPaystackOperation, MockPaystackFault[]>();
   private readonly queue: MockPaystackWebhook[] = [];
-  private readonly counts: Record<MockPaystackOperation, number> = { initialize: 0, verify: 0, list_transactions: 0, list_disputes: 0 };
+  private readonly counts = Object.fromEntries(
+    (['initialize', 'verify', 'list_transactions', 'list_disputes', ...MOCK_TRANSFER_OPERATIONS] as MockPaystackOperation[]).map((operation) => [operation, 0]),
+  ) as Record<MockPaystackOperation, number>;
+  /** The transfer side (W2): banks, resolve, recipients, transfers, balance and ledger. */
+  readonly transfers: MockPaystackTransfers;
   private nextId = FIRST_TRANSACTION_ID;
   private nextDisputeId = 700_000;
   private initializations = 0;
@@ -112,13 +117,27 @@ export class MockPaystack {
   constructor(private readonly options: MockPaystackOptions) {
     this.deliverer = options.deliverWebhook;
     this.onRequest = options.onRequest;
+    this.transfers = new MockPaystackTransfers({
+      now: () => this.now(),
+      integrationId: '463433',
+      emit: (event, data) => this.emit(event, data),
+      handle: (operation, response, effect) => this.handle(operation, response, effect),
+    });
   }
 
   // ── lifecycle ─────────────────────────────────────────────────────────────
 
   async start(port = 0, host = '127.0.0.1'): Promise<string> {
     const app = express();
-    app.use(express.json({ limit: '100kb' }));
+    // The raw text is kept too: the transfer routes read money losslessly (an integer, never a float).
+    app.use(
+      express.json({
+        limit: '100kb',
+        verify: (request, _response, buffer) => {
+          (request as unknown as { rawBody?: string }).rawBody = buffer.toString('utf8');
+        },
+      }),
+    );
     app.use(express.urlencoded({ extended: false }));
     // The hosted checkout (dev walkthrough): no key, like Paystack's.
     app.get('/checkout/:accessCode', (request, response) => this.checkoutPage(request, response));
@@ -128,6 +147,7 @@ export class MockPaystack {
     app.get('/transaction/verify/:reference', (request, response) => void this.handle('verify', response, (into) => this.verify(request, into)));
     app.get('/transaction', (request, response) => void this.handle('list_transactions', response, (into) => this.listTransactions(request, into)));
     app.get('/dispute', (request, response) => void this.handle('list_disputes', response, (into) => this.listDisputes(request, into)));
+    this.transfers.register(app);
     await new Promise<void>((resolve) => {
       this.server = app.listen(port, host, () => resolve());
     });

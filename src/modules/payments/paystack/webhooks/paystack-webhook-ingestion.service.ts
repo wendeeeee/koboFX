@@ -1,10 +1,14 @@
+import { randomUUID } from 'node:crypto';
 import type { IncomingHttpHeaders } from 'node:http';
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import { APP_CONFIG } from '../../../../config/config.module';
 import { AppConfig } from '../../../../config/configuration';
 import { UnitOfWork } from '../../../../database/transaction/unit-of-work';
 import { ProviderCallDirection, ProviderCallRecorder } from '../../provider-call-recorder';
+import { ProtectionService, sha256 } from '../../../protection/protection.service';
 import { WebhookMetrics } from '../../webhooks/webhook-metrics';
+import { WebhookPayloadEncoding, webhookPayloadContext } from '../../webhooks/stored-webhook-payload';
+import { eventTypeOf, familyOfEvent, PaystackEventFamily } from './paystack-event-family';
 import { parsePaystackWebhookHint } from './paystack-webhook-payload';
 import { PAYSTACK_SIGNATURE_HEADER, verifyPaystackSignature } from './paystack-webhook-signature';
 
@@ -40,6 +44,7 @@ export class PaystackWebhookIngestionService {
     private readonly unitOfWork: UnitOfWork,
     private readonly recorder: ProviderCallRecorder,
     private readonly metrics: WebhookMetrics,
+    private readonly protection: ProtectionService,
     @Inject(APP_CONFIG) private readonly config: AppConfig,
   ) {}
 
@@ -58,27 +63,38 @@ export class PaystackWebhookIngestionService {
     );
     const refusal = !sourceAllowed ? `source ${source || 'unknown'} not allowed` : !verdict.valid ? `signature ${verdict.reason}` : undefined;
 
+    // §H: a valid charge event is stored as received (funding unchanged); a transfer-bearing, refused, malformed or
+    // unknown-family delivery may carry account data the redactor cannot find, so it is SEALED — the exact signed bytes,
+    // bound to this row, digest kept. No keys configured ⇒ the request fails and nothing is acknowledged.
+    const eventType = eventTypeOf(rawBody);
+    const sealPayload = !accepted || !hint || eventType === null || familyOfEvent(eventType) !== PaystackEventFamily.CHARGE;
+    const webhookEventId = randomUUID();
+    const sealed = sealPayload ? await this.protection.sealEvidence(rawBody, webhookPayloadContext(webhookEventId)) : null;
+
     const result = await this.unitOfWork.run(async (manager) => {
       const inserted = (await manager.query(
-        `INSERT INTO webhook_events (provider, provider_event_id, raw_payload, headers, signature_valid, outcome, processed_at)
-         VALUES ($1, $2, $3, $4, $5, $6::webhook_event_outcome, CASE WHEN $6::text IS NULL THEN NULL ELSE now() END)
+        `INSERT INTO webhook_events (id, provider, provider_event_id, raw_payload, headers, signature_valid, outcome, processed_at,
+                                     payload_encoding, payload_key_id, payload_sha256)
+         VALUES ($7, $1, $2, $3, $4, $5, $6::webhook_event_outcome, CASE WHEN $6::text IS NULL THEN NULL ELSE now() END, $8, $9, $10)
          ON CONFLICT (provider, provider_event_id) WHERE signature_valid AND provider_event_id IS NOT NULL DO NOTHING
          RETURNING id`,
-        [paystack.name, providerEventId, rawBody, JSON.stringify(storedHeaders), verdict.valid, outcome],
+        [paystack.name, providerEventId, sealed ? sealed.sealed : rawBody, JSON.stringify(storedHeaders), verdict.valid, outcome,
+          webhookEventId, sealed ? WebhookPayloadEncoding.SEALED_V1 : WebhookPayloadEncoding.PLAINTEXT_V1, sealed?.keyId ?? null,
+          sealed ? sha256(rawBody) : null],
       )) as { id: string }[];
-      let webhookEventId = inserted[0]?.id;
-      if (!webhookEventId) {
+      let storedId = inserted[0]?.id;
+      if (!storedId) {
         const [existing] = (await manager.query(
           `SELECT id FROM webhook_events WHERE provider = $1 AND provider_event_id = $2 AND signature_valid`,
           [paystack.name, providerEventId],
         )) as { id: string }[];
-        webhookEventId = existing.id;
+        storedId = existing.id;
       }
       await this.recorder.record({
         provider: paystack.name,
         operation: hint ? `webhook:${hint.eventType}` : 'webhook',
         direction: ProviderCallDirection.INBOUND,
-        webhookEventId,
+        webhookEventId: storedId,
         requestMethod: 'POST',
         requestPath: '/webhooks/paystack',
         // Ids only: the full payload (customer data included) is the stored raw evidence, not copied here.
@@ -86,7 +102,7 @@ export class PaystackWebhookIngestionService {
         responseStatus: accepted ? 200 : 401,
         error: refusal ?? (inserted.length === 0 ? 'duplicate delivery' : undefined),
       });
-      return { webhookEventId, duplicate: inserted.length === 0 };
+      return { webhookEventId: storedId, duplicate: inserted.length === 0 };
     });
     if (!verdict.valid) this.metrics.recordInvalidSignature();
     if (!accepted) {

@@ -191,7 +191,7 @@ describe('reconciliation: the less travelled paths (integration)', () => {
       const flowId = await fund('220000');
       await payments.drive();
       const batchId = payments.psp.settle({ currency: 'NGN', paymentIds: [await paymentOf(flowId)] });
-      payments.psp.failNext('get_settlement', 'malformed_json', 4); // every retry of this run
+      payments.psp.failNext('get_settlement', 'malformed_json', 4, batchId); // every retry of this report, regardless of batch order
       await daily();
       const [unreadable] = await breaksOf(BreakType.SETTLEMENT_REPORT_REJECTED, `batch:simulated-psp:${batchId}`);
       expect(unreadable).toMatchObject({ status: BreakStatus.ESCALATED, details: expect.objectContaining({ rejection: 'UNREADABLE' }) });

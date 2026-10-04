@@ -1,3 +1,4 @@
+import { KeyRing, parseKeyRing } from '../common/crypto/key-ring';
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { KeyObject, createPrivateKey, createPublicKey } from 'node:crypto';
@@ -118,6 +119,19 @@ export interface PaystackConfig {
 }
 
 export const PAYSTACK_PROVIDER_NAME = 'paystack';
+
+/**
+ * Key rings for protected envelopes (WITHDRAWAL_PLAN.md §H; D6). `null` = not configured: whatever needs the ring fails
+ * loudly when used (`DependencyUnavailableError`), never with plaintext or an unkeyed digest.
+ */
+export interface ProtectionConfig {
+  /** Wraps data keys (AES-256, exactly 32 bytes each). */
+  readonly keyEncryption: KeyRing | null;
+  /** Destination fingerprints (HMAC-SHA256, ≥ 32 bytes). */
+  readonly fingerprint: KeyRing | null;
+  /** Request hashes of idempotent requests whose body carries PII (HMAC-SHA256, ≥ 32 bytes). */
+  readonly requestHash: KeyRing | null;
+}
 
 export interface FundingLimit {
   readonly minimumMinor: bigint;
@@ -262,6 +276,7 @@ export interface AppConfig {
   readonly outbox: OutboxConfig;
   readonly paymentProvider: PaymentProviderConfig;
   readonly paystack: PaystackConfig;
+  readonly protection: ProtectionConfig;
   readonly funding: FundingConfig;
   readonly conversion: ConversionConfig;
   readonly flows: FlowConfig;
@@ -380,6 +395,14 @@ const envSchema = Joi.object({
   PAYSTACK_REQUEST_TIMEOUT_MILLISECONDS: Joi.number().integer().min(100).max(30_000).default(5000),
   PAYSTACK_INITIALIZE_TIMEOUT_MILLISECONDS: Joi.number().integer().min(1000).max(60_000).default(10_000),
   PAYSTACK_READ_RETRIES: Joi.number().integer().min(0).max(5).default(3),
+  // Protected envelopes (WITHDRAWAL_PLAN.md §H): key rings as JSON {keyId: base64}, each with its active id. Optional:
+  // absent → the features that need them fail with an explicit dependency error, never a plaintext fallback.
+  WITHDRAWAL_KEY_ENCRYPTION_KEYS: Joi.string(),
+  WITHDRAWAL_KEY_ENCRYPTION_ACTIVE_KEY_ID: Joi.string(),
+  WITHDRAWAL_FINGERPRINT_KEYS: Joi.string(),
+  WITHDRAWAL_FINGERPRINT_ACTIVE_KEY_ID: Joi.string(),
+  IDEMPOTENCY_REQUEST_HASH_KEYS: Joi.string(),
+  IDEMPOTENCY_REQUEST_HASH_ACTIVE_KEY_ID: Joi.string(),
 
   PSP_FUNDING_CURRENCIES: Joi.string()
     .pattern(/^[A-Z]{3}(,[A-Z]{3})*$/)
@@ -490,8 +513,9 @@ export function loadConfig(raw: NodeJS.ProcessEnv | Record<string, string | unde
   const conversion = parseConversion(env.CONVERSION_LIMITS, problems);
   const fx = error ? undefined : parseFx(env, problems);
   const reconciliation = error ? undefined : parseReconciliation(env, funding?.currencies ?? [], problems);
+  const protection = parseProtection(raw, problems);
   const buildGitSha = resolveBuildGitSha(env.BUILD_GIT_SHA, env.NODE_ENV === 'production', problems);
-  if (problems.length > 0 || !keys || !pepper || !webhookSecrets || !funding || !conversion || !fx || !reconciliation || !paystack) {
+  if (problems.length > 0 || !keys || !pepper || !webhookSecrets || !funding || !conversion || !fx || !reconciliation || !paystack || !protection) {
     throw new ConfigValidationError(problems);
   }
   return {
@@ -555,6 +579,7 @@ export function loadConfig(raw: NodeJS.ProcessEnv | Record<string, string | unde
       readRetries: env.PSP_READ_RETRIES,
     },
     paystack,
+    protection,
     funding,
     conversion,
     flows: {
@@ -957,4 +982,24 @@ function parseAccessTokenKeys(
     problems.push('JWT_PRIVATE_KEY does not match the public key published under JWT_SIGNING_KEY_ID');
   }
   return { privateKey, publicKeys };
+}
+
+function parseProtection(raw: Record<string, string | undefined>, problems: string[]): ProtectionConfig | undefined {
+  const keyEncryption = parseKeyRing(raw.WITHDRAWAL_KEY_ENCRYPTION_KEYS, raw.WITHDRAWAL_KEY_ENCRYPTION_ACTIVE_KEY_ID, {
+    name: 'WITHDRAWAL_KEY_ENCRYPTION_KEYS',
+    activeName: 'WITHDRAWAL_KEY_ENCRYPTION_ACTIVE_KEY_ID',
+    exactBytes: 32,
+  }, problems);
+  const fingerprint = parseKeyRing(raw.WITHDRAWAL_FINGERPRINT_KEYS, raw.WITHDRAWAL_FINGERPRINT_ACTIVE_KEY_ID, {
+    name: 'WITHDRAWAL_FINGERPRINT_KEYS',
+    activeName: 'WITHDRAWAL_FINGERPRINT_ACTIVE_KEY_ID',
+    minimumBytes: 32,
+  }, problems);
+  const requestHash = parseKeyRing(raw.IDEMPOTENCY_REQUEST_HASH_KEYS, raw.IDEMPOTENCY_REQUEST_HASH_ACTIVE_KEY_ID, {
+    name: 'IDEMPOTENCY_REQUEST_HASH_KEYS',
+    activeName: 'IDEMPOTENCY_REQUEST_HASH_ACTIVE_KEY_ID',
+    minimumBytes: 32,
+  }, problems);
+  if (keyEncryption === undefined || fingerprint === undefined || requestHash === undefined) return undefined;
+  return { keyEncryption, fingerprint, requestHash };
 }

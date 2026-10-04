@@ -25,6 +25,7 @@ import { FlowResumer } from '../../src/modules/flows/flow-resumer';
 import { FlowRunner } from '../../src/modules/flows/flow-runner';
 import { WebhookProcessor } from '../../src/modules/payments/webhooks/webhook-processor';
 import { RedisService } from '../../src/redis/redis.service';
+import { PaystackTransfersModule } from '../../src/modules/payments/paystack/transfers/paystack-transfers.module';
 import { Clock } from '../../src/common/clock';
 import { EmailSender } from '../../src/modules/notifications/email/email-sender';
 import { OutboxDispatcher } from '../../src/modules/outbox/outbox-dispatcher';
@@ -107,7 +108,15 @@ export interface HarnessOptions {
 
   readonly fx?: { readonly open?: boolean } | true;
 
-  readonly paystack?: { readonly hangMilliseconds?: number; readonly checkoutWindowMinutes?: number; readonly webhookIpAllowlist?: string } | true;
+  readonly paystack?:
+    | {
+        readonly hangMilliseconds?: number;
+        readonly checkoutWindowMinutes?: number;
+        readonly webhookIpAllowlist?: string;
+        /** Also import `PaystackTransfersModule` (W2: the transfers gateway + the TRANSFER webhook family). */
+        readonly transfers?: boolean;
+      }
+    | true;
 }
 
 export interface PaystackHarness {
@@ -307,7 +316,7 @@ export async function startLedgerHarness(
   if (redis) {
     const emails = new CapturingEmailSender();
     moduleRef = await Test.createTestingModule({
-      imports: [AppModule.forRoot(db.env, { logStream: options.logStream })],
+      imports: [AppModule.forRoot(db.env, { logStream: options.logStream }), ...(paystackOptions.transfers ? [PaystackTransfersModule] : [])],
     })
       .overrideProvider(EmailSender)
       .useValue(emails)

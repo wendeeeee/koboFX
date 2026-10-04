@@ -1,6 +1,7 @@
 import { Logger } from '@nestjs/common';
 import { RandomSource, fullJitterDelayMilliseconds } from '../polling/backoff';
 import { ProviderCallDirection, ProviderCallRecorder, unparsedBody } from './provider-call-recorder';
+import { InvariantViolationError } from '../errors';
 import { ProviderRequestRejectedError, ProviderResponseInvalidError, ProviderUnavailableError } from './provider.errors';
 import { REDACTED, redactJsonTextLosslessly } from './redaction';
 
@@ -52,6 +53,11 @@ export interface ProviderHttpClientOptions {
   readonly recordResponseAs?: RecordResponseAs;
   /** With `redacted-lossless-json`: keys redacted beyond the shared rule (e.g. a customer object). */
   readonly extraRedactedKeys?: RegExp;
+  /**
+   * Record a non-JSON body as its length only, never its text (it may echo PII the redactor cannot find by key —
+   * a bank's HTML error page quoting an account number). The adapter keeps the exact bytes as protected evidence.
+   */
+  readonly withholdUnparsedBodies?: boolean;
   readonly random?: RandomSource;
   readonly sleep?: (milliseconds: number) => Promise<void>;
   readonly fetch?: typeof fetch;
@@ -66,6 +72,18 @@ export interface ProviderHttpRequest<T> {
   readonly recordedPath?: string;
   readonly headers?: Record<string, string>;
   readonly body?: Record<string, unknown>;
+  /**
+   * The exact JSON text to send, instead of `JSON.stringify(body)` — for a provider that wants money as a JSON
+   * INTEGER (`exactJsonBody`, never a float). Requires `recordedBody`: what `provider_calls` sees.
+   */
+  readonly rawBody?: string;
+  /** What the recorder stores as the request body (already sanitised by the adapter). Defaults to `body`. */
+  readonly recordedBody?: unknown;
+  /**
+   * Values of THIS request that must never be recorded or logged (an account number in a query string): scrubbed,
+   * with their URL-encoded forms, from the recorded path, error texts and recorded raw bodies.
+   */
+  readonly sensitiveValues?: readonly string[];
   readonly flowId?: string;
   /** Only an idempotent read may be retried (design §7.2). Defaults to `method === 'GET'`. */
   readonly retryable?: boolean;
@@ -115,16 +133,23 @@ export class ProviderHttpClient {
     this.fetch = options.fetch ?? fetch;
   }
 
-  /** Replace every configured secret in `text` with `[REDACTED]`. */
-  scrub(text: string): string {
+  /** Replace every configured secret (and the request's sensitive values, raw or URL-encoded) with `[REDACTED]`. */
+  scrub(text: string, sensitiveValues: readonly string[] = []): string {
     let result = text;
-    for (const secret of this.options.secrets ?? []) {
-      if (secret.length > 0) result = result.split(secret).join(REDACTED);
+    const values = [...(this.options.secrets ?? []), ...sensitiveValues];
+    const forms = values.flatMap((value) => [value, encodeURIComponent(value), encodeURIComponent(encodeURIComponent(value))]);
+    for (const form of [...new Set(forms)].sort((a, b) => b.length - a.length)) {
+      if (form.length > 0) result = result.split(form).join(REDACTED);
     }
     return result;
   }
 
   async send<T>(request: ProviderHttpRequest<T>): Promise<ProviderHttpResponse<T>> {
+    if (request.rawBody !== undefined && (request.body !== undefined || request.recordedBody === undefined)) {
+      throw new InvariantViolationError('A raw request body replaces `body` and needs a `recordedBody` for the recorder.', {
+        operation: request.operation,
+      });
+    }
     const retryable = request.retryable ?? request.method === 'GET';
     const attempts = request.maximumAttempts ?? (retryable ? 1 + this.options.readRetries : 1);
     let lastError: unknown;
@@ -151,6 +176,7 @@ export class ProviderHttpClient {
   private async attempt<T>(request: ProviderHttpRequest<T>, attempt: number): Promise<ProviderHttpResponse<T>> {
     const { label } = this.options;
     const started = Date.now();
+    const sensitive = request.sensitiveValues ?? [];
     const record = (fields: { responseStatus?: number; responseText?: string; error?: string }) =>
       this.recorder.recordQuietly({
         provider: this.options.provider,
@@ -158,13 +184,13 @@ export class ProviderHttpClient {
         direction: ProviderCallDirection.OUTBOUND,
         flowId: request.flowId,
         requestMethod: request.method,
-        requestPath: this.scrub(request.recordedPath ?? request.path),
+        requestPath: this.scrub(request.recordedPath ?? request.path, sensitive),
         attempt,
-        requestBody: request.body,
+        requestBody: request.recordedBody ?? request.body,
         durationMilliseconds: Date.now() - started,
         responseStatus: fields.responseStatus,
-        ...(fields.responseText === undefined ? {} : this.recordedBody(fields.responseText, request.recordResponseAs)),
-        ...(fields.error === undefined ? {} : { error: this.scrub(fields.error) }),
+        ...(fields.responseText === undefined ? {} : this.recordedBody(fields.responseText, request.recordResponseAs, sensitive)),
+        ...(fields.error === undefined ? {} : { error: this.scrub(fields.error, sensitive) }),
       });
 
     let response: Response;
@@ -174,10 +200,10 @@ export class ProviderHttpClient {
         method: request.method,
         headers: {
           Accept: 'application/json',
-          ...(request.body ? { 'Content-Type': 'application/json' } : {}),
+          ...(request.body || request.rawBody !== undefined ? { 'Content-Type': 'application/json' } : {}),
           ...request.headers,
         },
-        body: request.body ? JSON.stringify(request.body) : undefined,
+        body: request.rawBody ?? (request.body ? JSON.stringify(request.body) : undefined),
         signal: AbortSignal.timeout(this.options.timeoutMilliseconds),
       });
       text = await response.text();
@@ -217,19 +243,21 @@ export class ProviderHttpClient {
   private recordedBody(
     text: string,
     recordResponseAs = this.options.recordResponseAs,
+    sensitive: readonly string[] = [],
   ): { responseBody?: unknown; responseBodyText?: string } {
     let parsed: unknown;
     try {
       parsed = text.length === 0 ? null : JSON.parse(text);
     } catch {
-      return { responseBody: unparsedBody(this.scrub(text)) };
+      if (this.options.withholdUnparsedBodies) return { responseBody: { unparsed: `[WITHHELD: ${Buffer.byteLength(text)} bytes]` } };
+      return { responseBody: unparsedBody(this.scrub(text, sensitive)) };
     }
     if (recordResponseAs === 'raw-json-text' && text.length > 0) {
-      return { responseBodyText: this.scrub(text) };
+      return { responseBodyText: this.scrub(text, sensitive) };
     }
     if (recordResponseAs === 'redacted-lossless-json' && text.length > 0) {
       const redacted = redactJsonTextLosslessly(text, this.options.extraRedactedKeys);
-      if (redacted !== undefined) return { responseBodyText: this.scrub(redacted) };
+      if (redacted !== undefined) return { responseBodyText: this.scrub(redacted, sensitive) };
     }
     return { responseBody: parsed };
   }

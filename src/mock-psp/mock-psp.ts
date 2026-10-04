@@ -149,7 +149,7 @@ export class MockPsp {
   private readonly payments = new Map<string, MockPayment>();
   private readonly byReference = new Map<string, string>();
   private readonly writes = new Map<string, StoredWrite>();
-  private readonly faults = new Map<MockOperation, FaultKind[]>();
+  private readonly faults = new Map<MockOperation, { kind: FaultKind; resourceId?: string }[]>();
   private readonly queue: MockWebhookEvent[] = [];
   private readonly timers = new Set<NodeJS.Timeout>();
   private readonly requests: Record<MockOperation, number> = {
@@ -212,9 +212,10 @@ export class MockPsp {
     this.readLag = reads;
   }
 
-  failNext(operation: MockOperation, kind: FaultKind, count = 1): void {
+  /** Optionally limit the fault to reads or writes of a particular resource. */
+  failNext(operation: MockOperation, kind: FaultKind, count = 1, resourceId?: string): void {
     const queue = this.faults.get(operation) ?? [];
-    for (let index = 0; index < count; index += 1) queue.push(kind);
+    for (let index = 0; index < count; index += 1) queue.push({ kind, resourceId });
     this.faults.set(operation, queue);
   }
 
@@ -617,7 +618,9 @@ export class MockPsp {
 
   private async handle(operation: MockOperation, request: Request, response: Response, effect: () => StoredWrite): Promise<void> {
     this.requests[operation] += 1;
-    const fault = this.faults.get(operation)?.shift();
+    const faults = this.faults.get(operation);
+    const faultIndex = faults?.findIndex((fault) => fault.resourceId === undefined || fault.resourceId === request.params.id) ?? -1;
+    const fault = faultIndex >= 0 ? faults!.splice(faultIndex, 1)[0].kind : undefined;
     const isWrite = operation === 'authorize' || operation === 'capture' || operation === 'void';
     const idempotencyKey = request.header('idempotency-key');
     if (isWrite && !idempotencyKey) {

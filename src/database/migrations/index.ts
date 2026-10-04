@@ -45,6 +45,7 @@ import { WithdrawalFlowStates1791417600001 } from './1791417600001-WithdrawalFlo
 import { ProtectedReservationsAndPayoutAccounts1791417600002 } from './1791417600002-ProtectedReservationsAndPayoutAccounts';
 import { CreateProviderEvidence1791417600003 } from './1791417600003-CreateProviderEvidence';
 import { CreateWithdrawals1791417600004 } from './1791417600004-CreateWithdrawals';
+import { ProtectedEnvelopes1791504000000 } from './1791504000000-ProtectedEnvelopes';
 
 /** Explicit, ordered list — no globbing, so the CLI and the test harness run the same set. */
 export const MIGRATIONS = [
@@ -95,4 +96,5 @@ export const MIGRATIONS = [
   ProtectedReservationsAndPayoutAccounts1791417600002,
   CreateProviderEvidence1791417600003,
   CreateWithdrawals1791417600004,
+  ProtectedEnvelopes1791504000000,
 ];

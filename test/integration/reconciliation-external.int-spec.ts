@@ -142,7 +142,8 @@ describe('reconciliation: external faults (integration)', () => {
     expect(await createdBy(await daily())).toEqual([]);
     expect((await depositOf(kept)).state).toBe('SETTLED');
 
-    clock().advance(5 * DAY);
+    const deadline = expectedSettlementDeadline((await depositOf(omitted)).captured_at, 2, 24);
+    clock().advance(deadline.getTime() - clock().now().getTime() + 1000);
     const late = await daily();
     expect(await createdBy(late)).toEqual([[BreakType.UNSETTLED_PAST_WINDOW, subject(omittedPayment), BreakStatus.OPEN]]);
     expect((await depositOf(omitted)).state).toBe('POSTED'); // nothing edited to hide it
@@ -161,13 +162,17 @@ describe('reconciliation: external faults (integration)', () => {
   it('late batch (settled on time, published late): one UNSETTLED_PAST_WINDOW while unseen, resolved when it appears', async () => {
     const flowId = await fund('410000');
     await payments.drive();
-    const paymentId = await payment(flowId)();
-    const batchId = payments.psp.settle({ currency: 'NGN', paymentIds: [paymentId], settledAt: clock().now(), visibleFrom: new Date(clock().now().getTime() + 10 * DAY) });
+    const deposit = await depositOf(flowId);
+    const paymentId = deposit.provider_payment_id;
+    const visibleFrom = new Date(clock().now().getTime() + 10 * DAY);
+    const batchId = payments.psp.settle({ currency: 'NGN', paymentIds: [paymentId], settledAt: clock().now(), visibleFrom });
 
-    clock().advance(5 * DAY);
+    const deadline = expectedSettlementDeadline(deposit.captured_at, 2, 24);
+    clock().advance(deadline.getTime() - clock().now().getTime() + 1000);
+    expect(clock().now().getTime()).toBeLessThan(visibleFrom.getTime());
     expect(await createdBy(await daily())).toEqual([[BreakType.UNSETTLED_PAST_WINDOW, subject(paymentId), BreakStatus.OPEN]]);
 
-    clock().advance(6 * DAY);
+    clock().advance(visibleFrom.getTime() - clock().now().getTime() + 1000);
     expect(await createdBy(await daily())).toEqual([]);
     expect((await depositOf(flowId)).state).toBe('SETTLED');
     expect((await breakOn(BreakType.UNSETTLED_PAST_WINDOW, subject(paymentId)))[0].resolutionKind).toBe(ResolutionKind.SETTLED_LATE);

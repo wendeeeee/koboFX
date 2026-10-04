@@ -5,6 +5,8 @@ import { InvariantViolationError } from '../../../common/errors';
 export interface ResolvedWebhook {
   readonly eventType: string;
   readonly flowId: string | null;
+  /** Set when the event's identifiers point at different intents: recorded, routed nowhere (WITHDRAWAL_PLAN.md §I.1). */
+  readonly conflict?: string;
 }
 
 

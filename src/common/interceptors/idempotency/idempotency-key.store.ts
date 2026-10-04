@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { EntityManager } from 'typeorm';
 import { IdempotencyKeyStatus, StoredIdempotencyKey } from './idempotency-decision';
+import { RequestHashing } from './request-hash';
 
 export interface IdempotencyScope {
   readonly userId: string;
@@ -25,27 +26,36 @@ export class IdempotencyKeyStore {
   }
 
   /** The atomic claim — ONE statement (design §6.5). `true` when this request owns the key. */
-  async claim(manager: EntityManager, scope: IdempotencyScope, requestHash: string): Promise<boolean> {
+  async claim(manager: EntityManager, scope: IdempotencyScope, hashing: RequestHashing): Promise<boolean> {
     const rows = (await manager.query(
-      `INSERT INTO idempotency_keys (user_id, endpoint, key, request_hash, status)
-       VALUES ($1, $2, $3, $4, 'IN_PROGRESS')
+      `INSERT INTO idempotency_keys (user_id, endpoint, key, request_hash, status, request_hash_algorithm, request_hash_key_id)
+       VALUES ($1, $2, $3, $4, 'IN_PROGRESS', $5, $6)
        ON CONFLICT (user_id, endpoint, key) DO NOTHING
        RETURNING key`,
-      [scope.userId, scope.endpoint, scope.key, requestHash],
+      [scope.userId, scope.endpoint, scope.key, hashing.hash, hashing.algorithm, hashing.keyId],
     )) as unknown[];
     return rows.length === 1;
   }
 
   async find(manager: EntityManager, scope: IdempotencyScope): Promise<StoredIdempotencyKey | null> {
     const [row] = (await manager.query(
-      `SELECT status, request_hash, response_status_code, response_body FROM idempotency_keys
+      `SELECT status, request_hash, request_hash_algorithm, request_hash_key_id, response_status_code, response_body FROM idempotency_keys
         WHERE user_id = $1 AND endpoint = $2 AND key = $3`,
       [scope.userId, scope.endpoint, scope.key],
-    )) as { status: IdempotencyKeyStatus; request_hash: string; response_status_code: number | null; response_body: string | null }[];
+    )) as {
+      status: IdempotencyKeyStatus;
+      request_hash: string;
+      request_hash_algorithm: string;
+      request_hash_key_id: string | null;
+      response_status_code: number | null;
+      response_body: string | null;
+    }[];
     return row
       ? {
           status: row.status,
           requestHash: row.request_hash,
+          requestHashAlgorithm: row.request_hash_algorithm,
+          requestHashKeyId: row.request_hash_key_id,
           responseStatusCode: row.response_status_code,
           responseBody: row.response_body,
         }

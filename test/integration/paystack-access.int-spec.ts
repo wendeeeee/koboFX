@@ -1,5 +1,6 @@
 import { buildOpenApiDocument } from '../../src/openapi/openapi-document';
 import { signPaystackWebhook } from '../../src/modules/payments/paystack/webhooks/paystack-webhook-signature';
+import { STORED_PAYLOAD_COLUMNS, StoredWebhookPayloadReader } from '../../src/modules/payments/webhooks/stored-webhook-payload';
 import { LedgerHarness, startLedgerHarness } from '../support/ledger-harness';
 import request from 'supertest';
 
@@ -19,9 +20,14 @@ describe('Paystack source allowlist', () => {
       'X-Forwarded-For': '192.0.2.1',
     });
     expect(response.status).toBe(401);
-    const [event] = await harness.dataSource.query("SELECT signature_valid, outcome, raw_payload FROM webhook_events WHERE provider = 'paystack'");
+    const [event] = await harness.dataSource.query(
+      `SELECT webhook_events.id, webhook_events.signature_valid, webhook_events.outcome, ${STORED_PAYLOAD_COLUMNS}
+         FROM webhook_events WHERE provider = 'paystack'`,
+    );
     expect(event.signature_valid).toBe(true);
-    expect(event.raw_payload).toEqual(body);
+    // W2 (WITHDRAWAL_PLAN.md §H): a refused delivery is stored sealed; it reads back as the exact bytes received.
+    expect(event.payload_encoding).toBe('SEALED_V1');
+    expect(await harness.moduleRef.get(StoredWebhookPayloadReader).read(event)).toEqual(body);
     expect((await harness.payments!.processor.processDue(100)).claimed).toBe(0);
     expect(paystack.gatewayCalls).toHaveLength(0);
   });
