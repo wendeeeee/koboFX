@@ -102,7 +102,7 @@ export class WithdrawalFixtures {
       await manager.query(
         `UPDATE withdrawal_beneficiaries
             SET provider_recipient_code_sealed = $2, provider_recipient_id_sealed = $3, recipient_evidence_id = $4,
-                recipient_bound_at = now()
+                recipient_bound_at = now(), bank_name = 'Test Bank'
           WHERE id = $1`,
         [beneficiary.id, sealed(), sealed(), await this.evidence(manager)],
       );

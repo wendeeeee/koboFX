@@ -29,6 +29,7 @@ import { ReconciliationModule } from './modules/reconciliation/reconciliation.mo
 import { AdminModule } from './modules/admin/admin.module';
 import { RedisModule } from './redis/redis.module';
 import { PaystackFundingModule, isPaystackEnabled } from './modules/flows/paystack-funding/paystack-funding.module';
+import { WithdrawalsModule } from './modules/withdrawals/withdrawals.module';
 
 const REDACT_PATHS = [
   'req.headers.authorization',
@@ -100,6 +101,7 @@ export class AppModule {
         ReconciliationModule,
         AdminModule,
         ...(isPaystackEnabled(env) ? [PaystackFundingModule] : []),
+        WithdrawalsModule.forRoot(env),
         HealthModule,
       ],
       providers: [

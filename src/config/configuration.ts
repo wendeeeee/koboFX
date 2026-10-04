@@ -1,4 +1,5 @@
 import { KeyRing, parseKeyRing } from '../common/crypto/key-ring';
+import { WithdrawalLimit, parseWithdrawalLimits } from '../modules/withdrawals/withdrawal-limits';
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { KeyObject, createPrivateKey, createPublicKey } from 'node:crypto';
@@ -119,6 +120,19 @@ export interface PaystackConfig {
 }
 
 export const PAYSTACK_PROVIDER_NAME = 'paystack';
+
+/**
+ * Paystack withdrawals (WITHDRAWAL_PLAN.md §K; D8). `enabled` admits NEW beneficiaries and withdrawals; recorded work is
+ * processed whenever a Paystack key is configured, whatever the switch says. Enabling requires a test key outside
+ * production, explicit limits, the account identity and every key ring (refused at boot otherwise).
+ */
+export interface WithdrawalConfig {
+  readonly enabled: boolean;
+  readonly limits: ReadonlyMap<string, WithdrawalLimit> | null;
+  readonly accountIdentity: string | null;
+  readonly reviewDeadlineMinutes: number;
+  readonly workerHeartbeatFreshnessSeconds: number;
+}
 
 /**
  * Key rings for protected envelopes (WITHDRAWAL_PLAN.md §H; D6). `null` = not configured: whatever needs the ring fails
@@ -277,6 +291,7 @@ export interface AppConfig {
   readonly paymentProvider: PaymentProviderConfig;
   readonly paystack: PaystackConfig;
   readonly protection: ProtectionConfig;
+  readonly withdrawals: WithdrawalConfig;
   readonly funding: FundingConfig;
   readonly conversion: ConversionConfig;
   readonly flows: FlowConfig;
@@ -403,6 +418,12 @@ const envSchema = Joi.object({
   WITHDRAWAL_FINGERPRINT_ACTIVE_KEY_ID: Joi.string(),
   IDEMPOTENCY_REQUEST_HASH_KEYS: Joi.string(),
   IDEMPOTENCY_REQUEST_HASH_ACTIVE_KEY_ID: Joi.string(),
+  // Paystack withdrawals (WITHDRAWAL_PLAN.md §K; D8). The switch admits NEW work only; recorded work is always processed.
+  PAYSTACK_WITHDRAWALS_ENABLED: Joi.boolean().default(false),
+  PAYSTACK_WITHDRAWAL_LIMITS: Joi.string(),
+  PAYSTACK_ACCOUNT_IDENTITY: Joi.string().pattern(/^[A-Za-z0-9._:-]{1,64}$/, 'a Paystack integration/account identity'),
+  PAYSTACK_WITHDRAWAL_REVIEW_DEADLINE_MINUTES: Joi.number().integer().min(1).max(24 * 60).default(15),
+  WITHDRAWAL_WORKER_HEARTBEAT_FRESHNESS_SECONDS: Joi.number().integer().min(10).max(3600).default(120),
 
   PSP_FUNDING_CURRENCIES: Joi.string()
     .pattern(/^[A-Z]{3}(,[A-Z]{3})*$/)
@@ -514,8 +535,9 @@ export function loadConfig(raw: NodeJS.ProcessEnv | Record<string, string | unde
   const fx = error ? undefined : parseFx(env, problems);
   const reconciliation = error ? undefined : parseReconciliation(env, funding?.currencies ?? [], problems);
   const protection = parseProtection(raw, problems);
+  const withdrawals = error || !protection ? undefined : parseWithdrawals(raw, env, protection, problems);
   const buildGitSha = resolveBuildGitSha(env.BUILD_GIT_SHA, env.NODE_ENV === 'production', problems);
-  if (problems.length > 0 || !keys || !pepper || !webhookSecrets || !funding || !conversion || !fx || !reconciliation || !paystack || !protection) {
+  if (problems.length > 0 || !keys || !pepper || !webhookSecrets || !funding || !conversion || !fx || !reconciliation || !paystack || !protection || !withdrawals) {
     throw new ConfigValidationError(problems);
   }
   return {
@@ -580,6 +602,7 @@ export function loadConfig(raw: NodeJS.ProcessEnv | Record<string, string | unde
     },
     paystack,
     protection,
+    withdrawals,
     funding,
     conversion,
     flows: {
@@ -1002,4 +1025,36 @@ function parseProtection(raw: Record<string, string | undefined>, problems: stri
   }, problems);
   if (keyEncryption === undefined || fingerprint === undefined || requestHash === undefined) return undefined;
   return { keyEncryption, fingerprint, requestHash };
+}
+
+function parseWithdrawals(
+  raw: Record<string, string | undefined>,
+  env: Record<string, never>,
+  protection: ProtectionConfig,
+  problems: string[],
+): WithdrawalConfig | undefined {
+  const enabled = env.PAYSTACK_WITHDRAWALS_ENABLED as boolean;
+  const secretKey = raw.PAYSTACK_SECRET_KEY ?? '';
+  const accountIdentity = (env.PAYSTACK_ACCOUNT_IDENTITY as string | undefined) ?? null;
+  const limitsProblems: string[] = [];
+  const limits = raw.PAYSTACK_WITHDRAWAL_LIMITS === undefined && !enabled ? null : parseWithdrawalLimits(raw.PAYSTACK_WITHDRAWAL_LIMITS, limitsProblems);
+  problems.push(...limitsProblems);
+  if (enabled) {
+    if (env.NODE_ENV === 'production') problems.push('PAYSTACK_WITHDRAWALS_ENABLED is refused in production (test-mode payouts only, D3/D8)');
+    if (!secretKey.startsWith('sk_test_')) problems.push('PAYSTACK_WITHDRAWALS_ENABLED needs a Paystack TEST secret key (sk_test_…)');
+    if (!accountIdentity) problems.push('PAYSTACK_ACCOUNT_IDENTITY is required when PAYSTACK_WITHDRAWALS_ENABLED=true');
+    if (limits && !limits.has('NGN')) problems.push('PAYSTACK_WITHDRAWAL_LIMITS must include NGN');
+    if (!protection.keyEncryption || !protection.fingerprint || !protection.requestHash) {
+      problems.push('PAYSTACK_WITHDRAWALS_ENABLED needs WITHDRAWAL_KEY_ENCRYPTION_KEYS, WITHDRAWAL_FINGERPRINT_KEYS and IDEMPOTENCY_REQUEST_HASH_KEYS');
+    }
+  }
+  if (secretKey.startsWith('sk_live_') && enabled) problems.push('PAYSTACK_SECRET_KEY is a live key: withdrawals refuse it');
+  if (limits === undefined) return undefined;
+  return {
+    enabled,
+    limits,
+    accountIdentity,
+    reviewDeadlineMinutes: env.PAYSTACK_WITHDRAWAL_REVIEW_DEADLINE_MINUTES as number,
+    workerHeartbeatFreshnessSeconds: env.WITHDRAWAL_WORKER_HEARTBEAT_FRESHNESS_SECONDS as number,
+  };
 }

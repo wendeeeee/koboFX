@@ -26,6 +26,8 @@ import { FlowRunner } from '../../src/modules/flows/flow-runner';
 import { WebhookProcessor } from '../../src/modules/payments/webhooks/webhook-processor';
 import { RedisService } from '../../src/redis/redis.service';
 import { PaystackTransfersModule } from '../../src/modules/payments/paystack/transfers/paystack-transfers.module';
+import { PaystackTransfersGateway } from '../../src/modules/payments/paystack/transfers/paystack-transfers.port';
+import { WithdrawalWorkerHeartbeat } from '../../src/modules/withdrawals/withdrawal-admission-gate';
 import { Clock } from '../../src/common/clock';
 import { EmailSender } from '../../src/modules/notifications/email/email-sender';
 import { OutboxDispatcher } from '../../src/modules/outbox/outbox-dispatcher';
@@ -115,6 +117,8 @@ export interface HarnessOptions {
         readonly webhookIpAllowlist?: string;
         /** Also import `PaystackTransfersModule` (W2: the transfers gateway + the TRANSFER webhook family). */
         readonly transfers?: boolean;
+        /** W3: admit withdrawals (switch on, NGN limits, the account identity) and expose `paystack.withdrawals`. */
+        readonly withdrawals?: boolean | { readonly limits?: string };
       }
     | true;
 }
@@ -126,6 +130,21 @@ export interface PaystackHarness {
   status(user: SignedUpUser, fundingId: string): request.Test;
   postWebhook(body: Buffer, headers: Record<string, string>): request.Test;
  
+  readonly gatewayCalls: { readonly operation: string; readonly insideTransaction: boolean }[];
+  /** W3 (with `paystack: { withdrawals: true }`): the customer routes and the worker heartbeat. */
+  readonly withdrawals: WithdrawalsHarness | undefined;
+}
+
+export interface WithdrawalsHarness {
+  addBeneficiary(user: SignedUpUser, body: Record<string, unknown>, idempotencyKey?: string): request.Test;
+  beneficiary(user: SignedUpUser, beneficiaryId: string): request.Test;
+  beneficiaries(user: SignedUpUser, query?: Record<string, string>): request.Test;
+  withdraw(user: SignedUpUser, body: Record<string, unknown>, idempotencyKey?: string): request.Test;
+  withdrawal(user: SignedUpUser, withdrawalId: string): request.Test;
+  banks(user: SignedUpUser, query?: Record<string, string>): request.Test;
+  /** Play the worker's heartbeat (admission needs a fresh one). */
+  beat(): Promise<void>;
+  /** Every transfers-gateway call, and whether a database transaction was open (it must never be). */
   readonly gatewayCalls: { readonly operation: string; readonly insideTransaction: boolean }[];
 }
 
@@ -294,6 +313,15 @@ export async function startLedgerHarness(
           PAYSTACK_INITIALIZE_TIMEOUT_MILLISECONDS: '1000',
           ...(paystackOptions.checkoutWindowMinutes ? { PAYSTACK_CHECKOUT_WINDOW_MINUTES: String(paystackOptions.checkoutWindowMinutes) } : {}),
           ...(paystackOptions.webhookIpAllowlist ? { PAYSTACK_WEBHOOK_IP_ALLOWLIST: paystackOptions.webhookIpAllowlist } : {}),
+          ...(paystackOptions.withdrawals
+            ? {
+                PAYSTACK_WITHDRAWALS_ENABLED: 'true',
+                PAYSTACK_ACCOUNT_IDENTITY: 'test-integration-1',
+                PAYSTACK_WITHDRAWAL_LIMITS:
+                  (typeof paystackOptions.withdrawals === 'object' ? paystackOptions.withdrawals.limits : undefined) ??
+                  '{"NGN":{"minimum":"10000","maximum":"100000000","dailyMaximum":"500000000"}}',
+              }
+            : {}),
         }
       : { PAYSTACK_BASE_URL: 'http://127.0.0.1:9' }),
     ...(fxUrl
@@ -460,8 +488,37 @@ export async function startLedgerHarness(
           };
         }
       }
+      const transfersGatewayCalls: { operation: string; insideTransaction: boolean }[] = [];
+      let withdrawals: WithdrawalsHarness | undefined;
+      if (paystackMock && paystackOptions.withdrawals) {
+        const transfers = moduleRef.get(PaystackTransfersGateway, { strict: false });
+        const unitOfWork = moduleRef.get(UnitOfWork);
+        for (const operation of ['listBanks', 'resolveAccount', 'createRecipient', 'listRecipients', 'fetchRecipient', 'initiateTransfer', 'verifyTransfer', 'fetchTransfer', 'listTransfers', 'balances', 'balanceLedger'] as const) {
+          const original = transfers[operation].bind(transfers) as (...parameters: unknown[]) => Promise<unknown>;
+          (transfers as unknown as Record<string, unknown>)[operation] = (...parameters: unknown[]) => {
+            transfersGatewayCalls.push({ operation, insideTransaction: unitOfWork.inTransaction });
+            return original(...parameters);
+          };
+        }
+        const heartbeat = moduleRef.get(WithdrawalWorkerHeartbeat, { strict: false });
+        const authorized = (test: request.Test, user: SignedUpUser) => test.set('Authorization', `Bearer ${user.accessToken}`);
+        withdrawals = {
+          gatewayCalls: transfersGatewayCalls,
+          addBeneficiary: (user, body, idempotencyKey = randomUUID()) =>
+            authorized(http().post(`/${API_PREFIX}/wallet/withdrawal-beneficiaries`), user).set('Idempotency-Key', idempotencyKey).send(body),
+          beneficiary: (user, beneficiaryId) => authorized(http().get(`/${API_PREFIX}/wallet/withdrawal-beneficiaries/${beneficiaryId}`), user),
+          beneficiaries: (user, query = {}) => authorized(http().get(`/${API_PREFIX}/wallet/withdrawal-beneficiaries`).query(query), user),
+          withdraw: (user, body, idempotencyKey = randomUUID()) =>
+            authorized(http().post(`/${API_PREFIX}/wallet/withdraw/paystack`), user).set('Idempotency-Key', idempotencyKey).send(body),
+          withdrawal: (user, withdrawalId) => authorized(http().get(`/${API_PREFIX}/wallet/withdraw/${withdrawalId}`), user),
+          banks: (user, query = {}) => authorized(http().get(`/${API_PREFIX}/wallet/withdrawal-banks`).query(query), user),
+          beat: () => heartbeat.beat(),
+        };
+        await heartbeat.beat();
+      }
       const paystack: PaystackHarness | undefined = paystackMock
         ? {
+            withdrawals,
             gatewayCalls,
             mock: paystackMock,
             secretKey: paystackSecretKey,

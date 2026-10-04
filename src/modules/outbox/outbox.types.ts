@@ -8,6 +8,8 @@ export enum OutboxEventType {
   BREAK_GLASS_USED = 'BreakGlassUsed.v1',
   BREAK_GLASS_REVIEW_OVERDUE = 'BreakGlassReviewOverdue.v1',
   EXCHANGE_RATE_OVERRIDDEN = 'ExchangeRateOverridden.v1',
+  BENEFICIARY_CHANGED = 'BeneficiaryChanged.v1',
+  WITHDRAWAL_CHANGED = 'WithdrawalChanged.v1',
 }
 
 export interface UserEventPayload {
@@ -19,6 +21,13 @@ export interface ConversionPostedPayload {
   readonly userId: string;
   readonly flowId: string;
   readonly quoteId: string | null;
+}
+
+/** Withdrawals (W3): ids and the flow state only — never an account number, name or amount. */
+export interface WithdrawalFlowChangedPayload {
+  readonly flowId: string;
+  readonly userId: string;
+  readonly state: string;
 }
 
 export interface FundingPostedPayload {

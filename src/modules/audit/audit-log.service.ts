@@ -39,6 +39,10 @@ export enum AuditAction {
   WRITE_OFF_POSTED = 'WRITE_OFF_POSTED',
   // Withdrawals (W2): a data key rewrapped under the active key-encryption key; the sealed facts are untouched.
   DATA_KEY_REWRAPPED = 'DATA_KEY_REWRAPPED',
+  BENEFICIARY_REQUESTED = 'BENEFICIARY_REQUESTED',
+  BENEFICIARY_STATE_CHANGED = 'BENEFICIARY_STATE_CHANGED',
+  WITHDRAWAL_REQUESTED = 'WITHDRAWAL_REQUESTED',
+  WITHDRAWAL_STATE_CHANGED = 'WITHDRAWAL_STATE_CHANGED',
   /** Written by `bootstrap_first_administrators` itself (SQL), listed here so the vocabulary is complete. */
   ADMINISTRATORS_BOOTSTRAPPED = 'ADMINISTRATORS_BOOTSTRAPPED',
 }

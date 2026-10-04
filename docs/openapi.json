@@ -3,7 +3,7 @@
   "paths": {
     "/api/v1/auth/register": {
       "post": {
-        "description": "Creates the user, wallet and NGN account and emails a 6-digit code (design §7.1). The answer is the same whatever the email's state (enumeration resistance): a pending email gets the NEW password and a fresh code; an existing account changes nothing and its owner is told by email.\n\n**Access:** public (no bearer token).\n\n**Rate limit:** 100 per 60s per ip (`global`); 10 per 3600s per ip (`register`); 1 per 60s per email (`verification-email-cooldown`); 5 per 3600s per email (`verification-email-hourly`). Refused with `503` if the limiter is unavailable.",
+        "description": "Creates the user, wallet and NGN account and emails a 6-digit code.\n\n**Access:** public (no bearer token).\n\n**Rate limit:** 100 per 60s per ip (`global`); 10 per 3600s per ip (`register`); 1 per 60s per email (`verification-email-cooldown`); 5 per 3600s per email (`verification-email-hourly`). Refused with `503` if the limiter is unavailable.",
         "operationId": "AuthController_register",
         "parameters": [],
         "requestBody": {
@@ -368,7 +368,7 @@
     },
     "/api/v1/auth/verify": {
       "post": {
-        "description": "Takes the email, the password AND the code (closing pre-registration takeover; a recorded deviation from §7.1). Activates the account and returns a session. Every failure is the same `VERIFICATION_FAILED`.\n\n**Access:** public (no bearer token).\n\n**Rate limit:** 100 per 60s per ip (`global`); 10 per 900s per ip-and-email (`verify`). Refused with `503` if the limiter is unavailable.",
+        "description": "Takes the email, the password AND the codeActivates the account and returns a session.\n\n**Access:** public (no bearer token).\n\n**Rate limit:** 100 per 60s per ip (`global`); 10 per 900s per ip-and-email (`verify`). Refused with `503` if the limiter is unavailable.",
         "operationId": "AuthController_verify",
         "parameters": [],
         "requestBody": {
@@ -731,7 +731,7 @@
     },
     "/api/v1/auth/resend-otp": {
       "post": {
-        "description": "Supersedes the previous code. Same answer whatever the email's state. One code per 60 seconds and five per hour per email, shared with register.\n\n**Access:** public (no bearer token).\n\n**Rate limit:** 100 per 60s per ip (`global`); 1 per 60s per email (`verification-email-cooldown`); 5 per 3600s per email (`verification-email-hourly`). Refused with `503` if the limiter is unavailable.",
+        "description": "Supersedes the previous code.\n\n**Access:** public (no bearer token).\n\n**Rate limit:** 100 per 60s per ip (`global`); 1 per 60s per email (`verification-email-cooldown`); 5 per 3600s per email (`verification-email-hourly`). Refused with `503` if the limiter is unavailable.",
         "operationId": "AuthController_resendVerificationCode",
         "parameters": [],
         "requestBody": {
@@ -1090,7 +1090,7 @@
     },
     "/api/v1/auth/login": {
       "post": {
-        "description": "Unknown email, wrong password, unverified or suspended account: all the same `401 INVALID_CREDENTIALS`. No lockout; rate limits instead.\n\n**Access:** public (no bearer token).\n\n**Rate limit:** 100 per 60s per ip (`global`); 5 per 900s per ip-and-email (`login`); 20 per 900s per email (`login-email`). Refused with `503` if the limiter is unavailable.",
+        "description": "Log in to your account\n\n**Access:** public (no bearer token).\n\n**Rate limit:** 100 per 60s per ip (`global`); 5 per 900s per ip-and-email (`login`); 20 per 900s per email (`login-email`). Refused with `503` if the limiter is unavailable.",
         "operationId": "AuthController_logIn",
         "parameters": [],
         "requestBody": {
@@ -1499,7 +1499,7 @@
     },
     "/api/v1/auth/refresh": {
       "post": {
-        "description": "Public: the credential is the refresh token in the body. Strict rotation (§9.1, no grace window): presenting a used refresh token revokes the whole session family — single-flight refreshes on the client.\n\n**Access:** public (no bearer token).\n\n**Rate limit:** 100 per 60s per ip (`global`).",
+        "description": "**Access:** public (no bearer token).\n\n**Rate limit:** 100 per 60s per ip (`global`).",
         "operationId": "AuthController_refresh",
         "parameters": [],
         "requestBody": {
@@ -17132,6 +17132,3180 @@
         ]
       }
     },
+    "/api/v1/wallet/withdrawal-banks": {
+      "get": {
+        "description": "Nigerian NGN banks from Paystack's directory, cached (about 5 minutes). Paystack TEST mode only: no real bank receives money; a confirmed transfer lands in your simulated-bank stash.\n\n**Access:** an authenticated ACTIVE user (verified, not suspended).\n\n**Rate limit:** 100 per 60s per ip (`global`); 120 per 60s per user (`withdrawal-reads`).",
+        "operationId": "WithdrawalsController_listBanks",
+        "parameters": [
+          {
+            "name": "cursor",
+            "required": false,
+            "in": "query",
+            "description": "The previous page's `nextCursor`.",
+            "schema": {
+              "maxLength": 512,
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "required": false,
+            "in": "query",
+            "description": "Page size, 1–100 (default 50). Digits only.",
+            "schema": {
+              "pattern": "^(100|[1-9]\\d?)$",
+              "example": "50",
+              "type": "string"
+            }
+          },
+          {
+            "name": "currency",
+            "required": false,
+            "in": "query",
+            "description": "Only NGN has withdrawal banks (default NGN).",
+            "schema": {
+              "pattern": "^[A-Z]{3}$",
+              "example": "NGN",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WithdrawalBankPage"
+                }
+              }
+            },
+            "headers": {
+              "X-Correlation-Id": {
+                "description": "The request's correlation id (yours, or a generated UUID). Also in every error body.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`VALIDATION_FAILED`: The request is malformed. A body/query DTO failure lists `details.violations`; fix the request.\n\n`INVALID_CURSOR`: The cursor is malformed, from another version, or from a different sort/filter set. Restart from the first page.",
+            "headers": {
+              "X-Correlation-Id": {
+                "description": "The request's correlation id (yours, or a generated UUID). Also in every error body.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ErrorResponse"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "statusCode": {
+                          "type": "integer",
+                          "enum": [
+                            400
+                          ]
+                        },
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "VALIDATION_FAILED",
+                            "INVALID_CURSOR"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                },
+                "examples": {
+                  "VALIDATION_FAILED": {
+                    "value": {
+                      "statusCode": 400,
+                      "code": "VALIDATION_FAILED",
+                      "message": "Request validation failed.",
+                      "details": {
+                        "violations": [
+                          "amount must be a positive whole number of minor units, as a string"
+                        ]
+                      },
+                      "correlationId": "6f1d2c3b-4a5e-4f60-8a7b-9c0d1e2f3a4b",
+                      "timestamp": "2026-09-10T11:04:22.114Z"
+                    }
+                  },
+                  "INVALID_CURSOR": {
+                    "value": {
+                      "statusCode": 400,
+                      "code": "INVALID_CURSOR",
+                      "message": "The cursor is malformed, from another version, or from a different sort/filter set. Restart from the first page.",
+                      "correlationId": "6f1d2c3b-4a5e-4f60-8a7b-9c0d1e2f3a4b",
+                      "timestamp": "2026-09-10T11:04:22.114Z"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`UNAUTHENTICATED`: No valid credentials: missing/expired/revoked access token, a refused refresh token, or a bad webhook signature.",
+            "headers": {
+              "X-Correlation-Id": {
+                "description": "The request's correlation id (yours, or a generated UUID). Also in every error body.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ErrorResponse"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "statusCode": {
+                          "type": "integer",
+                          "enum": [
+                            401
+                          ]
+                        },
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "UNAUTHENTICATED"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                },
+                "examples": {
+                  "UNAUTHENTICATED": {
+                    "value": {
+                      "statusCode": 401,
+                      "code": "UNAUTHENTICATED",
+                      "message": "Authentication is required.",
+                      "correlationId": "6f1d2c3b-4a5e-4f60-8a7b-9c0d1e2f3a4b",
+                      "timestamp": "2026-09-10T11:04:22.114Z"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`ACCOUNT_SUSPENDED`: The account is suspended.\n\n`EMAIL_NOT_VERIFIED`: Verify the email address first.",
+            "headers": {
+              "X-Correlation-Id": {
+                "description": "The request's correlation id (yours, or a generated UUID). Also in every error body.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ErrorResponse"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "statusCode": {
+                          "type": "integer",
+                          "enum": [
+                            403
+                          ]
+                        },
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "ACCOUNT_SUSPENDED",
+                            "EMAIL_NOT_VERIFIED"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                },
+                "examples": {
+                  "ACCOUNT_SUSPENDED": {
+                    "value": {
+                      "statusCode": 403,
+                      "code": "ACCOUNT_SUSPENDED",
+                      "message": "The account is suspended.",
+                      "correlationId": "6f1d2c3b-4a5e-4f60-8a7b-9c0d1e2f3a4b",
+                      "timestamp": "2026-09-10T11:04:22.114Z"
+                    }
+                  },
+                  "EMAIL_NOT_VERIFIED": {
+                    "value": {
+                      "statusCode": 403,
+                      "code": "EMAIL_NOT_VERIFIED",
+                      "message": "Verify the email address first.",
+                      "correlationId": "6f1d2c3b-4a5e-4f60-8a7b-9c0d1e2f3a4b",
+                      "timestamp": "2026-09-10T11:04:22.114Z"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "`RATE_LIMITED`: Too many requests. Retry after `Retry-After` seconds.",
+            "headers": {
+              "X-Correlation-Id": {
+                "description": "The request's correlation id (yours, or a generated UUID). Also in every error body.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Retry-After": {
+                "description": "Seconds to wait before retrying.",
+                "schema": {
+                  "type": "integer",
+                  "minimum": 0
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ErrorResponse"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "statusCode": {
+                          "type": "integer",
+                          "enum": [
+                            429
+                          ]
+                        },
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "RATE_LIMITED"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                },
+                "examples": {
+                  "RATE_LIMITED": {
+                    "value": {
+                      "statusCode": 429,
+                      "code": "RATE_LIMITED",
+                      "message": "Too many requests. Retry after the time given in the Retry-After header.",
+                      "details": {
+                        "retryAfterSeconds": 42
+                      },
+                      "correlationId": "6f1d2c3b-4a5e-4f60-8a7b-9c0d1e2f3a4b",
+                      "timestamp": "2026-09-10T11:04:22.114Z"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`INVARIANT_VIOLATION`: Our bug, failed loudly. Quote the `correlationId`.\n\n`INTERNAL_ERROR`: Unexpected error. Quote the `correlationId`.",
+            "headers": {
+              "X-Correlation-Id": {
+                "description": "The request's correlation id (yours, or a generated UUID). Also in every error body.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ErrorResponse"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "statusCode": {
+                          "type": "integer",
+                          "enum": [
+                            500
+                          ]
+                        },
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "INVARIANT_VIOLATION",
+                            "INTERNAL_ERROR"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                },
+                "examples": {
+                  "INVARIANT_VIOLATION": {
+                    "value": {
+                      "statusCode": 500,
+                      "code": "INVARIANT_VIOLATION",
+                      "message": "An unexpected error occurred.",
+                      "correlationId": "6f1d2c3b-4a5e-4f60-8a7b-9c0d1e2f3a4b",
+                      "timestamp": "2026-09-10T11:04:22.114Z"
+                    }
+                  },
+                  "INTERNAL_ERROR": {
+                    "value": {
+                      "statusCode": 500,
+                      "code": "INTERNAL_ERROR",
+                      "message": "An unexpected error occurred.",
+                      "correlationId": "6f1d2c3b-4a5e-4f60-8a7b-9c0d1e2f3a4b",
+                      "timestamp": "2026-09-10T11:04:22.114Z"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "`RESOURCE_BUSY`: Transient lock or statement timeout. Retry with the SAME `Idempotency-Key`.\n\n`DEPENDENCY_UNAVAILABLE`: A dependency we cannot work without is down; we fail closed. Transient.\n\n`WITHDRAWALS_DISABLED`: New withdrawals are switched off (or no worker can process them). Earlier requests keep their answers. Transient.",
+            "headers": {
+              "X-Correlation-Id": {
+                "description": "The request's correlation id (yours, or a generated UUID). Also in every error body.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Retry-After": {
+                "description": "Seconds to wait before retrying.",
+                "schema": {
+                  "type": "integer",
+                  "minimum": 0
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ErrorResponse"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "statusCode": {
+                          "type": "integer",
+                          "enum": [
+                            503
+                          ]
+                        },
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "RESOURCE_BUSY",
+                            "DEPENDENCY_UNAVAILABLE",
+                            "WITHDRAWALS_DISABLED"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                },
+                "examples": {
+                  "RESOURCE_BUSY": {
+                    "value": {
+                      "statusCode": 503,
+                      "code": "RESOURCE_BUSY",
+                      "message": "The resource is busy. Retry the request with the same Idempotency-Key.",
+                      "details": {
+                        "reason": "lock_timeout"
+                      },
+                      "correlationId": "6f1d2c3b-4a5e-4f60-8a7b-9c0d1e2f3a4b",
+                      "timestamp": "2026-09-10T11:04:22.114Z"
+                    }
+                  },
+                  "DEPENDENCY_UNAVAILABLE": {
+                    "value": {
+                      "statusCode": 503,
+                      "code": "DEPENDENCY_UNAVAILABLE",
+                      "message": "A dependency we cannot work without is down; we fail closed. Transient.",
+                      "correlationId": "6f1d2c3b-4a5e-4f60-8a7b-9c0d1e2f3a4b",
+                      "timestamp": "2026-09-10T11:04:22.114Z"
+                    }
+                  },
+                  "WITHDRAWALS_DISABLED": {
+                    "value": {
+                      "statusCode": 503,
+                      "code": "WITHDRAWALS_DISABLED",
+                      "message": "New withdrawals are switched off (or no worker can process them). Earlier requests keep their answers. Transient.",
+                      "correlationId": "6f1d2c3b-4a5e-4f60-8a7b-9c0d1e2f3a4b",
+                      "timestamp": "2026-09-10T11:04:22.114Z"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "summary": "Banks you can withdraw to",
+        "tags": [
+          "wallet"
+        ],
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "x-authentication": "active-user",
+        "x-idempotent": false,
+        "x-rate-limits": [
+          {
+            "name": "global",
+            "subject": "ip",
+            "limit": 100,
+            "windowSeconds": 60
+          },
+          {
+            "name": "withdrawal-reads",
+            "subject": "user",
+            "limit": 120,
+            "windowSeconds": 60
+          }
+        ]
+      }
+    },
+    "/api/v1/wallet/withdrawal-beneficiaries": {
+      "post": {
+        "description": "Accepted at once (`202 PENDING`); the worker asks Paystack to resolve the account (the name is Paystack's) and creates the transfer recipient. Poll until READY. The same account added again returns the existing beneficiary. Paystack TEST mode only: no real bank receives money; a confirmed transfer lands in your simulated-bank stash.\n\n**Access:** an authenticated ACTIVE user (verified, not suspended).\n\n**Idempotent:** requires `Idempotency-Key`; retries replay the stored outcome.\n\n**Rate limit:** 100 per 60s per ip (`global`); 10 per 60s per user (`withdrawal-beneficiary-writes`).",
+        "operationId": "WithdrawalsController_addBeneficiary",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/IdempotencyKey"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AddWithdrawalBeneficiaryRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WithdrawalBeneficiaryAccepted"
+                }
+              }
+            },
+            "headers": {
+              "X-Correlation-Id": {
+                "description": "The request's correlation id (yours, or a generated UUID). Also in every error body.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Idempotent-Replayed": {
+                "description": "Present (`true`) when this is the stored outcome of an earlier request with the same `Idempotency-Key`.",
+                "schema": {
+                  "type": "string",
+                  "enum": [
+                    "true"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`VALIDATION_FAILED`: The request is malformed. A body/query DTO failure lists `details.violations`; fix the request.\n\n`UNSUPPORTED_CURRENCY`: The currency is not supported for this operation.\n\n`IDEMPOTENCY_KEY_REQUIRED`: This route needs an `Idempotency-Key` header.\n\n`IDEMPOTENCY_KEY_INVALID`: `Idempotency-Key` must be 16–128 characters of `[A-Za-z0-9_-]`.",
+            "headers": {
+              "X-Correlation-Id": {
+                "description": "The request's correlation id (yours, or a generated UUID). Also in every error body.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Idempotent-Replayed": {
+                "description": "Present (`true`) when this is the stored outcome of an earlier request with the same `Idempotency-Key`.",
+                "schema": {
+                  "type": "string",
+                  "enum": [
+                    "true"
+                  ]
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ErrorResponse"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "statusCode": {
+                          "type": "integer",
+                          "enum": [
+                            400
+                          ]
+                        },
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "VALIDATION_FAILED",
+                            "UNSUPPORTED_CURRENCY",
+                            "IDEMPOTENCY_KEY_REQUIRED",
+                            "IDEMPOTENCY_KEY_INVALID"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                },
+                "examples": {
+                  "VALIDATION_FAILED": {
+                    "value": {
+                      "statusCode": 400,
+                      "code": "VALIDATION_FAILED",
+                      "message": "Request validation failed.",
+                      "details": {
+                        "violations": [
+                          "amount must be a positive whole number of minor units, as a string"
+                        ]
+                      },
+                      "correlationId": "6f1d2c3b-4a5e-4f60-8a7b-9c0d1e2f3a4b",
+                      "timestamp": "2026-09-10T11:04:22.114Z"
+                    }
+                  },
+                  "UNSUPPORTED_CURRENCY": {
+                    "value": {
+                      "statusCode": 400,
+                      "code": "UNSUPPORTED_CURRENCY",
+                      "message": "The currency is not supported for this operation.",
+                      "correlationId": "6f1d2c3b-4a5e-4f60-8a7b-9c0d1e2f3a4b",
+                      "timestamp": "2026-09-10T11:04:22.114Z"
+                    }
+                  },
+                  "IDEMPOTENCY_KEY_REQUIRED": {
+                    "value": {
+                      "statusCode": 400,
+                      "code": "IDEMPOTENCY_KEY_REQUIRED",
+                      "message": "This route needs an `Idempotency-Key` header.",
+                      "correlationId": "6f1d2c3b-4a5e-4f60-8a7b-9c0d1e2f3a4b",
+                      "timestamp": "2026-09-10T11:04:22.114Z"
+                    }
+                  },
+                  "IDEMPOTENCY_KEY_INVALID": {
+                    "value": {
+                      "statusCode": 400,
+                      "code": "IDEMPOTENCY_KEY_INVALID",
+                      "message": "`Idempotency-Key` must be 16–128 characters of `[A-Za-z0-9_-]`.",
+                      "correlationId": "6f1d2c3b-4a5e-4f60-8a7b-9c0d1e2f3a4b",
+                      "timestamp": "2026-09-10T11:04:22.114Z"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`UNAUTHENTICATED`: No valid credentials: missing/expired/revoked access token, a refused refresh token, or a bad webhook signature.",
+            "headers": {
+              "X-Correlation-Id": {
+                "description": "The request's correlation id (yours, or a generated UUID). Also in every error body.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ErrorResponse"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "statusCode": {
+                          "type": "integer",
+                          "enum": [
+                            401
+                          ]
+                        },
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "UNAUTHENTICATED"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                },
+                "examples": {
+                  "UNAUTHENTICATED": {
+                    "value": {
+                      "statusCode": 401,
+                      "code": "UNAUTHENTICATED",
+                      "message": "Authentication is required.",
+                      "correlationId": "6f1d2c3b-4a5e-4f60-8a7b-9c0d1e2f3a4b",
+                      "timestamp": "2026-09-10T11:04:22.114Z"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`ACCOUNT_SUSPENDED`: The account is suspended.\n\n`EMAIL_NOT_VERIFIED`: Verify the email address first.",
+            "headers": {
+              "X-Correlation-Id": {
+                "description": "The request's correlation id (yours, or a generated UUID). Also in every error body.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ErrorResponse"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "statusCode": {
+                          "type": "integer",
+                          "enum": [
+                            403
+                          ]
+                        },
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "ACCOUNT_SUSPENDED",
+                            "EMAIL_NOT_VERIFIED"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                },
+                "examples": {
+                  "ACCOUNT_SUSPENDED": {
+                    "value": {
+                      "statusCode": 403,
+                      "code": "ACCOUNT_SUSPENDED",
+                      "message": "The account is suspended.",
+                      "correlationId": "6f1d2c3b-4a5e-4f60-8a7b-9c0d1e2f3a4b",
+                      "timestamp": "2026-09-10T11:04:22.114Z"
+                    }
+                  },
+                  "EMAIL_NOT_VERIFIED": {
+                    "value": {
+                      "statusCode": 403,
+                      "code": "EMAIL_NOT_VERIFIED",
+                      "message": "Verify the email address first.",
+                      "correlationId": "6f1d2c3b-4a5e-4f60-8a7b-9c0d1e2f3a4b",
+                      "timestamp": "2026-09-10T11:04:22.114Z"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`IDEMPOTENCY_KEY_REUSE`: This key was used with a different request body on this route. Use a new key.\n\n`REQUEST_IN_PROGRESS`: The same key is being processed right now. Retry after `Retry-After` with the same key.",
+            "headers": {
+              "X-Correlation-Id": {
+                "description": "The request's correlation id (yours, or a generated UUID). Also in every error body.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Retry-After": {
+                "description": "Seconds to wait before retrying.",
+                "schema": {
+                  "type": "integer",
+                  "minimum": 0
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ErrorResponse"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "statusCode": {
+                          "type": "integer",
+                          "enum": [
+                            409
+                          ]
+                        },
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "IDEMPOTENCY_KEY_REUSE",
+                            "REQUEST_IN_PROGRESS"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                },
+                "examples": {
+                  "IDEMPOTENCY_KEY_REUSE": {
+                    "value": {
+                      "statusCode": 409,
+                      "code": "IDEMPOTENCY_KEY_REUSE",
+                      "message": "This key was used with a different request body on this route. Use a new key.",
+                      "correlationId": "6f1d2c3b-4a5e-4f60-8a7b-9c0d1e2f3a4b",
+                      "timestamp": "2026-09-10T11:04:22.114Z"
+                    }
+                  },
+                  "REQUEST_IN_PROGRESS": {
+                    "value": {
+                      "statusCode": 409,
+                      "code": "REQUEST_IN_PROGRESS",
+                      "message": "The same key is being processed right now. Retry after `Retry-After` with the same key.",
+                      "correlationId": "6f1d2c3b-4a5e-4f60-8a7b-9c0d1e2f3a4b",
+                      "timestamp": "2026-09-10T11:04:22.114Z"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "`PAYLOAD_TOO_LARGE`: The body exceeds 100 KB.",
+            "headers": {
+              "X-Correlation-Id": {
+                "description": "The request's correlation id (yours, or a generated UUID). Also in every error body.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ErrorResponse"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "statusCode": {
+                          "type": "integer",
+                          "enum": [
+                            413
+                          ]
+                        },
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "PAYLOAD_TOO_LARGE"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                },
+                "examples": {
+                  "PAYLOAD_TOO_LARGE": {
+                    "value": {
+                      "statusCode": 413,
+                      "code": "PAYLOAD_TOO_LARGE",
+                      "message": "The body exceeds 100 KB.",
+                      "correlationId": "6f1d2c3b-4a5e-4f60-8a7b-9c0d1e2f3a4b",
+                      "timestamp": "2026-09-10T11:04:22.114Z"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "`RATE_LIMITED`: Too many requests. Retry after `Retry-After` seconds.",
+            "headers": {
+              "X-Correlation-Id": {
+                "description": "The request's correlation id (yours, or a generated UUID). Also in every error body.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Retry-After": {
+                "description": "Seconds to wait before retrying.",
+                "schema": {
+                  "type": "integer",
+                  "minimum": 0
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ErrorResponse"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "statusCode": {
+                          "type": "integer",
+                          "enum": [
+                            429
+                          ]
+                        },
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "RATE_LIMITED"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                },
+                "examples": {
+                  "RATE_LIMITED": {
+                    "value": {
+                      "statusCode": 429,
+                      "code": "RATE_LIMITED",
+                      "message": "Too many requests. Retry after the time given in the Retry-After header.",
+                      "details": {
+                        "retryAfterSeconds": 42
+                      },
+                      "correlationId": "6f1d2c3b-4a5e-4f60-8a7b-9c0d1e2f3a4b",
+                      "timestamp": "2026-09-10T11:04:22.114Z"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`INVARIANT_VIOLATION`: Our bug, failed loudly. Quote the `correlationId`.\n\n`INTERNAL_ERROR`: Unexpected error. Quote the `correlationId`.",
+            "headers": {
+              "X-Correlation-Id": {
+                "description": "The request's correlation id (yours, or a generated UUID). Also in every error body.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ErrorResponse"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "statusCode": {
+                          "type": "integer",
+                          "enum": [
+                            500
+                          ]
+                        },
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "INVARIANT_VIOLATION",
+                            "INTERNAL_ERROR"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                },
+                "examples": {
+                  "INVARIANT_VIOLATION": {
+                    "value": {
+                      "statusCode": 500,
+                      "code": "INVARIANT_VIOLATION",
+                      "message": "An unexpected error occurred.",
+                      "correlationId": "6f1d2c3b-4a5e-4f60-8a7b-9c0d1e2f3a4b",
+                      "timestamp": "2026-09-10T11:04:22.114Z"
+                    }
+                  },
+                  "INTERNAL_ERROR": {
+                    "value": {
+                      "statusCode": 500,
+                      "code": "INTERNAL_ERROR",
+                      "message": "An unexpected error occurred.",
+                      "correlationId": "6f1d2c3b-4a5e-4f60-8a7b-9c0d1e2f3a4b",
+                      "timestamp": "2026-09-10T11:04:22.114Z"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "`RESOURCE_BUSY`: Transient lock or statement timeout. Retry with the SAME `Idempotency-Key`.\n\n`WITHDRAWALS_DISABLED`: New withdrawals are switched off (or no worker can process them). Earlier requests keep their answers. Transient.",
+            "headers": {
+              "X-Correlation-Id": {
+                "description": "The request's correlation id (yours, or a generated UUID). Also in every error body.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Retry-After": {
+                "description": "Seconds to wait before retrying.",
+                "schema": {
+                  "type": "integer",
+                  "minimum": 0
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ErrorResponse"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "statusCode": {
+                          "type": "integer",
+                          "enum": [
+                            503
+                          ]
+                        },
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "RESOURCE_BUSY",
+                            "WITHDRAWALS_DISABLED"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                },
+                "examples": {
+                  "RESOURCE_BUSY": {
+                    "value": {
+                      "statusCode": 503,
+                      "code": "RESOURCE_BUSY",
+                      "message": "The resource is busy. Retry the request with the same Idempotency-Key.",
+                      "details": {
+                        "reason": "lock_timeout"
+                      },
+                      "correlationId": "6f1d2c3b-4a5e-4f60-8a7b-9c0d1e2f3a4b",
+                      "timestamp": "2026-09-10T11:04:22.114Z"
+                    }
+                  },
+                  "WITHDRAWALS_DISABLED": {
+                    "value": {
+                      "statusCode": 503,
+                      "code": "WITHDRAWALS_DISABLED",
+                      "message": "New withdrawals are switched off (or no worker can process them). Earlier requests keep their answers. Transient.",
+                      "correlationId": "6f1d2c3b-4a5e-4f60-8a7b-9c0d1e2f3a4b",
+                      "timestamp": "2026-09-10T11:04:22.114Z"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "summary": "Add a withdrawal beneficiary",
+        "tags": [
+          "wallet"
+        ],
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "x-authentication": "active-user",
+        "x-idempotent": true,
+        "x-rate-limits": [
+          {
+            "name": "global",
+            "subject": "ip",
+            "limit": 100,
+            "windowSeconds": 60
+          },
+          {
+            "name": "withdrawal-beneficiary-writes",
+            "subject": "user",
+            "limit": 10,
+            "windowSeconds": 60
+          }
+        ]
+      },
+      "get": {
+        "description": "Newest first, keyset-paginated. Account numbers are masked.\n\n**Access:** an authenticated ACTIVE user (verified, not suspended).\n\n**Rate limit:** 100 per 60s per ip (`global`); 120 per 60s per user (`withdrawal-reads`).",
+        "operationId": "WithdrawalsController_listBeneficiaries",
+        "parameters": [
+          {
+            "name": "cursor",
+            "required": false,
+            "in": "query",
+            "description": "The previous page's `nextCursor`.",
+            "schema": {
+              "maxLength": 512,
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "required": false,
+            "in": "query",
+            "description": "Page size, 1–100 (default 50). Digits only.",
+            "schema": {
+              "pattern": "^(100|[1-9]\\d?)$",
+              "example": "50",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WithdrawalBeneficiaryPage"
+                }
+              }
+            },
+            "headers": {
+              "X-Correlation-Id": {
+                "description": "The request's correlation id (yours, or a generated UUID). Also in every error body.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`VALIDATION_FAILED`: The request is malformed. A body/query DTO failure lists `details.violations`; fix the request.\n\n`INVALID_CURSOR`: The cursor is malformed, from another version, or from a different sort/filter set. Restart from the first page.",
+            "headers": {
+              "X-Correlation-Id": {
+                "description": "The request's correlation id (yours, or a generated UUID). Also in every error body.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ErrorResponse"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "statusCode": {
+                          "type": "integer",
+                          "enum": [
+                            400
+                          ]
+                        },
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "VALIDATION_FAILED",
+                            "INVALID_CURSOR"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                },
+                "examples": {
+                  "VALIDATION_FAILED": {
+                    "value": {
+                      "statusCode": 400,
+                      "code": "VALIDATION_FAILED",
+                      "message": "Request validation failed.",
+                      "details": {
+                        "violations": [
+                          "amount must be a positive whole number of minor units, as a string"
+                        ]
+                      },
+                      "correlationId": "6f1d2c3b-4a5e-4f60-8a7b-9c0d1e2f3a4b",
+                      "timestamp": "2026-09-10T11:04:22.114Z"
+                    }
+                  },
+                  "INVALID_CURSOR": {
+                    "value": {
+                      "statusCode": 400,
+                      "code": "INVALID_CURSOR",
+                      "message": "The cursor is malformed, from another version, or from a different sort/filter set. Restart from the first page.",
+                      "correlationId": "6f1d2c3b-4a5e-4f60-8a7b-9c0d1e2f3a4b",
+                      "timestamp": "2026-09-10T11:04:22.114Z"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`UNAUTHENTICATED`: No valid credentials: missing/expired/revoked access token, a refused refresh token, or a bad webhook signature.",
+            "headers": {
+              "X-Correlation-Id": {
+                "description": "The request's correlation id (yours, or a generated UUID). Also in every error body.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ErrorResponse"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "statusCode": {
+                          "type": "integer",
+                          "enum": [
+                            401
+                          ]
+                        },
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "UNAUTHENTICATED"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                },
+                "examples": {
+                  "UNAUTHENTICATED": {
+                    "value": {
+                      "statusCode": 401,
+                      "code": "UNAUTHENTICATED",
+                      "message": "Authentication is required.",
+                      "correlationId": "6f1d2c3b-4a5e-4f60-8a7b-9c0d1e2f3a4b",
+                      "timestamp": "2026-09-10T11:04:22.114Z"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`ACCOUNT_SUSPENDED`: The account is suspended.\n\n`EMAIL_NOT_VERIFIED`: Verify the email address first.",
+            "headers": {
+              "X-Correlation-Id": {
+                "description": "The request's correlation id (yours, or a generated UUID). Also in every error body.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ErrorResponse"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "statusCode": {
+                          "type": "integer",
+                          "enum": [
+                            403
+                          ]
+                        },
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "ACCOUNT_SUSPENDED",
+                            "EMAIL_NOT_VERIFIED"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                },
+                "examples": {
+                  "ACCOUNT_SUSPENDED": {
+                    "value": {
+                      "statusCode": 403,
+                      "code": "ACCOUNT_SUSPENDED",
+                      "message": "The account is suspended.",
+                      "correlationId": "6f1d2c3b-4a5e-4f60-8a7b-9c0d1e2f3a4b",
+                      "timestamp": "2026-09-10T11:04:22.114Z"
+                    }
+                  },
+                  "EMAIL_NOT_VERIFIED": {
+                    "value": {
+                      "statusCode": 403,
+                      "code": "EMAIL_NOT_VERIFIED",
+                      "message": "Verify the email address first.",
+                      "correlationId": "6f1d2c3b-4a5e-4f60-8a7b-9c0d1e2f3a4b",
+                      "timestamp": "2026-09-10T11:04:22.114Z"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "`RATE_LIMITED`: Too many requests. Retry after `Retry-After` seconds.",
+            "headers": {
+              "X-Correlation-Id": {
+                "description": "The request's correlation id (yours, or a generated UUID). Also in every error body.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Retry-After": {
+                "description": "Seconds to wait before retrying.",
+                "schema": {
+                  "type": "integer",
+                  "minimum": 0
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ErrorResponse"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "statusCode": {
+                          "type": "integer",
+                          "enum": [
+                            429
+                          ]
+                        },
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "RATE_LIMITED"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                },
+                "examples": {
+                  "RATE_LIMITED": {
+                    "value": {
+                      "statusCode": 429,
+                      "code": "RATE_LIMITED",
+                      "message": "Too many requests. Retry after the time given in the Retry-After header.",
+                      "details": {
+                        "retryAfterSeconds": 42
+                      },
+                      "correlationId": "6f1d2c3b-4a5e-4f60-8a7b-9c0d1e2f3a4b",
+                      "timestamp": "2026-09-10T11:04:22.114Z"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`INVARIANT_VIOLATION`: Our bug, failed loudly. Quote the `correlationId`.\n\n`INTERNAL_ERROR`: Unexpected error. Quote the `correlationId`.",
+            "headers": {
+              "X-Correlation-Id": {
+                "description": "The request's correlation id (yours, or a generated UUID). Also in every error body.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ErrorResponse"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "statusCode": {
+                          "type": "integer",
+                          "enum": [
+                            500
+                          ]
+                        },
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "INVARIANT_VIOLATION",
+                            "INTERNAL_ERROR"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                },
+                "examples": {
+                  "INVARIANT_VIOLATION": {
+                    "value": {
+                      "statusCode": 500,
+                      "code": "INVARIANT_VIOLATION",
+                      "message": "An unexpected error occurred.",
+                      "correlationId": "6f1d2c3b-4a5e-4f60-8a7b-9c0d1e2f3a4b",
+                      "timestamp": "2026-09-10T11:04:22.114Z"
+                    }
+                  },
+                  "INTERNAL_ERROR": {
+                    "value": {
+                      "statusCode": 500,
+                      "code": "INTERNAL_ERROR",
+                      "message": "An unexpected error occurred.",
+                      "correlationId": "6f1d2c3b-4a5e-4f60-8a7b-9c0d1e2f3a4b",
+                      "timestamp": "2026-09-10T11:04:22.114Z"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "`RESOURCE_BUSY`: Transient lock or statement timeout. Retry with the SAME `Idempotency-Key`.",
+            "headers": {
+              "X-Correlation-Id": {
+                "description": "The request's correlation id (yours, or a generated UUID). Also in every error body.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Retry-After": {
+                "description": "Seconds to wait before retrying.",
+                "schema": {
+                  "type": "integer",
+                  "minimum": 0
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ErrorResponse"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "statusCode": {
+                          "type": "integer",
+                          "enum": [
+                            503
+                          ]
+                        },
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "RESOURCE_BUSY"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                },
+                "examples": {
+                  "RESOURCE_BUSY": {
+                    "value": {
+                      "statusCode": 503,
+                      "code": "RESOURCE_BUSY",
+                      "message": "The resource is busy. Retry the request with the same Idempotency-Key.",
+                      "details": {
+                        "reason": "lock_timeout"
+                      },
+                      "correlationId": "6f1d2c3b-4a5e-4f60-8a7b-9c0d1e2f3a4b",
+                      "timestamp": "2026-09-10T11:04:22.114Z"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "summary": "My withdrawal beneficiaries",
+        "tags": [
+          "wallet"
+        ],
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "x-authentication": "active-user",
+        "x-idempotent": false,
+        "x-rate-limits": [
+          {
+            "name": "global",
+            "subject": "ip",
+            "limit": 100,
+            "windowSeconds": 60
+          },
+          {
+            "name": "withdrawal-reads",
+            "subject": "user",
+            "limit": 120,
+            "windowSeconds": 60
+          }
+        ]
+      }
+    },
+    "/api/v1/wallet/withdrawal-beneficiaries/{beneficiaryId}": {
+      "get": {
+        "description": "Status, masked account, and the name Paystack resolved once known.\n\n**Access:** an authenticated ACTIVE user (verified, not suspended).\n\n**Rate limit:** 100 per 60s per ip (`global`); 120 per 60s per user (`withdrawal-reads`).",
+        "operationId": "WithdrawalsController_findBeneficiary",
+        "parameters": [
+          {
+            "name": "beneficiaryId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WithdrawalBeneficiary"
+                }
+              }
+            },
+            "headers": {
+              "X-Correlation-Id": {
+                "description": "The request's correlation id (yours, or a generated UUID). Also in every error body.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`VALIDATION_FAILED`: The request is malformed. A body/query DTO failure lists `details.violations`; fix the request.",
+            "headers": {
+              "X-Correlation-Id": {
+                "description": "The request's correlation id (yours, or a generated UUID). Also in every error body.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ErrorResponse"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "statusCode": {
+                          "type": "integer",
+                          "enum": [
+                            400
+                          ]
+                        },
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "VALIDATION_FAILED"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                },
+                "examples": {
+                  "VALIDATION_FAILED": {
+                    "value": {
+                      "statusCode": 400,
+                      "code": "VALIDATION_FAILED",
+                      "message": "Request validation failed.",
+                      "details": {
+                        "violations": [
+                          "amount must be a positive whole number of minor units, as a string"
+                        ]
+                      },
+                      "correlationId": "6f1d2c3b-4a5e-4f60-8a7b-9c0d1e2f3a4b",
+                      "timestamp": "2026-09-10T11:04:22.114Z"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`UNAUTHENTICATED`: No valid credentials: missing/expired/revoked access token, a refused refresh token, or a bad webhook signature.",
+            "headers": {
+              "X-Correlation-Id": {
+                "description": "The request's correlation id (yours, or a generated UUID). Also in every error body.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ErrorResponse"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "statusCode": {
+                          "type": "integer",
+                          "enum": [
+                            401
+                          ]
+                        },
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "UNAUTHENTICATED"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                },
+                "examples": {
+                  "UNAUTHENTICATED": {
+                    "value": {
+                      "statusCode": 401,
+                      "code": "UNAUTHENTICATED",
+                      "message": "Authentication is required.",
+                      "correlationId": "6f1d2c3b-4a5e-4f60-8a7b-9c0d1e2f3a4b",
+                      "timestamp": "2026-09-10T11:04:22.114Z"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`ACCOUNT_SUSPENDED`: The account is suspended.\n\n`EMAIL_NOT_VERIFIED`: Verify the email address first.",
+            "headers": {
+              "X-Correlation-Id": {
+                "description": "The request's correlation id (yours, or a generated UUID). Also in every error body.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ErrorResponse"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "statusCode": {
+                          "type": "integer",
+                          "enum": [
+                            403
+                          ]
+                        },
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "ACCOUNT_SUSPENDED",
+                            "EMAIL_NOT_VERIFIED"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                },
+                "examples": {
+                  "ACCOUNT_SUSPENDED": {
+                    "value": {
+                      "statusCode": 403,
+                      "code": "ACCOUNT_SUSPENDED",
+                      "message": "The account is suspended.",
+                      "correlationId": "6f1d2c3b-4a5e-4f60-8a7b-9c0d1e2f3a4b",
+                      "timestamp": "2026-09-10T11:04:22.114Z"
+                    }
+                  },
+                  "EMAIL_NOT_VERIFIED": {
+                    "value": {
+                      "statusCode": 403,
+                      "code": "EMAIL_NOT_VERIFIED",
+                      "message": "Verify the email address first.",
+                      "correlationId": "6f1d2c3b-4a5e-4f60-8a7b-9c0d1e2f3a4b",
+                      "timestamp": "2026-09-10T11:04:22.114Z"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`WITHDRAWAL_BENEFICIARY_NOT_FOUND`: No such beneficiary for this user (unknown and another user's are the same answer).",
+            "headers": {
+              "X-Correlation-Id": {
+                "description": "The request's correlation id (yours, or a generated UUID). Also in every error body.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ErrorResponse"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "statusCode": {
+                          "type": "integer",
+                          "enum": [
+                            404
+                          ]
+                        },
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "WITHDRAWAL_BENEFICIARY_NOT_FOUND"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                },
+                "examples": {
+                  "WITHDRAWAL_BENEFICIARY_NOT_FOUND": {
+                    "value": {
+                      "statusCode": 404,
+                      "code": "WITHDRAWAL_BENEFICIARY_NOT_FOUND",
+                      "message": "No such beneficiary for this user (unknown and another user's are the same answer).",
+                      "correlationId": "6f1d2c3b-4a5e-4f60-8a7b-9c0d1e2f3a4b",
+                      "timestamp": "2026-09-10T11:04:22.114Z"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "`RATE_LIMITED`: Too many requests. Retry after `Retry-After` seconds.",
+            "headers": {
+              "X-Correlation-Id": {
+                "description": "The request's correlation id (yours, or a generated UUID). Also in every error body.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Retry-After": {
+                "description": "Seconds to wait before retrying.",
+                "schema": {
+                  "type": "integer",
+                  "minimum": 0
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ErrorResponse"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "statusCode": {
+                          "type": "integer",
+                          "enum": [
+                            429
+                          ]
+                        },
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "RATE_LIMITED"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                },
+                "examples": {
+                  "RATE_LIMITED": {
+                    "value": {
+                      "statusCode": 429,
+                      "code": "RATE_LIMITED",
+                      "message": "Too many requests. Retry after the time given in the Retry-After header.",
+                      "details": {
+                        "retryAfterSeconds": 42
+                      },
+                      "correlationId": "6f1d2c3b-4a5e-4f60-8a7b-9c0d1e2f3a4b",
+                      "timestamp": "2026-09-10T11:04:22.114Z"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`INVARIANT_VIOLATION`: Our bug, failed loudly. Quote the `correlationId`.\n\n`INTERNAL_ERROR`: Unexpected error. Quote the `correlationId`.",
+            "headers": {
+              "X-Correlation-Id": {
+                "description": "The request's correlation id (yours, or a generated UUID). Also in every error body.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ErrorResponse"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "statusCode": {
+                          "type": "integer",
+                          "enum": [
+                            500
+                          ]
+                        },
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "INVARIANT_VIOLATION",
+                            "INTERNAL_ERROR"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                },
+                "examples": {
+                  "INVARIANT_VIOLATION": {
+                    "value": {
+                      "statusCode": 500,
+                      "code": "INVARIANT_VIOLATION",
+                      "message": "An unexpected error occurred.",
+                      "correlationId": "6f1d2c3b-4a5e-4f60-8a7b-9c0d1e2f3a4b",
+                      "timestamp": "2026-09-10T11:04:22.114Z"
+                    }
+                  },
+                  "INTERNAL_ERROR": {
+                    "value": {
+                      "statusCode": 500,
+                      "code": "INTERNAL_ERROR",
+                      "message": "An unexpected error occurred.",
+                      "correlationId": "6f1d2c3b-4a5e-4f60-8a7b-9c0d1e2f3a4b",
+                      "timestamp": "2026-09-10T11:04:22.114Z"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "`RESOURCE_BUSY`: Transient lock or statement timeout. Retry with the SAME `Idempotency-Key`.",
+            "headers": {
+              "X-Correlation-Id": {
+                "description": "The request's correlation id (yours, or a generated UUID). Also in every error body.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Retry-After": {
+                "description": "Seconds to wait before retrying.",
+                "schema": {
+                  "type": "integer",
+                  "minimum": 0
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ErrorResponse"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "statusCode": {
+                          "type": "integer",
+                          "enum": [
+                            503
+                          ]
+                        },
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "RESOURCE_BUSY"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                },
+                "examples": {
+                  "RESOURCE_BUSY": {
+                    "value": {
+                      "statusCode": 503,
+                      "code": "RESOURCE_BUSY",
+                      "message": "The resource is busy. Retry the request with the same Idempotency-Key.",
+                      "details": {
+                        "reason": "lock_timeout"
+                      },
+                      "correlationId": "6f1d2c3b-4a5e-4f60-8a7b-9c0d1e2f3a4b",
+                      "timestamp": "2026-09-10T11:04:22.114Z"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "summary": "One withdrawal beneficiary",
+        "tags": [
+          "wallet"
+        ],
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "x-authentication": "active-user",
+        "x-idempotent": false,
+        "x-rate-limits": [
+          {
+            "name": "global",
+            "subject": "ip",
+            "limit": 100,
+            "windowSeconds": 60
+          },
+          {
+            "name": "withdrawal-reads",
+            "subject": "user",
+            "limit": 120,
+            "windowSeconds": 60
+          }
+        ]
+      }
+    },
+    "/api/v1/wallet/withdraw/paystack": {
+      "post": {
+        "description": "Accepted at once (`202 PENDING`) with the amount HELD from your available balance; the worker sends the transfer after this commits. It completes only when Paystack's verify API confirms the exact transfer — a webhook alone never does. If Paystack definitively fails it, the hold is released. Paystack TEST mode only: no real bank receives money; a confirmed transfer lands in your simulated-bank stash.\n\n**Access:** an authenticated ACTIVE user (verified, not suspended).\n\n**Idempotent:** requires `Idempotency-Key`; retries replay the stored outcome.\n\n**Rate limit:** 100 per 60s per ip (`global`); 30 per 60s per user (`withdrawal-writes`).",
+        "operationId": "WithdrawalsController_withdraw",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/IdempotencyKey"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PaystackWithdrawRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PaystackWithdrawalAccepted"
+                }
+              }
+            },
+            "headers": {
+              "X-Correlation-Id": {
+                "description": "The request's correlation id (yours, or a generated UUID). Also in every error body.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Idempotent-Replayed": {
+                "description": "Present (`true`) when this is the stored outcome of an earlier request with the same `Idempotency-Key`.",
+                "schema": {
+                  "type": "string",
+                  "enum": [
+                    "true"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`VALIDATION_FAILED`: The request is malformed. A body/query DTO failure lists `details.violations`; fix the request.\n\n`INVALID_AMOUNT`: The amount is not a positive whole number of minor units in range.\n\n`UNSUPPORTED_CURRENCY`: The currency is not supported for this operation.\n\n`IDEMPOTENCY_KEY_REQUIRED`: This route needs an `Idempotency-Key` header.\n\n`IDEMPOTENCY_KEY_INVALID`: `Idempotency-Key` must be 16–128 characters of `[A-Za-z0-9_-]`.",
+            "headers": {
+              "X-Correlation-Id": {
+                "description": "The request's correlation id (yours, or a generated UUID). Also in every error body.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Idempotent-Replayed": {
+                "description": "Present (`true`) when this is the stored outcome of an earlier request with the same `Idempotency-Key`.",
+                "schema": {
+                  "type": "string",
+                  "enum": [
+                    "true"
+                  ]
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ErrorResponse"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "statusCode": {
+                          "type": "integer",
+                          "enum": [
+                            400
+                          ]
+                        },
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "VALIDATION_FAILED",
+                            "INVALID_AMOUNT",
+                            "UNSUPPORTED_CURRENCY",
+                            "IDEMPOTENCY_KEY_REQUIRED",
+                            "IDEMPOTENCY_KEY_INVALID"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                },
+                "examples": {
+                  "VALIDATION_FAILED": {
+                    "value": {
+                      "statusCode": 400,
+                      "code": "VALIDATION_FAILED",
+                      "message": "Request validation failed.",
+                      "details": {
+                        "violations": [
+                          "amount must be a positive whole number of minor units, as a string"
+                        ]
+                      },
+                      "correlationId": "6f1d2c3b-4a5e-4f60-8a7b-9c0d1e2f3a4b",
+                      "timestamp": "2026-09-10T11:04:22.114Z"
+                    }
+                  },
+                  "INVALID_AMOUNT": {
+                    "value": {
+                      "statusCode": 400,
+                      "code": "INVALID_AMOUNT",
+                      "message": "The amount is not a positive whole number of minor units in range.",
+                      "correlationId": "6f1d2c3b-4a5e-4f60-8a7b-9c0d1e2f3a4b",
+                      "timestamp": "2026-09-10T11:04:22.114Z"
+                    }
+                  },
+                  "UNSUPPORTED_CURRENCY": {
+                    "value": {
+                      "statusCode": 400,
+                      "code": "UNSUPPORTED_CURRENCY",
+                      "message": "The currency is not supported for this operation.",
+                      "correlationId": "6f1d2c3b-4a5e-4f60-8a7b-9c0d1e2f3a4b",
+                      "timestamp": "2026-09-10T11:04:22.114Z"
+                    }
+                  },
+                  "IDEMPOTENCY_KEY_REQUIRED": {
+                    "value": {
+                      "statusCode": 400,
+                      "code": "IDEMPOTENCY_KEY_REQUIRED",
+                      "message": "This route needs an `Idempotency-Key` header.",
+                      "correlationId": "6f1d2c3b-4a5e-4f60-8a7b-9c0d1e2f3a4b",
+                      "timestamp": "2026-09-10T11:04:22.114Z"
+                    }
+                  },
+                  "IDEMPOTENCY_KEY_INVALID": {
+                    "value": {
+                      "statusCode": 400,
+                      "code": "IDEMPOTENCY_KEY_INVALID",
+                      "message": "`Idempotency-Key` must be 16–128 characters of `[A-Za-z0-9_-]`.",
+                      "correlationId": "6f1d2c3b-4a5e-4f60-8a7b-9c0d1e2f3a4b",
+                      "timestamp": "2026-09-10T11:04:22.114Z"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`UNAUTHENTICATED`: No valid credentials: missing/expired/revoked access token, a refused refresh token, or a bad webhook signature.",
+            "headers": {
+              "X-Correlation-Id": {
+                "description": "The request's correlation id (yours, or a generated UUID). Also in every error body.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ErrorResponse"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "statusCode": {
+                          "type": "integer",
+                          "enum": [
+                            401
+                          ]
+                        },
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "UNAUTHENTICATED"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                },
+                "examples": {
+                  "UNAUTHENTICATED": {
+                    "value": {
+                      "statusCode": 401,
+                      "code": "UNAUTHENTICATED",
+                      "message": "Authentication is required.",
+                      "correlationId": "6f1d2c3b-4a5e-4f60-8a7b-9c0d1e2f3a4b",
+                      "timestamp": "2026-09-10T11:04:22.114Z"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`ACCOUNT_SUSPENDED`: The account is suspended.\n\n`EMAIL_NOT_VERIFIED`: Verify the email address first.",
+            "headers": {
+              "X-Correlation-Id": {
+                "description": "The request's correlation id (yours, or a generated UUID). Also in every error body.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ErrorResponse"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "statusCode": {
+                          "type": "integer",
+                          "enum": [
+                            403
+                          ]
+                        },
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "ACCOUNT_SUSPENDED",
+                            "EMAIL_NOT_VERIFIED"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                },
+                "examples": {
+                  "ACCOUNT_SUSPENDED": {
+                    "value": {
+                      "statusCode": 403,
+                      "code": "ACCOUNT_SUSPENDED",
+                      "message": "The account is suspended.",
+                      "correlationId": "6f1d2c3b-4a5e-4f60-8a7b-9c0d1e2f3a4b",
+                      "timestamp": "2026-09-10T11:04:22.114Z"
+                    }
+                  },
+                  "EMAIL_NOT_VERIFIED": {
+                    "value": {
+                      "statusCode": 403,
+                      "code": "EMAIL_NOT_VERIFIED",
+                      "message": "Verify the email address first.",
+                      "correlationId": "6f1d2c3b-4a5e-4f60-8a7b-9c0d1e2f3a4b",
+                      "timestamp": "2026-09-10T11:04:22.114Z"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`WITHDRAWAL_BENEFICIARY_NOT_FOUND`: No such beneficiary for this user (unknown and another user's are the same answer).",
+            "headers": {
+              "X-Correlation-Id": {
+                "description": "The request's correlation id (yours, or a generated UUID). Also in every error body.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Idempotent-Replayed": {
+                "description": "Present (`true`) when this is the stored outcome of an earlier request with the same `Idempotency-Key`.",
+                "schema": {
+                  "type": "string",
+                  "enum": [
+                    "true"
+                  ]
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ErrorResponse"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "statusCode": {
+                          "type": "integer",
+                          "enum": [
+                            404
+                          ]
+                        },
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "WITHDRAWAL_BENEFICIARY_NOT_FOUND"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                },
+                "examples": {
+                  "WITHDRAWAL_BENEFICIARY_NOT_FOUND": {
+                    "value": {
+                      "statusCode": 404,
+                      "code": "WITHDRAWAL_BENEFICIARY_NOT_FOUND",
+                      "message": "No such beneficiary for this user (unknown and another user's are the same answer).",
+                      "correlationId": "6f1d2c3b-4a5e-4f60-8a7b-9c0d1e2f3a4b",
+                      "timestamp": "2026-09-10T11:04:22.114Z"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`INSUFFICIENT_FUNDS`: The available balance does not cover it, even counting held funds: top up.\n\n`FUNDS_RESERVED`: The total balance would cover it but part is held by a pending operation: wait for it.\n\n`IDEMPOTENCY_KEY_REUSE`: This key was used with a different request body on this route. Use a new key.\n\n`REQUEST_IN_PROGRESS`: The same key is being processed right now. Retry after `Retry-After` with the same key.\n\n`BENEFICIARY_NOT_READY`: The beneficiary is still being verified with Paystack, or failed: only a READY one can receive a withdrawal.",
+            "headers": {
+              "X-Correlation-Id": {
+                "description": "The request's correlation id (yours, or a generated UUID). Also in every error body.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Retry-After": {
+                "description": "Seconds to wait before retrying.",
+                "schema": {
+                  "type": "integer",
+                  "minimum": 0
+                }
+              },
+              "Idempotent-Replayed": {
+                "description": "Present (`true`) when this is the stored outcome of an earlier request with the same `Idempotency-Key`.",
+                "schema": {
+                  "type": "string",
+                  "enum": [
+                    "true"
+                  ]
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ErrorResponse"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "statusCode": {
+                          "type": "integer",
+                          "enum": [
+                            409
+                          ]
+                        },
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "INSUFFICIENT_FUNDS",
+                            "FUNDS_RESERVED",
+                            "IDEMPOTENCY_KEY_REUSE",
+                            "REQUEST_IN_PROGRESS",
+                            "BENEFICIARY_NOT_READY"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                },
+                "examples": {
+                  "INSUFFICIENT_FUNDS": {
+                    "value": {
+                      "statusCode": 409,
+                      "code": "INSUFFICIENT_FUNDS",
+                      "message": "The balance cannot cover this debit.",
+                      "details": {
+                        "accountId": "0b6f3c1e-8d2a-4e5b-9c7d-1a2b3c4d5e6f",
+                        "requestedMinor": "100000000",
+                        "balanceMinor": "100000000",
+                        "reservedMinor": "60000000",
+                        "availableMinor": "40000000",
+                        "overdraftLimitMinor": "0"
+                      },
+                      "correlationId": "6f1d2c3b-4a5e-4f60-8a7b-9c0d1e2f3a4b",
+                      "timestamp": "2026-09-10T11:04:22.114Z"
+                    }
+                  },
+                  "FUNDS_RESERVED": {
+                    "value": {
+                      "statusCode": 409,
+                      "code": "FUNDS_RESERVED",
+                      "message": "Part of the balance is reserved by another operation.",
+                      "details": {
+                        "accountId": "0b6f3c1e-8d2a-4e5b-9c7d-1a2b3c4d5e6f",
+                        "requestedMinor": "50000000",
+                        "balanceMinor": "100000000",
+                        "reservedMinor": "60000000",
+                        "availableMinor": "40000000",
+                        "overdraftLimitMinor": "0"
+                      },
+                      "correlationId": "6f1d2c3b-4a5e-4f60-8a7b-9c0d1e2f3a4b",
+                      "timestamp": "2026-09-10T11:04:22.114Z"
+                    }
+                  },
+                  "IDEMPOTENCY_KEY_REUSE": {
+                    "value": {
+                      "statusCode": 409,
+                      "code": "IDEMPOTENCY_KEY_REUSE",
+                      "message": "This key was used with a different request body on this route. Use a new key.",
+                      "correlationId": "6f1d2c3b-4a5e-4f60-8a7b-9c0d1e2f3a4b",
+                      "timestamp": "2026-09-10T11:04:22.114Z"
+                    }
+                  },
+                  "REQUEST_IN_PROGRESS": {
+                    "value": {
+                      "statusCode": 409,
+                      "code": "REQUEST_IN_PROGRESS",
+                      "message": "The same key is being processed right now. Retry after `Retry-After` with the same key.",
+                      "correlationId": "6f1d2c3b-4a5e-4f60-8a7b-9c0d1e2f3a4b",
+                      "timestamp": "2026-09-10T11:04:22.114Z"
+                    }
+                  },
+                  "BENEFICIARY_NOT_READY": {
+                    "value": {
+                      "statusCode": 409,
+                      "code": "BENEFICIARY_NOT_READY",
+                      "message": "The beneficiary is still being verified with Paystack, or failed: only a READY one can receive a withdrawal.",
+                      "correlationId": "6f1d2c3b-4a5e-4f60-8a7b-9c0d1e2f3a4b",
+                      "timestamp": "2026-09-10T11:04:22.114Z"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "`PAYLOAD_TOO_LARGE`: The body exceeds 100 KB.",
+            "headers": {
+              "X-Correlation-Id": {
+                "description": "The request's correlation id (yours, or a generated UUID). Also in every error body.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ErrorResponse"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "statusCode": {
+                          "type": "integer",
+                          "enum": [
+                            413
+                          ]
+                        },
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "PAYLOAD_TOO_LARGE"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                },
+                "examples": {
+                  "PAYLOAD_TOO_LARGE": {
+                    "value": {
+                      "statusCode": 413,
+                      "code": "PAYLOAD_TOO_LARGE",
+                      "message": "The body exceeds 100 KB.",
+                      "correlationId": "6f1d2c3b-4a5e-4f60-8a7b-9c0d1e2f3a4b",
+                      "timestamp": "2026-09-10T11:04:22.114Z"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "`AMOUNT_TOO_SMALL`: Below the minimum for this currency or pair.\n\n`AMOUNT_TOO_LARGE`: Above the per-operation maximum.\n\n`DAILY_LIMIT_EXCEEDED`: The rolling 24-hour limit for this source currency would be exceeded.",
+            "headers": {
+              "X-Correlation-Id": {
+                "description": "The request's correlation id (yours, or a generated UUID). Also in every error body.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Idempotent-Replayed": {
+                "description": "Present (`true`) when this is the stored outcome of an earlier request with the same `Idempotency-Key`.",
+                "schema": {
+                  "type": "string",
+                  "enum": [
+                    "true"
+                  ]
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ErrorResponse"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "statusCode": {
+                          "type": "integer",
+                          "enum": [
+                            422
+                          ]
+                        },
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "AMOUNT_TOO_SMALL",
+                            "AMOUNT_TOO_LARGE",
+                            "DAILY_LIMIT_EXCEEDED"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                },
+                "examples": {
+                  "AMOUNT_TOO_SMALL": {
+                    "value": {
+                      "statusCode": 422,
+                      "code": "AMOUNT_TOO_SMALL",
+                      "message": "Below the minimum for this currency or pair.",
+                      "correlationId": "6f1d2c3b-4a5e-4f60-8a7b-9c0d1e2f3a4b",
+                      "timestamp": "2026-09-10T11:04:22.114Z"
+                    }
+                  },
+                  "AMOUNT_TOO_LARGE": {
+                    "value": {
+                      "statusCode": 422,
+                      "code": "AMOUNT_TOO_LARGE",
+                      "message": "Above the per-operation maximum.",
+                      "correlationId": "6f1d2c3b-4a5e-4f60-8a7b-9c0d1e2f3a4b",
+                      "timestamp": "2026-09-10T11:04:22.114Z"
+                    }
+                  },
+                  "DAILY_LIMIT_EXCEEDED": {
+                    "value": {
+                      "statusCode": 422,
+                      "code": "DAILY_LIMIT_EXCEEDED",
+                      "message": "The rolling 24-hour limit for this source currency would be exceeded.",
+                      "correlationId": "6f1d2c3b-4a5e-4f60-8a7b-9c0d1e2f3a4b",
+                      "timestamp": "2026-09-10T11:04:22.114Z"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "`RATE_LIMITED`: Too many requests. Retry after `Retry-After` seconds.",
+            "headers": {
+              "X-Correlation-Id": {
+                "description": "The request's correlation id (yours, or a generated UUID). Also in every error body.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Retry-After": {
+                "description": "Seconds to wait before retrying.",
+                "schema": {
+                  "type": "integer",
+                  "minimum": 0
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ErrorResponse"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "statusCode": {
+                          "type": "integer",
+                          "enum": [
+                            429
+                          ]
+                        },
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "RATE_LIMITED"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                },
+                "examples": {
+                  "RATE_LIMITED": {
+                    "value": {
+                      "statusCode": 429,
+                      "code": "RATE_LIMITED",
+                      "message": "Too many requests. Retry after the time given in the Retry-After header.",
+                      "details": {
+                        "retryAfterSeconds": 42
+                      },
+                      "correlationId": "6f1d2c3b-4a5e-4f60-8a7b-9c0d1e2f3a4b",
+                      "timestamp": "2026-09-10T11:04:22.114Z"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`INVARIANT_VIOLATION`: Our bug, failed loudly. Quote the `correlationId`.\n\n`INTERNAL_ERROR`: Unexpected error. Quote the `correlationId`.",
+            "headers": {
+              "X-Correlation-Id": {
+                "description": "The request's correlation id (yours, or a generated UUID). Also in every error body.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ErrorResponse"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "statusCode": {
+                          "type": "integer",
+                          "enum": [
+                            500
+                          ]
+                        },
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "INVARIANT_VIOLATION",
+                            "INTERNAL_ERROR"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                },
+                "examples": {
+                  "INVARIANT_VIOLATION": {
+                    "value": {
+                      "statusCode": 500,
+                      "code": "INVARIANT_VIOLATION",
+                      "message": "An unexpected error occurred.",
+                      "correlationId": "6f1d2c3b-4a5e-4f60-8a7b-9c0d1e2f3a4b",
+                      "timestamp": "2026-09-10T11:04:22.114Z"
+                    }
+                  },
+                  "INTERNAL_ERROR": {
+                    "value": {
+                      "statusCode": 500,
+                      "code": "INTERNAL_ERROR",
+                      "message": "An unexpected error occurred.",
+                      "correlationId": "6f1d2c3b-4a5e-4f60-8a7b-9c0d1e2f3a4b",
+                      "timestamp": "2026-09-10T11:04:22.114Z"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "`RESOURCE_BUSY`: Transient lock or statement timeout. Retry with the SAME `Idempotency-Key`.\n\n`WITHDRAWALS_DISABLED`: New withdrawals are switched off (or no worker can process them). Earlier requests keep their answers. Transient.",
+            "headers": {
+              "X-Correlation-Id": {
+                "description": "The request's correlation id (yours, or a generated UUID). Also in every error body.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Retry-After": {
+                "description": "Seconds to wait before retrying.",
+                "schema": {
+                  "type": "integer",
+                  "minimum": 0
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ErrorResponse"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "statusCode": {
+                          "type": "integer",
+                          "enum": [
+                            503
+                          ]
+                        },
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "RESOURCE_BUSY",
+                            "WITHDRAWALS_DISABLED"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                },
+                "examples": {
+                  "RESOURCE_BUSY": {
+                    "value": {
+                      "statusCode": 503,
+                      "code": "RESOURCE_BUSY",
+                      "message": "The resource is busy. Retry the request with the same Idempotency-Key.",
+                      "details": {
+                        "reason": "lock_timeout"
+                      },
+                      "correlationId": "6f1d2c3b-4a5e-4f60-8a7b-9c0d1e2f3a4b",
+                      "timestamp": "2026-09-10T11:04:22.114Z"
+                    }
+                  },
+                  "WITHDRAWALS_DISABLED": {
+                    "value": {
+                      "statusCode": 503,
+                      "code": "WITHDRAWALS_DISABLED",
+                      "message": "New withdrawals are switched off (or no worker can process them). Earlier requests keep their answers. Transient.",
+                      "correlationId": "6f1d2c3b-4a5e-4f60-8a7b-9c0d1e2f3a4b",
+                      "timestamp": "2026-09-10T11:04:22.114Z"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "summary": "Withdraw to a beneficiary through Paystack",
+        "tags": [
+          "wallet"
+        ],
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "x-authentication": "active-user",
+        "x-idempotent": true,
+        "x-rate-limits": [
+          {
+            "name": "global",
+            "subject": "ip",
+            "limit": 100,
+            "windowSeconds": 60
+          },
+          {
+            "name": "withdrawal-writes",
+            "subject": "user",
+            "limit": 30,
+            "windowSeconds": 60
+          }
+        ]
+      }
+    },
+    "/api/v1/wallet/withdraw/{withdrawalId}": {
+      "get": {
+        "description": "Status, amounts, the frozen destination (masked), and the stash receipt once COMPLETED.\n\n**Access:** an authenticated ACTIVE user (verified, not suspended).\n\n**Rate limit:** 100 per 60s per ip (`global`); 120 per 60s per user (`withdrawal-reads`).",
+        "operationId": "WithdrawalsController_findWithdrawal",
+        "parameters": [
+          {
+            "name": "withdrawalId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PaystackWithdrawal"
+                }
+              }
+            },
+            "headers": {
+              "X-Correlation-Id": {
+                "description": "The request's correlation id (yours, or a generated UUID). Also in every error body.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`VALIDATION_FAILED`: The request is malformed. A body/query DTO failure lists `details.violations`; fix the request.",
+            "headers": {
+              "X-Correlation-Id": {
+                "description": "The request's correlation id (yours, or a generated UUID). Also in every error body.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ErrorResponse"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "statusCode": {
+                          "type": "integer",
+                          "enum": [
+                            400
+                          ]
+                        },
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "VALIDATION_FAILED"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                },
+                "examples": {
+                  "VALIDATION_FAILED": {
+                    "value": {
+                      "statusCode": 400,
+                      "code": "VALIDATION_FAILED",
+                      "message": "Request validation failed.",
+                      "details": {
+                        "violations": [
+                          "amount must be a positive whole number of minor units, as a string"
+                        ]
+                      },
+                      "correlationId": "6f1d2c3b-4a5e-4f60-8a7b-9c0d1e2f3a4b",
+                      "timestamp": "2026-09-10T11:04:22.114Z"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`UNAUTHENTICATED`: No valid credentials: missing/expired/revoked access token, a refused refresh token, or a bad webhook signature.",
+            "headers": {
+              "X-Correlation-Id": {
+                "description": "The request's correlation id (yours, or a generated UUID). Also in every error body.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ErrorResponse"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "statusCode": {
+                          "type": "integer",
+                          "enum": [
+                            401
+                          ]
+                        },
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "UNAUTHENTICATED"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                },
+                "examples": {
+                  "UNAUTHENTICATED": {
+                    "value": {
+                      "statusCode": 401,
+                      "code": "UNAUTHENTICATED",
+                      "message": "Authentication is required.",
+                      "correlationId": "6f1d2c3b-4a5e-4f60-8a7b-9c0d1e2f3a4b",
+                      "timestamp": "2026-09-10T11:04:22.114Z"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`ACCOUNT_SUSPENDED`: The account is suspended.\n\n`EMAIL_NOT_VERIFIED`: Verify the email address first.",
+            "headers": {
+              "X-Correlation-Id": {
+                "description": "The request's correlation id (yours, or a generated UUID). Also in every error body.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ErrorResponse"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "statusCode": {
+                          "type": "integer",
+                          "enum": [
+                            403
+                          ]
+                        },
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "ACCOUNT_SUSPENDED",
+                            "EMAIL_NOT_VERIFIED"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                },
+                "examples": {
+                  "ACCOUNT_SUSPENDED": {
+                    "value": {
+                      "statusCode": 403,
+                      "code": "ACCOUNT_SUSPENDED",
+                      "message": "The account is suspended.",
+                      "correlationId": "6f1d2c3b-4a5e-4f60-8a7b-9c0d1e2f3a4b",
+                      "timestamp": "2026-09-10T11:04:22.114Z"
+                    }
+                  },
+                  "EMAIL_NOT_VERIFIED": {
+                    "value": {
+                      "statusCode": 403,
+                      "code": "EMAIL_NOT_VERIFIED",
+                      "message": "Verify the email address first.",
+                      "correlationId": "6f1d2c3b-4a5e-4f60-8a7b-9c0d1e2f3a4b",
+                      "timestamp": "2026-09-10T11:04:22.114Z"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`WITHDRAWAL_NOT_FOUND`: No such withdrawal for this user (unknown and another user's are the same answer).",
+            "headers": {
+              "X-Correlation-Id": {
+                "description": "The request's correlation id (yours, or a generated UUID). Also in every error body.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ErrorResponse"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "statusCode": {
+                          "type": "integer",
+                          "enum": [
+                            404
+                          ]
+                        },
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "WITHDRAWAL_NOT_FOUND"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                },
+                "examples": {
+                  "WITHDRAWAL_NOT_FOUND": {
+                    "value": {
+                      "statusCode": 404,
+                      "code": "WITHDRAWAL_NOT_FOUND",
+                      "message": "No such withdrawal for this user (unknown and another user's are the same answer).",
+                      "correlationId": "6f1d2c3b-4a5e-4f60-8a7b-9c0d1e2f3a4b",
+                      "timestamp": "2026-09-10T11:04:22.114Z"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "`RATE_LIMITED`: Too many requests. Retry after `Retry-After` seconds.",
+            "headers": {
+              "X-Correlation-Id": {
+                "description": "The request's correlation id (yours, or a generated UUID). Also in every error body.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Retry-After": {
+                "description": "Seconds to wait before retrying.",
+                "schema": {
+                  "type": "integer",
+                  "minimum": 0
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ErrorResponse"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "statusCode": {
+                          "type": "integer",
+                          "enum": [
+                            429
+                          ]
+                        },
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "RATE_LIMITED"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                },
+                "examples": {
+                  "RATE_LIMITED": {
+                    "value": {
+                      "statusCode": 429,
+                      "code": "RATE_LIMITED",
+                      "message": "Too many requests. Retry after the time given in the Retry-After header.",
+                      "details": {
+                        "retryAfterSeconds": 42
+                      },
+                      "correlationId": "6f1d2c3b-4a5e-4f60-8a7b-9c0d1e2f3a4b",
+                      "timestamp": "2026-09-10T11:04:22.114Z"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`INVARIANT_VIOLATION`: Our bug, failed loudly. Quote the `correlationId`.\n\n`INTERNAL_ERROR`: Unexpected error. Quote the `correlationId`.",
+            "headers": {
+              "X-Correlation-Id": {
+                "description": "The request's correlation id (yours, or a generated UUID). Also in every error body.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ErrorResponse"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "statusCode": {
+                          "type": "integer",
+                          "enum": [
+                            500
+                          ]
+                        },
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "INVARIANT_VIOLATION",
+                            "INTERNAL_ERROR"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                },
+                "examples": {
+                  "INVARIANT_VIOLATION": {
+                    "value": {
+                      "statusCode": 500,
+                      "code": "INVARIANT_VIOLATION",
+                      "message": "An unexpected error occurred.",
+                      "correlationId": "6f1d2c3b-4a5e-4f60-8a7b-9c0d1e2f3a4b",
+                      "timestamp": "2026-09-10T11:04:22.114Z"
+                    }
+                  },
+                  "INTERNAL_ERROR": {
+                    "value": {
+                      "statusCode": 500,
+                      "code": "INTERNAL_ERROR",
+                      "message": "An unexpected error occurred.",
+                      "correlationId": "6f1d2c3b-4a5e-4f60-8a7b-9c0d1e2f3a4b",
+                      "timestamp": "2026-09-10T11:04:22.114Z"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "`RESOURCE_BUSY`: Transient lock or statement timeout. Retry with the SAME `Idempotency-Key`.",
+            "headers": {
+              "X-Correlation-Id": {
+                "description": "The request's correlation id (yours, or a generated UUID). Also in every error body.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Retry-After": {
+                "description": "Seconds to wait before retrying.",
+                "schema": {
+                  "type": "integer",
+                  "minimum": 0
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ErrorResponse"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "statusCode": {
+                          "type": "integer",
+                          "enum": [
+                            503
+                          ]
+                        },
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "RESOURCE_BUSY"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                },
+                "examples": {
+                  "RESOURCE_BUSY": {
+                    "value": {
+                      "statusCode": 503,
+                      "code": "RESOURCE_BUSY",
+                      "message": "The resource is busy. Retry the request with the same Idempotency-Key.",
+                      "details": {
+                        "reason": "lock_timeout"
+                      },
+                      "correlationId": "6f1d2c3b-4a5e-4f60-8a7b-9c0d1e2f3a4b",
+                      "timestamp": "2026-09-10T11:04:22.114Z"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "summary": "One withdrawal",
+        "tags": [
+          "wallet"
+        ],
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "x-authentication": "active-user",
+        "x-idempotent": false,
+        "x-rate-limits": [
+          {
+            "name": "global",
+            "subject": "ip",
+            "limit": 100,
+            "windowSeconds": 60
+          },
+          {
+            "name": "withdrawal-reads",
+            "subject": "user",
+            "limit": 120,
+            "windowSeconds": 60
+          }
+        ]
+      }
+    },
     "/api/v1/health/live": {
       "get": {
         "description": "The process is up. Reports the build's git SHA.\n\n**Access:** public (no bearer token).\n\n**Rate limit:** none.",
@@ -18286,7 +21460,7 @@
           "token": {
             "type": "string",
             "example": "<token>",
-            "description": "Opaque to the client. Access: an RS256 JWT. Refresh: 256 random bits."
+            "description": ""
           },
           "expiresAt": {
             "type": "string",
@@ -21743,6 +24917,459 @@
           "provider"
         ]
       },
+      "WithdrawalBank": {
+        "type": "object",
+        "properties": {
+          "bankCode": {
+            "type": "string",
+            "example": "058",
+            "description": "Send this as `bankCode`."
+          },
+          "bankName": {
+            "type": "string",
+            "example": "Guaranty Trust Bank"
+          },
+          "currency": {
+            "type": "string",
+            "pattern": "^[A-Z]{3}$",
+            "example": "NGN",
+            "description": "ISO 4217 code."
+          }
+        },
+        "required": [
+          "bankCode",
+          "bankName",
+          "currency"
+        ]
+      },
+      "WithdrawalBankPage": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/WithdrawalBank"
+            }
+          },
+          "nextCursor": {
+            "type": "string",
+            "nullable": true,
+            "example": null,
+            "description": "Bound to the directory snapshot it pages; a changed directory is `400 INVALID_CURSOR`."
+          },
+          "asOf": {
+            "type": "string",
+            "format": "date-time",
+            "example": "2026-09-29T10:00:00.000Z",
+            "description": "When this directory was read from Paystack (a failed refresh keeps serving the previous complete one)."
+          }
+        },
+        "required": [
+          "items",
+          "nextCursor",
+          "asOf"
+        ]
+      },
+      "AddWithdrawalBeneficiaryRequest": {
+        "type": "object",
+        "properties": {
+          "bankCode": {
+            "type": "string",
+            "pattern": "^[0-9A-Za-z]{1,20}$",
+            "example": "058",
+            "description": "A bank code from `GET /wallet/withdrawal-banks` (leading zeroes kept)."
+          },
+          "accountNumber": {
+            "type": "string",
+            "pattern": "^\\d{10}$",
+            "example": "0123456789",
+            "description": "A 10-digit Nigerian (NUBAN) account number. Paystack resolves the name; you never send one."
+          },
+          "currency": {
+            "type": "string",
+            "pattern": "^[A-Z]{3}$",
+            "example": "NGN",
+            "description": "Withdrawals are NGN only."
+          }
+        },
+        "required": [
+          "bankCode",
+          "accountNumber",
+          "currency"
+        ]
+      },
+      "WithdrawalBeneficiaryAccepted": {
+        "type": "object",
+        "properties": {
+          "beneficiaryId": {
+            "type": "string",
+            "format": "uuid",
+            "example": "6a1f9c2e-3b4d-4e5f-8a9b-0c1d2e3f4a5b",
+            "description": "Poll `GET /wallet/withdrawal-beneficiaries/{beneficiaryId}` until READY (or FAILED). The same destination added again returns the same beneficiary."
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "PENDING",
+              "READY",
+              "FAILED"
+            ],
+            "example": "PENDING"
+          }
+        },
+        "required": [
+          "beneficiaryId",
+          "status"
+        ]
+      },
+      "WithdrawalBeneficiary": {
+        "type": "object",
+        "properties": {
+          "beneficiaryId": {
+            "type": "string",
+            "format": "uuid",
+            "example": "6a1f9c2e-3b4d-4e5f-8a9b-0c1d2e3f4a5b",
+            "description": "The beneficiary."
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "PENDING",
+              "READY",
+              "FAILED"
+            ],
+            "example": "READY",
+            "description": "PENDING while Paystack resolves the account and the recipient is created; only READY can receive."
+          },
+          "bankCode": {
+            "type": "string",
+            "example": "058"
+          },
+          "bankName": {
+            "type": "string",
+            "nullable": true,
+            "example": "Guaranty Trust Bank",
+            "description": "As Paystack names it; null until READY."
+          },
+          "currency": {
+            "type": "string",
+            "pattern": "^[A-Z]{3}$",
+            "example": "NGN",
+            "description": "ISO 4217 code."
+          },
+          "accountNumberMasked": {
+            "type": "string",
+            "example": "******6789",
+            "description": "Only the last four digits are ever shown."
+          },
+          "accountName": {
+            "type": "string",
+            "nullable": true,
+            "example": "ADA LOVELACE",
+            "description": "The name Paystack resolved for the account; null until resolved. Check it before withdrawing."
+          },
+          "failureCode": {
+            "type": "string",
+            "nullable": true,
+            "example": null,
+            "description": "Why it FAILED (e.g. `ACCOUNT_NOT_RESOLVED`)."
+          },
+          "reviewRequired": {
+            "type": "boolean",
+            "example": false,
+            "description": "An operator is looking at it; it stays PENDING meanwhile."
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time",
+            "example": "2026-09-29T10:00:00.000Z",
+            "description": "When it was added."
+          }
+        },
+        "required": [
+          "beneficiaryId",
+          "status",
+          "bankCode",
+          "bankName",
+          "currency",
+          "accountNumberMasked",
+          "accountName",
+          "failureCode",
+          "reviewRequired",
+          "createdAt"
+        ]
+      },
+      "WithdrawalBeneficiaryPage": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/WithdrawalBeneficiary"
+            }
+          },
+          "nextCursor": {
+            "type": "string",
+            "nullable": true,
+            "example": null
+          }
+        },
+        "required": [
+          "items",
+          "nextCursor"
+        ]
+      },
+      "PaystackWithdrawRequest": {
+        "type": "object",
+        "properties": {
+          "beneficiaryId": {
+            "type": "string",
+            "format": "uuid",
+            "example": "6a1f9c2e-3b4d-4e5f-8a9b-0c1d2e3f4a5b",
+            "description": "A READY beneficiary of yours."
+          },
+          "amount": {
+            "type": "string",
+            "maxLength": 19,
+            "pattern": "^[1-9]\\d{0,17}$",
+            "example": "300000",
+            "description": "How much to withdraw. Within the configured withdrawal limits. A whole number of minor units, as a string (never a JSON number). The scale is the currency's `minorUnit`: NGN 2 (`\"150000\"` = ₦1,500.00), USD 2, JPY 0 (`\"1500\"` = ¥1,500), KWD 3 (`\"1500\"` = 1.500 KWD)."
+          },
+          "currency": {
+            "type": "string",
+            "pattern": "^[A-Z]{3}$",
+            "example": "NGN",
+            "description": "Withdrawals are NGN only."
+          }
+        },
+        "required": [
+          "beneficiaryId",
+          "amount",
+          "currency"
+        ]
+      },
+      "PaystackWithdrawalAccepted": {
+        "type": "object",
+        "properties": {
+          "withdrawalId": {
+            "type": "string",
+            "format": "uuid",
+            "example": "3f2c4c3e-8d2b-4a51-9b6f-0e1d2c3b4a59",
+            "description": "Poll `GET /wallet/withdraw/{withdrawalId}`. Your available balance already excludes the amount (it is held)."
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "PENDING"
+            ],
+            "example": "PENDING"
+          },
+          "amount": {
+            "type": "string",
+            "pattern": "^-?\\d+$",
+            "example": "300000",
+            "description": "As requested. A whole number of minor units, as a string (never a JSON number). The scale is the currency's `minorUnit`: NGN 2 (`\"150000\"` = ₦1,500.00), USD 2, JPY 0 (`\"1500\"` = ¥1,500), KWD 3 (`\"1500\"` = 1.500 KWD)."
+          },
+          "currency": {
+            "type": "string",
+            "pattern": "^[A-Z]{3}$",
+            "example": "NGN",
+            "description": "ISO 4217 code."
+          },
+          "fee": {
+            "type": "string",
+            "pattern": "^-?\\d+$",
+            "example": "0",
+            "description": "What you pay for the withdrawal: always zero (Paystack's fee is ours). A whole number of minor units, as a string (never a JSON number). The scale is the currency's `minorUnit`: NGN 2 (`\"150000\"` = ₦1,500.00), USD 2, JPY 0 (`\"1500\"` = ¥1,500), KWD 3 (`\"1500\"` = 1.500 KWD)."
+          },
+          "totalDebit": {
+            "type": "string",
+            "pattern": "^-?\\d+$",
+            "example": "300000",
+            "description": "What leaves your wallet: the amount. A whole number of minor units, as a string (never a JSON number). The scale is the currency's `minorUnit`: NGN 2 (`\"150000\"` = ₦1,500.00), USD 2, JPY 0 (`\"1500\"` = ¥1,500), KWD 3 (`\"1500\"` = 1.500 KWD)."
+          },
+          "provider": {
+            "type": "string",
+            "enum": [
+              "paystack"
+            ],
+            "example": "paystack"
+          },
+          "simulated": {
+            "type": "boolean",
+            "enum": [
+              true
+            ],
+            "example": true,
+            "description": "Paystack TEST mode: no real bank receives money; the stash is a simulated bank."
+          }
+        },
+        "required": [
+          "withdrawalId",
+          "status",
+          "amount",
+          "currency",
+          "fee",
+          "totalDebit",
+          "provider",
+          "simulated"
+        ]
+      },
+      "WithdrawalDestinationDocument": {
+        "type": "object",
+        "properties": {
+          "bankCode": {
+            "type": "string",
+            "example": "058"
+          },
+          "bankName": {
+            "type": "string",
+            "example": "Guaranty Trust Bank"
+          },
+          "accountNumberMasked": {
+            "type": "string",
+            "example": "******6789"
+          },
+          "accountName": {
+            "type": "string",
+            "example": "ADA LOVELACE"
+          }
+        },
+        "required": [
+          "bankCode",
+          "bankName",
+          "accountNumberMasked",
+          "accountName"
+        ]
+      },
+      "PaystackWithdrawal": {
+        "type": "object",
+        "properties": {
+          "withdrawalId": {
+            "type": "string",
+            "format": "uuid",
+            "example": "3f2c4c3e-8d2b-4a51-9b6f-0e1d2c3b4a59",
+            "description": "The withdrawal."
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "PENDING",
+              "COMPLETED",
+              "FAILED",
+              "REVERSED"
+            ],
+            "example": "COMPLETED",
+            "description": "COMPLETED only after Paystack's verify API confirms the exact transfer; FAILED released your hold; REVERSED returned the money."
+          },
+          "amount": {
+            "type": "string",
+            "pattern": "^-?\\d+$",
+            "example": "300000",
+            "description": "The amount. A whole number of minor units, as a string (never a JSON number). The scale is the currency's `minorUnit`: NGN 2 (`\"150000\"` = ₦1,500.00), USD 2, JPY 0 (`\"1500\"` = ¥1,500), KWD 3 (`\"1500\"` = 1.500 KWD)."
+          },
+          "currency": {
+            "type": "string",
+            "pattern": "^[A-Z]{3}$",
+            "example": "NGN",
+            "description": "ISO 4217 code."
+          },
+          "minorUnit": {
+            "type": "integer",
+            "minimum": 0,
+            "example": 2,
+            "description": "Decimal places of the currency (from the database): NGN 2, USD 2, JPY 0, KWD 3."
+          },
+          "fee": {
+            "type": "string",
+            "pattern": "^-?\\d+$",
+            "example": "0",
+            "description": "Always zero. A whole number of minor units, as a string (never a JSON number). The scale is the currency's `minorUnit`: NGN 2 (`\"150000\"` = ₦1,500.00), USD 2, JPY 0 (`\"1500\"` = ¥1,500), KWD 3 (`\"1500\"` = 1.500 KWD)."
+          },
+          "totalDebit": {
+            "type": "string",
+            "pattern": "^-?\\d+$",
+            "example": "300000",
+            "description": "What leaves your wallet. A whole number of minor units, as a string (never a JSON number). The scale is the currency's `minorUnit`: NGN 2 (`\"150000\"` = ₦1,500.00), USD 2, JPY 0 (`\"1500\"` = ¥1,500), KWD 3 (`\"1500\"` = 1.500 KWD)."
+          },
+          "provider": {
+            "type": "string",
+            "enum": [
+              "paystack"
+            ],
+            "example": "paystack"
+          },
+          "simulated": {
+            "type": "boolean",
+            "enum": [
+              true
+            ],
+            "example": true
+          },
+          "destination": {
+            "description": "The destination frozen when you asked (later changes to the beneficiary never apply).",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/WithdrawalDestinationDocument"
+              }
+            ]
+          },
+          "transactionReference": {
+            "type": "string",
+            "example": "withdrawal:3f2c4c3e-8d2b-4a51-9b6f-0e1d2c3b4a59",
+            "description": "The reference in `GET /transactions` (stable from the start)."
+          },
+          "stashReceiptId": {
+            "type": "string",
+            "format": "uuid",
+            "nullable": true,
+            "example": null,
+            "description": "The stash receipt confirming the money arrived; null until COMPLETED."
+          },
+          "failureCode": {
+            "type": "string",
+            "nullable": true,
+            "example": null,
+            "description": "Why it FAILED (e.g. `TRANSFER_FAILED`, `USER_SUSPENDED`)."
+          },
+          "reviewRequired": {
+            "type": "boolean",
+            "example": false,
+            "description": "An operator is looking at it; your money stays held meanwhile."
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time",
+            "example": "2026-09-29T10:00:00.000Z",
+            "description": "When you asked."
+          },
+          "completedAt": {
+            "type": "string",
+            "nullable": true,
+            "format": "date-time",
+            "example": null,
+            "description": "When it COMPLETED or FAILED; null while PENDING."
+          }
+        },
+        "required": [
+          "withdrawalId",
+          "status",
+          "amount",
+          "currency",
+          "minorUnit",
+          "fee",
+          "totalDebit",
+          "provider",
+          "simulated",
+          "destination",
+          "transactionReference",
+          "stashReceiptId",
+          "failureCode",
+          "reviewRequired",
+          "createdAt",
+          "completedAt"
+        ]
+      },
       "Version": {
         "type": "object",
         "properties": {
@@ -21943,6 +25570,8 @@
           "ACCOUNT_NOT_FOUND",
           "RESERVATION_NOT_FOUND",
           "FUNDING_NOT_FOUND",
+          "WITHDRAWAL_NOT_FOUND",
+          "WITHDRAWAL_BENEFICIARY_NOT_FOUND",
           "QUOTE_NOT_FOUND",
           "TRANSACTION_NOT_FOUND",
           "RECONCILIATION_BREAK_NOT_FOUND",
@@ -21968,6 +25597,7 @@
           "APPROVAL_REQUESTER_INELIGIBLE",
           "BREAK_GLASS_ALREADY_REVIEWED",
           "ACTION_PRECONDITION_FAILED",
+          "BENEFICIARY_NOT_READY",
           "PAYLOAD_TOO_LARGE",
           "AMOUNT_TOO_SMALL",
           "AMOUNT_TOO_LARGE",
@@ -21977,6 +25607,7 @@
           "FX_RATE_STALE",
           "FX_RATE_UNAVAILABLE",
           "DEPENDENCY_UNAVAILABLE",
+          "WITHDRAWALS_DISABLED",
           "INVARIANT_VIOLATION",
           "LEDGER_UNBALANCED",
           "INVALID_POSTING",
@@ -21986,7 +25617,7 @@
           "INTERNAL_ERROR",
           "HTTP_ERROR"
         ],
-        "description": "Stable error codes: clients branch on these. A code is never renamed or reused.\n\n- `VALIDATION_FAILED` (400): The request is malformed. A body/query DTO failure lists `details.violations`; fix the request.\n- `INVALID_AMOUNT` (400): The amount is not a positive whole number of minor units in range.\n- `UNSUPPORTED_CURRENCY` (400): The currency is not supported for this operation.\n- `SAME_CURRENCY` (400): `from` and `to` are the same currency.\n- `UNSUPPORTED_CURRENCY_PAIR` (400): The directional pair is not offered (or not active).\n- `IDEMPOTENCY_KEY_REQUIRED` (400): This route needs an `Idempotency-Key` header.\n- `IDEMPOTENCY_KEY_INVALID` (400): `Idempotency-Key` must be 16–128 characters of `[A-Za-z0-9_-]`.\n- `INVALID_CURSOR` (400): The cursor is malformed, from another version, or from a different sort/filter set. Restart from the first page.\n- `UNAUTHENTICATED` (401): No valid credentials: missing/expired/revoked access token, a refused refresh token, or a bad webhook signature.\n- `INVALID_CREDENTIALS` (401): Login refused. Deliberately the same for an unknown email, a wrong password, an unverified or a suspended account.\n- `VERIFICATION_FAILED` (400): The email, password and one-time password do not verify an account awaiting verification.\n- `FORBIDDEN` (403): Authenticated, but your role may not do this.\n- `ACCOUNT_SUSPENDED` (403): The account is suspended.\n- `EMAIL_NOT_VERIFIED` (403): Verify the email address first.\n- `NOT_FOUND` (404): No such route or resource.\n- `ACCOUNT_NOT_FOUND` (404): No such ledger account.\n- `RESERVATION_NOT_FOUND` (404): No such reservation.\n- `FUNDING_NOT_FOUND` (404): No such funding for this user (unknown and another user's are the same answer).\n- `QUOTE_NOT_FOUND` (404): No such quote for this user (unknown and another user's are the same answer).\n- `TRANSACTION_NOT_FOUND` (404): No such transaction for this user (unknown and another user's are the same answer).\n- `RECONCILIATION_BREAK_NOT_FOUND` (404): No such reconciliation break.\n- `APPROVAL_NOT_FOUND` (404): No such approval.\n- `USER_NOT_FOUND` (404): No such user.\n- `RECONCILIATION_RUN_NOT_FOUND` (404): No such reconciliation run.\n- `SELF_APPROVAL_FORBIDDEN` (403): Four-eyes: you may not decide (or review) your own request.\n- `BREAK_GLASS_NOT_ALLOWED` (403): Break-glass is only for SUSPEND_USER and RATE_OVERRIDE (MANUAL_RATE).\n- `INSUFFICIENT_FUNDS` (409): The available balance does not cover it, even counting held funds: top up.\n- `FUNDS_RESERVED` (409): The total balance would cover it but part is held by a pending operation: wait for it.\n- `QUOTE_EXPIRED` (409): The quote's 30 seconds are over. Request a new quote.\n- `QUOTE_ALREADY_USED` (409): Quotes are single-use and this one was executed.\n- `IDEMPOTENCY_KEY_REUSE` (409): This key was used with a different request body on this route. Use a new key.\n- `REQUEST_IN_PROGRESS` (409): The same key is being processed right now. Retry after `Retry-After` with the same key.\n- `PERIOD_LOCKED` (409): The value time falls in a closed reporting period.\n- `ALREADY_CORRECTED` (409): The original transaction was already corrected.\n- `RESERVATION_NOT_ACTIVE` (409): The reservation is no longer active.\n- `RESERVATION_CONFLICT` (409): The reservation exists with different terms.\n- `PRICE_LIMIT_EXCEEDED` (409): The priced amounts breach `minimumTargetAmount` / `maximumSourceAmount`; `details` has the priced amounts.\n- `RECONCILIATION_RUN_LEASE_LOST` (409): Internal: a reconciliation run lost its lease.\n- `APPROVAL_ALREADY_DECIDED` (409): The approval is no longer PENDING (or is a break-glass use, which is never decided).\n- `APPROVAL_EXPIRED` (409): The approval passed its time to live without a decision.\n- `APPROVAL_REQUESTER_INELIGIBLE` (409): The requester no longer holds the role (or is no longer active).\n- `BREAK_GLASS_ALREADY_REVIEWED` (409): This break-glass use was already reviewed (or is not a break-glass use).\n- `ACTION_PRECONDITION_FAILED` (409): The world does not allow this action now (see `details`).\n- `PAYLOAD_TOO_LARGE` (413): The body exceeds 100 KB.\n- `AMOUNT_TOO_SMALL` (422): Below the minimum for this currency or pair.\n- `AMOUNT_TOO_LARGE` (422): Above the per-operation maximum.\n- `DAILY_LIMIT_EXCEEDED` (422): The rolling 24-hour limit for this source currency would be exceeded.\n- `RATE_LIMITED` (429): Too many requests. Retry after `Retry-After` seconds.\n- `RESOURCE_BUSY` (503): Transient lock or statement timeout. Retry with the SAME `Idempotency-Key`.\n- `FX_RATE_STALE` (503): No executable rate right now (rates may still be displayed). Transient: retry later with the same key.\n- `FX_RATE_UNAVAILABLE` (503): No rate can be served at all. Transient.\n- `DEPENDENCY_UNAVAILABLE` (503): A dependency we cannot work without is down; we fail closed. Transient.\n- `INVARIANT_VIOLATION` (500): Our bug, failed loudly. Quote the `correlationId`.\n- `LEDGER_UNBALANCED` (500): Our bug: a posting did not balance. Quote the `correlationId`.\n- `INVALID_POSTING` (500): Our bug: an invalid posting was refused. Quote the `correlationId`.\n- `ACCOUNT_CURRENCY_MISMATCH` (500): Our bug: an entry's currency differs from its account's. Quote the `correlationId`.\n- `REVERSAL_MISMATCH` (500): Our bug: a reversal did not mirror its original. Quote the `correlationId`.\n- `INVALID_RESERVATION` (500): Our bug: an invalid reservation settlement. Quote the `correlationId`.\n- `INTERNAL_ERROR` (500): Unexpected error. Quote the `correlationId`.\n- `HTTP_ERROR` (400): An HTTP-level refusal without a dedicated code."
+        "description": "Stable error codes: clients branch on these. A code is never renamed or reused.\n\n- `VALIDATION_FAILED` (400): The request is malformed. A body/query DTO failure lists `details.violations`; fix the request.\n- `INVALID_AMOUNT` (400): The amount is not a positive whole number of minor units in range.\n- `UNSUPPORTED_CURRENCY` (400): The currency is not supported for this operation.\n- `SAME_CURRENCY` (400): `from` and `to` are the same currency.\n- `UNSUPPORTED_CURRENCY_PAIR` (400): The directional pair is not offered (or not active).\n- `IDEMPOTENCY_KEY_REQUIRED` (400): This route needs an `Idempotency-Key` header.\n- `IDEMPOTENCY_KEY_INVALID` (400): `Idempotency-Key` must be 16–128 characters of `[A-Za-z0-9_-]`.\n- `INVALID_CURSOR` (400): The cursor is malformed, from another version, or from a different sort/filter set. Restart from the first page.\n- `UNAUTHENTICATED` (401): No valid credentials: missing/expired/revoked access token, a refused refresh token, or a bad webhook signature.\n- `INVALID_CREDENTIALS` (401): Login refused. Deliberately the same for an unknown email, a wrong password, an unverified or a suspended account.\n- `VERIFICATION_FAILED` (400): The email, password and one-time password do not verify an account awaiting verification.\n- `FORBIDDEN` (403): Authenticated, but your role may not do this.\n- `ACCOUNT_SUSPENDED` (403): The account is suspended.\n- `EMAIL_NOT_VERIFIED` (403): Verify the email address first.\n- `NOT_FOUND` (404): No such route or resource.\n- `ACCOUNT_NOT_FOUND` (404): No such ledger account.\n- `RESERVATION_NOT_FOUND` (404): No such reservation.\n- `FUNDING_NOT_FOUND` (404): No such funding for this user (unknown and another user's are the same answer).\n- `WITHDRAWAL_NOT_FOUND` (404): No such withdrawal for this user (unknown and another user's are the same answer).\n- `WITHDRAWAL_BENEFICIARY_NOT_FOUND` (404): No such beneficiary for this user (unknown and another user's are the same answer).\n- `QUOTE_NOT_FOUND` (404): No such quote for this user (unknown and another user's are the same answer).\n- `TRANSACTION_NOT_FOUND` (404): No such transaction for this user (unknown and another user's are the same answer).\n- `RECONCILIATION_BREAK_NOT_FOUND` (404): No such reconciliation break.\n- `APPROVAL_NOT_FOUND` (404): No such approval.\n- `USER_NOT_FOUND` (404): No such user.\n- `RECONCILIATION_RUN_NOT_FOUND` (404): No such reconciliation run.\n- `SELF_APPROVAL_FORBIDDEN` (403): Four-eyes: you may not decide (or review) your own request.\n- `BREAK_GLASS_NOT_ALLOWED` (403): Break-glass is only for SUSPEND_USER and RATE_OVERRIDE (MANUAL_RATE).\n- `INSUFFICIENT_FUNDS` (409): The available balance does not cover it, even counting held funds: top up.\n- `FUNDS_RESERVED` (409): The total balance would cover it but part is held by a pending operation: wait for it.\n- `QUOTE_EXPIRED` (409): The quote's 30 seconds are over. Request a new quote.\n- `QUOTE_ALREADY_USED` (409): Quotes are single-use and this one was executed.\n- `IDEMPOTENCY_KEY_REUSE` (409): This key was used with a different request body on this route. Use a new key.\n- `REQUEST_IN_PROGRESS` (409): The same key is being processed right now. Retry after `Retry-After` with the same key.\n- `PERIOD_LOCKED` (409): The value time falls in a closed reporting period.\n- `ALREADY_CORRECTED` (409): The original transaction was already corrected.\n- `RESERVATION_NOT_ACTIVE` (409): The reservation is no longer active.\n- `RESERVATION_CONFLICT` (409): The reservation exists with different terms.\n- `PRICE_LIMIT_EXCEEDED` (409): The priced amounts breach `minimumTargetAmount` / `maximumSourceAmount`; `details` has the priced amounts.\n- `RECONCILIATION_RUN_LEASE_LOST` (409): Internal: a reconciliation run lost its lease.\n- `APPROVAL_ALREADY_DECIDED` (409): The approval is no longer PENDING (or is a break-glass use, which is never decided).\n- `APPROVAL_EXPIRED` (409): The approval passed its time to live without a decision.\n- `APPROVAL_REQUESTER_INELIGIBLE` (409): The requester no longer holds the role (or is no longer active).\n- `BREAK_GLASS_ALREADY_REVIEWED` (409): This break-glass use was already reviewed (or is not a break-glass use).\n- `ACTION_PRECONDITION_FAILED` (409): The world does not allow this action now (see `details`).\n- `BENEFICIARY_NOT_READY` (409): The beneficiary is still being verified with Paystack, or failed: only a READY one can receive a withdrawal.\n- `PAYLOAD_TOO_LARGE` (413): The body exceeds 100 KB.\n- `AMOUNT_TOO_SMALL` (422): Below the minimum for this currency or pair.\n- `AMOUNT_TOO_LARGE` (422): Above the per-operation maximum.\n- `DAILY_LIMIT_EXCEEDED` (422): The rolling 24-hour limit for this source currency would be exceeded.\n- `RATE_LIMITED` (429): Too many requests. Retry after `Retry-After` seconds.\n- `RESOURCE_BUSY` (503): Transient lock or statement timeout. Retry with the SAME `Idempotency-Key`.\n- `FX_RATE_STALE` (503): No executable rate right now (rates may still be displayed). Transient: retry later with the same key.\n- `FX_RATE_UNAVAILABLE` (503): No rate can be served at all. Transient.\n- `DEPENDENCY_UNAVAILABLE` (503): A dependency we cannot work without is down; we fail closed. Transient.\n- `WITHDRAWALS_DISABLED` (503): New withdrawals are switched off (or no worker can process them). Earlier requests keep their answers. Transient.\n- `INVARIANT_VIOLATION` (500): Our bug, failed loudly. Quote the `correlationId`.\n- `LEDGER_UNBALANCED` (500): Our bug: a posting did not balance. Quote the `correlationId`.\n- `INVALID_POSTING` (500): Our bug: an invalid posting was refused. Quote the `correlationId`.\n- `ACCOUNT_CURRENCY_MISMATCH` (500): Our bug: an entry's currency differs from its account's. Quote the `correlationId`.\n- `REVERSAL_MISMATCH` (500): Our bug: a reversal did not mirror its original. Quote the `correlationId`.\n- `INVALID_RESERVATION` (500): Our bug: an invalid reservation settlement. Quote the `correlationId`.\n- `INTERNAL_ERROR` (500): Unexpected error. Quote the `correlationId`.\n- `HTTP_ERROR` (400): An HTTP-level refusal without a dedicated code."
       },
       "ErrorResponse": {
         "type": "object",

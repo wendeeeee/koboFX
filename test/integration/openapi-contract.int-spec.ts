@@ -99,7 +99,8 @@ describe('OpenAPI contract (integration)', () => {
         );
       const documented = operations().map(({ method, path }) => `${method.toUpperCase()} ${path}`);
       expect([...documented].sort()).toEqual([...new Set(served)].sort());
-      expect(documented).toHaveLength(38);
+      // +6 withdrawal routes (W3): banks, beneficiaries POST/GET/list, withdraw POST/GET — always served, refused while off.
+      expect(documented).toHaveLength(44);
     });
 
     it('is a valid OpenAPI 3 document', async () => {
@@ -462,8 +463,8 @@ describe('OpenAPI contract (integration)', () => {
           checked.push(`${method} ${path}`);
         }
       }
-      // auth ×5, fund, quote ×2, convert ×2, trade, approvals ×9, reject, review.
-      expect(checked.length).toBe(23);
+      // auth ×5, fund, quote ×2, convert ×2, trade, approvals ×9, reject, review, withdrawal beneficiary, withdraw.
+      expect(checked.length).toBe(25);
     });
 
     it('every admin payload example matches its documented payload schema', () => {

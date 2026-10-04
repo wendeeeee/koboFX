@@ -17,6 +17,7 @@ import { ReconciliationModule } from './modules/reconciliation/reconciliation.mo
 import { RedisModule } from './redis/redis.module';
 import { AdminModule } from './modules/admin/admin.module';
 import { PaystackFundingModule, isPaystackEnabled } from './modules/flows/paystack-funding/paystack-funding.module';
+import { WithdrawalsModule } from './modules/withdrawals/withdrawals.module';
 
 /**
  * The worker process: runs the outbox dispatcher, the flow
@@ -47,6 +48,7 @@ export class WorkerModule {
         ReconciliationModule,
         AdminModule,
         ...(isPaystackEnabled(env) ? [PaystackFundingModule] : []),
+        WithdrawalsModule.forRoot(env, { worker: true }),
       ],
     };
   }
