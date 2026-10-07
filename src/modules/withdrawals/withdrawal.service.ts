@@ -19,6 +19,7 @@ import { ProtectionService } from '../protection/protection.service';
 import { ReservationService } from '../reservations/reservation.service';
 import { ReservationExpiryPolicy } from '../reservations/reservation.types';
 import { WithdrawalAdmissionGate } from './withdrawal-admission-gate';
+import { WithdrawalCodeService } from './withdrawal-code.service';
 import { withdrawalInternalBucket } from './withdrawal-accounts';
 import { assertWithinWithdrawalLimits } from './withdrawal-limits';
 import { WITHDRAWAL_CURRENCY, WithdrawalTrail, beneficiaryContext, maskedAccountNumber } from './withdrawal-records';
@@ -76,10 +77,11 @@ export class WithdrawalService {
     private readonly protection: ProtectionService,
     private readonly trail: WithdrawalTrail,
     private readonly gate: WithdrawalAdmissionGate,
+    private readonly codes: WithdrawalCodeService,
     @Inject(APP_CONFIG) private readonly config: AppConfig,
   ) {}
 
-  async request(userId: string, input: { beneficiaryId: string; amount: string; currency: string }): Promise<WithdrawalAccepted> {
+  async request(userId: string, input: { beneficiaryId: string; amount: string; currency: string; oneTimePassword: string }): Promise<WithdrawalAccepted> {
     await this.gate.assertOpen();
     if (input.currency !== WITHDRAWAL_CURRENCY) throw new UnsupportedCurrencyError(input.currency);
     if (!AMOUNT.test(input.amount)) {
@@ -89,6 +91,8 @@ export class WithdrawalService {
     const limit = this.config.withdrawals.limits?.get(WITHDRAWAL_CURRENCY);
     const accountIdentity = this.config.withdrawals.accountIdentity;
     if (!limit || !accountIdentity) throw new InvariantViolationError('Withdrawals are enabled without limits or an account identity.');
+    // The emailed code (2026-10-07): checked before any money is held, consumed as the admission's last step.
+    const code = await this.codes.check(userId, input.oneTimePassword);
 
     return this.unitOfWork.run(async (manager) => {
       await manager.query(`SELECT id FROM users WHERE id = $1 FOR SHARE`, [userId]);
@@ -146,6 +150,7 @@ export class WithdrawalService {
       });
       await manager.query(`UPDATE paystack_withdrawals SET reservation_id = $2 WHERE flow_id = $1`, [flow.id, hold.id]);
       await this.trail.requested('WITHDRAWAL', flow.id, userId, PaystackWithdrawalState.RESERVED);
+      await this.codes.consume(userId, code);
       return {
         withdrawalId: flow.id,
         status: 'PENDING',

@@ -111,11 +111,14 @@ describe('Withdrawal races (W4, integration)', () => {
     const { user, account } = await fundedUser(100_000n);
     const beneficiaryId = await readyBeneficiary(user);
     const service = harness.moduleRef.get(WithdrawalService, { strict: false });
+    // One emailed code (a user has one open code at a time): at most 5 racers get past the code check (5 tries), one
+    // is admitted, and the rest are FUNDS_RESERVED (the gate) or WITHDRAWAL_CODE_INVALID (used/exhausted).
+    const oneTimePassword = (await withdrawals.freshCode(user))!;
     // Through the service (the barrier's handler), so HTTP throttling cannot conceal the money race.
     const outcomes = await Promise.all(
       Array.from({ length: 100 }, async () => {
         try {
-          await service.request(user.userId, { beneficiaryId, amount: '80000', currency: 'NGN' });
+          await service.request(user.userId, { beneficiaryId, amount: '80000', currency: 'NGN', oneTimePassword });
           return 'ADMITTED';
         } catch (error) {
           return (error as { code?: string }).code ?? String(error);
@@ -124,7 +127,7 @@ describe('Withdrawal races (W4, integration)', () => {
     );
     const tally = outcomes.reduce<Record<string, number>>((each, outcome) => ({ ...each, [outcome]: (each[outcome] ?? 0) + 1 }), {});
     expect(tally.ADMITTED).toBe(1);
-    expect(Object.keys(tally).every((code) => ['ADMITTED', 'FUNDS_RESERVED', 'RESOURCE_BUSY'].includes(code))).toBe(true);
+    expect(Object.keys(tally).every((code) => ['ADMITTED', 'FUNDS_RESERVED', 'WITHDRAWAL_CODE_INVALID', 'RESOURCE_BUSY'].includes(code))).toBe(true);
     expect(await harness.reservedOf(account.accountId)).toBe(80_000n);
     expect(await count(`SELECT count(*)::int AS count FROM reservations WHERE account_id = $1 AND status = 'ACTIVE'`, [account.accountId])).toBe(1);
     expect(await count(`SELECT count(*)::int AS count FROM paystack_withdrawals WHERE user_id = $1`, [user.userId])).toBe(1);
@@ -134,6 +137,26 @@ describe('Withdrawal races (W4, integration)', () => {
     expect(await count(`SELECT coalesce(sum(amount_minor), 0)::int AS count FROM stash_receipts WHERE user_id = $1`, [user.userId])).toBe(80_000);
     await expectNoNegativeReserves();
     await harness.expectCleanBooks();
+  });
+
+  it('one code, two simultaneous withdrawals with funds for both: exactly one is admitted; the other is WITHDRAWAL_CODE_INVALID', async () => {
+    for (let round = 0; round < 5; round += 1) {
+      const { user, account } = await fundedUser(1_000_000n);
+      const beneficiaryId = await readyBeneficiary(user);
+      const oneTimePassword = (await withdrawals.freshCode(user))!;
+      await warmPool();
+      const [first, second] = await Promise.all([
+        withdrawals.withdraw(user, { beneficiaryId, amount: '100000', currency: 'NGN', oneTimePassword }, randomUUID()),
+        withdrawals.withdraw(user, { beneficiaryId, amount: '200000', currency: 'NGN', oneTimePassword }, randomUUID()),
+      ]);
+      const statuses = [first.status, second.status].sort();
+      expect(statuses).toEqual([202, 400]);
+      const refused = [first, second].find((response) => response.status === 400)!;
+      expect((refused.body as { code: string }).code).toBe('WITHDRAWAL_CODE_INVALID');
+      expect(await count(`SELECT count(*)::int AS count FROM reservations WHERE account_id = $1 AND status = 'ACTIVE'`, [account.accountId])).toBe(1);
+      expect(await count(`SELECT count(*)::int AS count FROM paystack_withdrawals WHERE user_id = $1`, [user.userId])).toBe(1);
+    }
+    await expectNoNegativeReserves();
   });
 
   it('withdrawal vs conversion on one account: exactly one wins each round; the loser is FUNDS_RESERVED or INSUFFICIENT_FUNDS', async () => {
@@ -146,7 +169,7 @@ describe('Withdrawal races (W4, integration)', () => {
       const withdraw = () => withdrawals.withdraw(user, { beneficiaryId, amount: '800000', currency: 'NGN' }, randomUUID());
       const convert = () =>
         http()
-          .post(`${API_PREFIX}/wallet/convert`)
+          .post(`/${API_PREFIX}/wallet/convert`)
           .set('Authorization', `Bearer ${user.accessToken}`)
           .set('Idempotency-Key', randomUUID())
           .send({ from: 'NGN', to: 'USD', sourceAmount: '800000' });

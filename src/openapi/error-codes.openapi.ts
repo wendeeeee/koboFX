@@ -11,6 +11,7 @@ export const ERROR_CODE_HTTP_STATUS: Readonly<Record<ErrorCode, number>> = {
   [ErrorCode.IDEMPOTENCY_KEY_INVALID]: 400,
   [ErrorCode.INVALID_CURSOR]: 400,
   [ErrorCode.VERIFICATION_FAILED]: 400,
+  [ErrorCode.WITHDRAWAL_CODE_INVALID]: 400,
 
   [ErrorCode.UNAUTHENTICATED]: 401,
   [ErrorCode.INVALID_CREDENTIALS]: 401,
@@ -85,6 +86,7 @@ export const ERROR_CODE_DESCRIPTIONS: Readonly<Record<ErrorCode, string>> = {
   [ErrorCode.IDEMPOTENCY_KEY_INVALID]: '`Idempotency-Key` must be 16–128 characters of `[A-Za-z0-9_-]`.',
   [ErrorCode.INVALID_CURSOR]: 'The cursor is malformed, from another version, or from a different sort/filter set. Restart from the first page.',
   [ErrorCode.VERIFICATION_FAILED]: 'The email, password and one-time password do not verify an account awaiting verification.',
+  [ErrorCode.WITHDRAWAL_CODE_INVALID]: 'The withdrawal code is wrong, expired, already used or replaced by a newer one. Request a new code; retry with a NEW Idempotency-Key (this refusal is stored for the key).',
   [ErrorCode.UNAUTHENTICATED]: 'No valid credentials: missing/expired/revoked access token, a refused refresh token, or a bad webhook signature.',
   [ErrorCode.INVALID_CREDENTIALS]: 'Login refused. Deliberately the same for an unknown email, a wrong password, an unverified or a suspended account.',
   [ErrorCode.FORBIDDEN]: 'Authenticated, but your role may not do this.',

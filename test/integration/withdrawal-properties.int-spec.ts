@@ -193,7 +193,7 @@ describe('Withdrawal properties (W4, integration)', () => {
             ),
           ).toBe(0);
           // The stash is never spendable: the wallet's available is balance − reserved, nothing more.
-          const wallet = await http().get(`${API_PREFIX}/wallet`).set('Authorization', `Bearer ${user.accessToken}`);
+          const wallet = await http().get(`/${API_PREFIX}/wallet`).set('Authorization', `Bearer ${user.accessToken}`);
           const ngn = (wallet.body.balances as { currency: string; available: string; total: string }[]).find((each) => each.currency === 'NGN')!;
           expect({ label, total: ngn.total, available: ngn.available }).toEqual({
             label,

@@ -17,6 +17,10 @@ export function createPreview() {
   ];
   const quotes = new Map();
   const replay = new Map();
+  const banks = [{ bankCode: '044', bankName: 'Access Bank', currency: 'NGN' }, { bankCode: '058', bankName: 'Guaranty Trust Bank', currency: 'NGN' }, { bankCode: '033', bankName: 'United Bank for Africa', currency: 'NGN' }];
+  const beneficiaries = [{ beneficiaryId: 'preview-beneficiary', status: 'READY', bankCode: '058', bankName: 'Guaranty Trust Bank', currency: 'NGN', accountNumberMasked: '******6789', accountName: 'ADA LOVELACE', failureCode: null, reviewRequired: false, createdAt: now() }];
+  const receipts = [];
+  const withdrawals = new Map();
   return {
     user: { id: 'preview', email: 'ada@example.com', status: 'ACTIVE', verifiedAt: now() },
     async request(path, options = {}) {
@@ -30,7 +34,33 @@ export function createPreview() {
         const filter = new URLSearchParams(path.split('?')[1]).get('type');
         return { items: structuredClone(items.filter((item) => !filter || item.type === filter)), nextCursor: null };
       }
-      if (path === '/fx/quotes') {
+      const method = options.method || 'GET';
+      if (method === 'GET' && path.startsWith('/wallet/withdrawal-banks')) return { items: structuredClone(banks), nextCursor: null, asOf: now() };
+      if (method === 'GET' && path.startsWith('/wallet/withdrawal-beneficiaries')) return { items: structuredClone(beneficiaries), nextCursor: null };
+      if (method === 'GET' && path === '/stash') {
+        const amount = receipts.reduce((sum, receipt) => sum + (receipt.direction === 'IN' ? 1n : -1n) * BigInt(receipt.amount), 0n);
+        return { stashId: receipts.length ? 'preview-stash' : null, kind: 'SIMULATED_BANK', simulated: true, balances: [{ currency: 'NGN', minorUnit: 2, amount: amount.toString() }] };
+      }
+      if (method === 'GET' && path.startsWith('/stash/transactions')) return { stashId: receipts.length ? 'preview-stash' : null, kind: 'SIMULATED_BANK', simulated: true, items: structuredClone(receipts), nextCursor: null };
+      if (method === 'GET' && path.startsWith('/wallet/withdraw/')) return structuredClone(withdrawals.get(decodeURIComponent(path.split('/').pop())));
+      if (path === '/wallet/withdraw/one-time-password') return { status: 'REQUESTED', channel: 'EMAIL', expiresInSeconds: 600 };
+      if (path === '/wallet/withdrawal-beneficiaries') {
+        const bank = banks.find((entry) => entry.bankCode === body.bankCode) || banks[0];
+        const added = { beneficiaryId: crypto.randomUUID(), status: 'READY', bankCode: bank.bankCode, bankName: bank.bankName, currency: 'NGN', accountNumberMasked: `******${body.accountNumber.slice(-4)}`, accountName: 'ADA LOVELACE', failureCode: null, reviewRequired: false, createdAt: now() };
+        beneficiaries.unshift(added);
+        result = { beneficiaryId: added.beneficiaryId, status: 'READY' };
+      } else if (path === '/wallet/withdraw/paystack') {
+        const beneficiary = beneficiaries.find((entry) => entry.beneficiaryId === body.beneficiaryId);
+        const balance = balances.find((entry) => entry.currency === 'NGN');
+        if (BigInt(balance.available) < BigInt(body.amount)) throw new Error('That’s more than your available naira. Enter a smaller amount.');
+        balance.total = balance.available = (BigInt(balance.total) - BigInt(body.amount)).toString();
+        const withdrawalId = crypto.randomUUID();
+        const destination = { bankCode: beneficiary.bankCode, bankName: beneficiary.bankName, accountNumberMasked: beneficiary.accountNumberMasked, accountName: beneficiary.accountName };
+        withdrawals.set(withdrawalId, { withdrawalId, status: 'COMPLETED', amount: body.amount, currency: 'NGN', minorUnit: 2, fee: '0', totalDebit: body.amount, destination, transactionReference: `withdrawal:${withdrawalId}`, stashReceiptId: null, failureCode: null, reviewRequired: false, provider: 'paystack', simulated: true });
+        receipts.unshift({ receiptId: crypto.randomUUID(), kind: 'CONFIRMATION', direction: 'IN', currency: 'NGN', minorUnit: 2, amount: body.amount, withdrawalId, destination, recordedAt: now(), valueTime: now() });
+        items.unshift({ reference: `withdrawal:${withdrawalId}`, type: 'WITHDRAWAL', status: 'COMPLETED', valueTime: now(), legs: [{ currency: 'NGN', amount: body.amount, direction: 'DEBIT', minorUnit: 2 }] });
+        result = { withdrawalId, status: 'PENDING', amount: body.amount, currency: 'NGN', fee: '0', totalDebit: body.amount, provider: 'paystack', simulated: true };
+      } else if (path === '/fx/quotes') {
         const rate = pairs.find((pair) => pair.from === body.from && pair.to === body.to);
         if (!rate) throw new Error('Choose a different currency pair.');
         result = { ...body, quoteId: crypto.randomUUID(), targetAmount: estimateTarget(body.sourceAmount, rate.clientRate, scaleOf(body.from), scaleOf(body.to)), clientRate: rate.clientRate, expiresAt: new Date(Date.now() + 30000).toISOString(), status: 'OPEN', spreadBasisPoints: 150 };

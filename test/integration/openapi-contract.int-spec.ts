@@ -101,7 +101,8 @@ describe('OpenAPI contract (integration)', () => {
       expect([...documented].sort()).toEqual([...new Set(served)].sort());
       // +6 withdrawal routes (W3): banks, beneficiaries POST/GET/list, withdraw POST/GET — always served, refused while off.
       // +2 stash reads (W4): GET /stash, GET /stash/transactions — always served.
-      expect(documented).toHaveLength(46);
+      // +1 (2026-10-07): POST /wallet/withdraw/one-time-password (the withdrawal code).
+      expect(documented).toHaveLength(47);
     });
 
     it('is a valid OpenAPI 3 document', async () => {

@@ -38,6 +38,16 @@ export class WithdrawDto {
   @IsString()
   @Matches(/^[A-Z]{3}$/, { message: 'currency must be an ISO 4217 code' })
   currency!: string;
+
+  @ApiProperty({
+    type: 'string',
+    pattern: '^\\d{6}$',
+    example: '123456',
+    description: 'The 6-digit code emailed by `POST /wallet/withdraw/one-time-password`. Valid 10 minutes for ONE withdrawal.',
+  })
+  @IsString()
+  @Matches(/^\d{6}$/, { message: 'oneTimePassword must be the 6-digit code from your email' })
+  oneTimePassword!: string;
 }
 
 export class PageQuery {

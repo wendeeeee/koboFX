@@ -55,4 +55,14 @@ export class CapturingEmailSender extends EmailSender {
     if (!code) throw new Error(`No verification code was emailed to ${address}`);
     return code;
   }
+
+  /** The code in the most recent withdrawal-code email to this address. */
+  latestWithdrawalCodeFor(address: string): string {
+    const codes = this.sentTo(address)
+      .map((message) => /withdrawal code is (\d{6})\./.exec(message.text)?.[1])
+      .filter((code): code is string => code !== undefined);
+    const code = codes[codes.length - 1];
+    if (!code) throw new Error(`No withdrawal code was emailed to ${address}`);
+    return code;
+  }
 }

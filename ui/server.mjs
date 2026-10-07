@@ -18,7 +18,7 @@ export const server = http.createServer(async (request, response) => {
   const url = new URL(request.url, 'http://localhost');
   if (url.pathname.startsWith('/api/v1/')) {
     // Customer API only. Never expose the admin routes through the UI proxy.
-    if (!/^\/api\/v1\/(auth(?:\/|$)|users\/me$|wallet(?:\/|$)|fx(?:\/|$)|transactions(?:\/|$)|health\/ready$)/.test(url.pathname)) {
+    if (!/^\/api\/v1\/(auth(?:\/|$)|users\/me$|wallet(?:\/|$)|stash(?:\/|$)|fx(?:\/|$)|transactions(?:\/|$)|health\/ready$)/.test(url.pathname)) {
       response.writeHead(404).end(); return;
     }
     const headers = { ...request.headers, host: upstream.host };

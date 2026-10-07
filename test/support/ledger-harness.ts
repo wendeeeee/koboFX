@@ -139,7 +139,16 @@ export interface WithdrawalsHarness {
   addBeneficiary(user: SignedUpUser, body: Record<string, unknown>, idempotencyKey?: string): request.Test;
   beneficiary(user: SignedUpUser, beneficiaryId: string): request.Test;
   beneficiaries(user: SignedUpUser, query?: Record<string, string>): request.Test;
-  withdraw(user: SignedUpUser, body: Record<string, unknown>, idempotencyKey?: string): request.Test;
+  /**
+   * POST /wallet/withdraw/paystack. Without `oneTimePassword` in the body it first gets a REAL code: requests one
+   * (clearing the code-request limits), plays the worker, reads it from the captured email. The code is remembered per
+   * Idempotency-Key, so a same-key retry sends the identical body. Pass `oneTimePassword` to send your own.
+   */
+  withdraw(user: SignedUpUser, body: Record<string, unknown>, idempotencyKey?: string): Promise<request.Response>;
+  /** POST /wallet/withdraw/one-time-password (as is: limits apply). */
+  requestCode(user: SignedUpUser): request.Test;
+  /** Request a code, play the worker, return the emailed code (null if the request was refused). */
+  freshCode(user: SignedUpUser): Promise<string | null>;
   withdrawal(user: SignedUpUser, withdrawalId: string): request.Test;
   banks(user: SignedUpUser, query?: Record<string, string>): request.Test;
   /** Play the worker's heartbeat (admission needs a fresh one). */
@@ -502,14 +511,44 @@ export async function startLedgerHarness(
         }
         const heartbeat = moduleRef.get(WithdrawalWorkerHeartbeat, { strict: false });
         const authorized = (test: request.Test, user: SignedUpUser) => test.set('Authorization', `Bearer ${user.accessToken}`);
+        const codesByKey = new Map<string, string>();
+        const requestCode = (user: SignedUpUser) => authorized(http().post(`/${API_PREFIX}/wallet/withdraw/one-time-password`), user).send();
+        // Serialised: the outbox drain and the captured mailbox are shared by parallel callers.
+        let codeQueue: Promise<unknown> = Promise.resolve();
+        const freshCode = (user: SignedUpUser): Promise<string | null> => {
+          const next = codeQueue.then(async () => {
+            await moduleRef
+              .get(RedisService)
+              .evaluate(`for _, key in ipairs(redis.call('KEYS', ARGV[1])) do redis.call('DEL', key) end return 0`, [], ['rate-limit:withdrawal-code-*']);
+            const response = await requestCode(user);
+            if (response.status !== 202) return null;
+            await auth!.deliverOutbox();
+            return auth!.emails.latestWithdrawalCodeFor(user.email);
+          });
+          codeQueue = next.catch(() => undefined);
+          return next;
+        };
         withdrawals = {
           gatewayCalls: transfersGatewayCalls,
           addBeneficiary: (user, body, idempotencyKey = randomUUID()) =>
             authorized(http().post(`/${API_PREFIX}/wallet/withdrawal-beneficiaries`), user).set('Idempotency-Key', idempotencyKey).send(body),
           beneficiary: (user, beneficiaryId) => authorized(http().get(`/${API_PREFIX}/wallet/withdrawal-beneficiaries/${beneficiaryId}`), user),
           beneficiaries: (user, query = {}) => authorized(http().get(`/${API_PREFIX}/wallet/withdrawal-beneficiaries`).query(query), user),
-          withdraw: (user, body, idempotencyKey = randomUUID()) =>
-            authorized(http().post(`/${API_PREFIX}/wallet/withdraw/paystack`), user).set('Idempotency-Key', idempotencyKey).send(body),
+          withdraw: async (user, body, idempotencyKey = randomUUID()) => {
+            let sent = body;
+            if (!('oneTimePassword' in body)) {
+              let code = codesByKey.get(idempotencyKey);
+              if (code === undefined) {
+                const fresh = await freshCode(user);
+                if (fresh !== null) codesByKey.set(idempotencyKey, fresh);
+                code = fresh ?? '000000'; // the code request was refused (e.g. disabled): the withdraw shows why; not remembered
+              }
+              sent = { ...body, oneTimePassword: code };
+            }
+            return authorized(http().post(`/${API_PREFIX}/wallet/withdraw/paystack`), user).set('Idempotency-Key', idempotencyKey).send(sent);
+          },
+          requestCode: (user) => requestCode(user),
+          freshCode: (user) => freshCode(user),
           withdrawal: (user, withdrawalId) => authorized(http().get(`/${API_PREFIX}/wallet/withdraw/${withdrawalId}`), user),
           banks: (user, query = {}) => authorized(http().get(`/${API_PREFIX}/wallet/withdrawal-banks`).query(query), user),
           beat: () => heartbeat.beat(),
@@ -568,11 +607,12 @@ export async function startLedgerHarness(
         },
         async drive({ rounds = 12, deliverWebhooks = true } = {}) {
           for (let round = 0; round < rounds; round += 1) {
+            // Make scheduled retries eligible before deciding there is no work left.
+            await makeAllDue();
             let activity = 0;
             if (deliverWebhooks) activity += (await psp.deliverAll()).length + (paystackMock ? (await paystackMock.deliverAll()).length : 0);
             activity += (await processor.processDue(100)).claimed;
             activity += await resumer.resumeDue(100);
-            await makeAllDue();
             if (activity === 0) return;
           }
         },

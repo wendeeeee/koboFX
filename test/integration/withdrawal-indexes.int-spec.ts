@@ -19,6 +19,9 @@ interface PlanNode {
   readonly 'Node Type': string;
   readonly 'Relation Name'?: string;
   readonly 'Index Name'?: string;
+  readonly 'Index Cond'?: string;
+  readonly 'Recheck Cond'?: string;
+  readonly Filter?: string;
   readonly Plans?: readonly PlanNode[];
 }
 
@@ -55,18 +58,23 @@ describe('Withdrawal, stash and payout reconciliation: index use (W4, integratio
   let repository: TransactionHistoryRepository;
   let stash: StashService;
   let heavy: UserAccount;
+  let light: UserAccount;
   let heavyWithdrawalId: string;
 
   beforeAll(async () => {
     harness = await startLedgerHarness();
     repository = new TransactionHistoryRepository(harness.unitOfWork);
-    stash = new StashService(harness.unitOfWork, harness.moduleRef.get(CurrencyRegistry, { strict: false }));
+    // Only SQL builders are exercised; the minimal ledger harness has no currency provider.
+    stash = new StashService(harness.unitOfWork, new CurrencyRegistry(harness.unitOfWork));
     heavy = await harness.openUserAccount('NGN');
     const superuser = await harness.db.superuserClient();
     try {
       await superuser.query(`SET session_replication_role = replica`);
       await seedUser(superuser, heavy, HEAVY_ROWS);
-      for (let index = 0; index < OTHER_USERS; index += 1) await seedUser(superuser, await harness.openUserAccount('NGN'), OTHER_ROWS);
+      for (let index = 0; index < OTHER_USERS; index += 1) {
+        light = await harness.openUserAccount('NGN');
+        await seedUser(superuser, light, OTHER_ROWS);
+      }
       // Completed flows of other types dominate flow_instances; the unresolved payout ones are a minority.
       for (let offset = 0; offset < 30_000; offset += SEED_BATCH) {
         await superuser.query(
@@ -146,13 +154,13 @@ describe('Withdrawal, stash and payout reconciliation: index use (W4, integratio
     return row['QUERY PLAN'][0].Plan;
   }
 
-  function expectStreams(plan: PlanNode, expectedIndex: string, where: string): void {
+  function expectStreams(plan: PlanNode, expectedIndexes: readonly string[], where: string): void {
     const scans = scansOf(plan);
     for (const scan of scans.filter((each) => LARGE_TABLES.has(each.node['Relation Name'] as string))) {
       expect({ where, table: scan.node['Relation Name'], node: scan.node['Node Type'] }).not.toMatchObject({ node: expect.stringMatching(/^(Seq Scan|Bitmap Heap Scan)$/) });
     }
-    const keyset = scans.filter((scan) => scan.node['Index Name'] === expectedIndex);
-    expect({ where, used: keyset.length > 0 }).toEqual({ where, used: true });
+    const keyset = scans.filter((scan) => expectedIndexes.includes(scan.node['Index Name'] ?? ''));
+    expect({ where, indexes: scans.map((scan) => scan.node['Index Name']), used: keyset.length > 0 }).toMatchObject({ where, used: true });
     expect({ where, streams: keyset.every(streams) }).toEqual({ where, streams: true });
   }
 
@@ -166,15 +174,18 @@ describe('Withdrawal, stash and payout reconciliation: index use (W4, integratio
   });
   const position = { timeMicroseconds: 1_767_225_600_000_000n + 10_000n * 1_000_000n, id: 'ffffffff-ffff-4fff-bfff-ffffffffffff' };
 
+  // Withdrawals are NGN-only by CHECK constraint. Both indexes provide the same ordered access for an NGN filter.
+  const withdrawalHistoryIndexes = ['paystack_withdrawals_unposted_user_index', 'paystack_withdrawals_unposted_user_currency_index'];
   it.each([
-    ['all types', query({}), 'paystack_withdrawals_unposted_user_index'],
-    ['type WITHDRAWAL', query({ type: 'WITHDRAWAL' }), 'paystack_withdrawals_unposted_user_index'],
-    ['currency NGN', query({ currency: 'NGN' }), 'paystack_withdrawals_unposted_user_currency_index'],
-    ['type WITHDRAWAL + currency NGN, booking time', query({ type: 'WITHDRAWAL', currency: 'NGN', sort: HistorySort.BOOKING_TIME }), 'paystack_withdrawals_unposted_user_currency_index'],
-  ])('history (%s): the unposted-withdrawal branch streams from its keyset index, with and without a cursor', async (_name, history, index) => {
+    ['all types', query({})],
+    ['type WITHDRAWAL', query({ type: 'WITHDRAWAL' })],
+    ['currency NGN', query({ currency: 'NGN' })],
+    ['type WITHDRAWAL + currency NGN, booking time', query({ type: 'WITHDRAWAL', currency: 'NGN', sort: HistorySort.BOOKING_TIME })],
+  ])('history (%s): the unposted-withdrawal branch streams from its keyset index, with and without a cursor', async (_name, history) => {
     for (const at of [null, position]) {
       const statement = repository.buildPage({ userId: heavy.userId }, history, at, LIMIT);
-      expectStreams(await planOf(statement.sql, statement.parameters), index, `${_name} cursor=${at !== null}`);
+      const indexes = history.currency === null ? ['paystack_withdrawals_unposted_user_index'] : withdrawalHistoryIndexes;
+      expectStreams(await planOf(statement.sql, statement.parameters), indexes, `${_name} cursor=${at !== null}`);
     }
   });
 
@@ -197,15 +208,29 @@ describe('Withdrawal, stash and payout reconciliation: index use (W4, integratio
   ])('stash transactions (%s): streams from its recorded-time keyset index, with and without a cursor', async (name, currency, index) => {
     for (const at of [null, position]) {
       const statement = stash.buildPage(heavy.userId, currency, at, LIMIT);
-      expectStreams(await planOf(statement.sql, statement.parameters), index, `${name} cursor=${at !== null}`);
+      expectStreams(await planOf(statement.sql, statement.parameters), [index], `${name} cursor=${at !== null}`);
     }
   });
 
-  it('stash balance: one statement over the owner\'s receipts by index, never a scan of every receipt', async () => {
-    const statement = stash.buildBalances(heavy.userId);
+  it.each(['heavy', 'light'] as const)('stash balance (%s owner): scoped totals, with indexed access when selective', async (owner) => {
+    const account = owner === 'heavy' ? heavy : light;
+    const rows = owner === 'heavy' ? HEAVY_ROWS : OTHER_ROWS;
+    const statement = stash.buildBalances(account.userId);
     const scans = scansOf(await planOf(statement.sql, statement.parameters)).filter((scan) => scan.node['Relation Name'] === 'stash_receipts');
     expect(scans.length).toBeGreaterThan(0);
-    for (const scan of scans) expect(scan.node['Node Type']).not.toBe('Seq Scan');
+    for (const { node } of scans) {
+      // The heavy owner holds 50% of receipts: a sequential scan may cost less than fetching half the heap by index.
+      // The light owner holds 5%: still require index access, without disabling any planner options.
+      if (owner === 'light') expect(node['Node Type']).toMatch(/^(Index (Only )?Scan|Bitmap Heap Scan)$/);
+      const predicate = [node['Index Cond'], node['Recheck Cond'], node.Filter].filter(Boolean).join(' ');
+      expect(predicate).toContain('user_id');
+      expect(predicate).toContain(account.userId);
+    }
+    // Every fixture row is a confirmation of 100 minor units; 1% are USD. Other owners must not affect the sum.
+    expect(await harness.dataSource.query(statement.sql, [...statement.parameters])).toEqual([
+      { stash_id: null, currency_code: 'NGN', minor_unit: 2, amount: String(rows * 99) },
+      { stash_id: null, currency_code: 'USD', minor_unit: 2, amount: String(rows) },
+    ]);
   });
 
   it.each([
@@ -216,7 +241,7 @@ describe('Withdrawal, stash and payout reconciliation: index use (W4, integratio
       [null, null],
       [new Date('2026-01-01T03:00:00Z'), '00000000-0000-4000-8000-000000000000'],
     ]) {
-      expectStreams(await planOf(sql, parameters), index, `${name} ${parameters[0] === null ? 'start' : 'position'}`);
+      expectStreams(await planOf(sql, parameters), [index], `${name} ${parameters[0] === null ? 'start' : 'position'}`);
     }
   });
 });

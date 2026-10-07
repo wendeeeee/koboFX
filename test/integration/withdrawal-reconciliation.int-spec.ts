@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { ProtectedHoldMonitor } from '../../src/modules/withdrawals/protected-hold-monitor';
 import { WithdrawalFlow } from '../../src/modules/withdrawals/withdrawal-flow';
-import { PaystackTransferReconciliation } from '../../src/modules/reconciliation/paystack/paystack-transfer-reconciliation';
+import { PaystackTransferReconciliation, POSTED_UNREVERSED_PAGE, UNRESOLVED_PAYOUT_FLOWS_PAGE } from '../../src/modules/reconciliation/paystack/paystack-transfer-reconciliation';
 import { ReconciliationRunKind } from '../../src/modules/reconciliation/reconciliation-schedule';
 import { BreakStatus, ResolutionKind } from '../../src/modules/reconciliation/break-transitions';
 import {
@@ -282,6 +282,8 @@ describe('Withdrawal reconciliation, monitor and recovery (W4, integration)', ()
         await superuser.query('BEGIN');
         await superuser.query('ALTER TABLE reservations DISABLE TRIGGER reservations_guard_mutation');
         await superuser.query(`UPDATE reservations SET expires_at = now() - interval '1 minute' WHERE id = $1`, [reservationId]);
+        // Flush deferred consistency checks before ALTER TABLE re-enables the mutation guard.
+        await superuser.query('SET CONSTRAINTS ALL IMMEDIATE');
         await superuser.query('ALTER TABLE reservations ENABLE TRIGGER reservations_guard_mutation');
         await superuser.query('COMMIT');
       } finally {
@@ -400,7 +402,7 @@ describe('Withdrawal reconciliation, monitor and recovery (W4, integration)', ()
         payload: { mode: 'COMPLETE_MATCHED_SUCCESS', ...target },
         reason: 'verified late success, investigated',
       });
-      expect(approved).toMatchObject({ status: 'EXECUTED', resultReference: `withdrawal:${late.withdrawalId}` });
+      expect(approved.status).toBe('EXECUTED');
       expect(await stateOf(late.withdrawalId)).toBe('POSTED');
       expect(await harness.balanceOf(late.account.accountId)).toBe(700_000n);
       expect(await harness.reservedOf(late.account.accountId)).toBe(0n);
@@ -412,11 +414,17 @@ describe('Withdrawal reconciliation, monitor and recovery (W4, integration)', ()
         resolutionReference: `approval:${approved.approvalId as string}`,
       });
       const [principal] = (await harness.dataSource.query(
-        `SELECT transactions.metadata ->> 'approvalId' AS approval_id, paystack_withdrawals.recovery_approval_id::text AS recovery_approval_id
+        `SELECT transactions.id AS transaction_id, transactions.reference, transactions.metadata ->> 'approvalId' AS approval_id,
+                paystack_withdrawals.recovery_approval_id::text AS recovery_approval_id
            FROM paystack_withdrawals JOIN transactions ON transactions.id = paystack_withdrawals.principal_transaction_id WHERE paystack_withdrawals.flow_id = $1`,
         [late.withdrawalId],
-      )) as { approval_id: string; recovery_approval_id: string }[];
-      expect(principal).toEqual({ approval_id: approved.approvalId, recovery_approval_id: approved.approvalId });
+      )) as { transaction_id: string; reference: string; approval_id: string; recovery_approval_id: string }[];
+      expect(principal).toEqual({
+        transaction_id: approved.resultReference,
+        reference: `withdrawal:${late.withdrawalId}`,
+        approval_id: approved.approvalId,
+        recovery_approval_id: approved.approvalId,
+      });
       expect((await withdrawals.withdrawal(await payments.logIn(late.user), late.withdrawalId)).body).toMatchObject({ status: 'COMPLETED' });
       // Never a new transfer: the recovery sends nothing.
       expect(paystack.mock.transfers.transfersFor(late.reference)).toBe(1);
@@ -465,7 +473,8 @@ describe('Withdrawal reconciliation, monitor and recovery (W4, integration)', ()
       // Meanwhile the resumer completes it the normal way.
       await payments.makeAllDue();
       await payments.drive({ deliverWebhooks: false });
-      expect(await stateOf(sent.withdrawalId)).toBe('POSTED');
+      expect(await harness.dataSource.query(`SELECT state, last_error FROM flow_instances WHERE id = $1`, [sent.withdrawalId]))
+        .toEqual([{ state: 'POSTED', last_error: null }]);
       const before = await harness.snapshot();
       const late = await admin.decide(checker, (requested.body as { approvalId: string }).approvalId, 'approve');
       expect(late.status).toBe(200);
@@ -478,6 +487,27 @@ describe('Withdrawal reconciliation, monitor and recovery (W4, integration)', ()
       const again = await recover(payload);
       expect(again.body).toMatchObject({ code: 'ACTION_PRECONDITION_FAILED', details: { reason: 'ALREADY_RECOVERED' } });
       await harness.expectCleanBooks();
+    });
+
+    it('a cleared or malformed recovery setting on a reused connection grants no recovery and never fails a UUID cast', async () => {
+      const client = await harness.db.appClient();
+      const flowId = randomUUID();
+      try {
+        await client.query('BEGIN');
+        await client.query(`SELECT set_config('fx.withdrawal_recovery', $1, true)`, [randomUUID()]);
+        await client.query('COMMIT');
+        // PostgreSQL retains the custom setting as '' after the transaction ends.
+        expect((await client.query(`SELECT current_setting('fx.withdrawal_recovery', true) AS setting`)).rows[0].setting).toBe('');
+        expect((await client.query(`SELECT withdrawal_recovery_payload($1) AS payload`, [flowId])).rows[0].payload).toBeNull();
+        for (const setting of ['', 'not-a-uuid', '00000000-0000-0000-0000-00000000000z', randomUUID()]) {
+          await client.query('BEGIN');
+          await client.query(`SELECT set_config('fx.withdrawal_recovery', $1, true)`, [setting]);
+          expect((await client.query(`SELECT withdrawal_recovery_payload($1) AS payload`, [flowId])).rows[0].payload).toBeNull();
+          await client.query('COMMIT');
+        }
+      } finally {
+        await client.end();
+      }
     });
 
     it('the action is four-eyes and never break-glass: the requester cannot approve it', async () => {
@@ -526,6 +556,38 @@ describe('Withdrawal reconciliation coverage: census watermark and page caps (W4
     return `${String(3000 + periodSequence)}-01-01`;
   };
   const runDaily = (key: string) => payments.reconciliation.scheduler.runPeriod(ReconciliationRunKind.EXTERNAL_DAILY, key, 'paystack');
+
+  it.each([
+    ['unresolved flows', UNRESOLVED_PAYOUT_FLOWS_PAGE, 'id'],
+    ['posted withdrawals', POSTED_UNREVERSED_PAGE, 'flow_id'],
+  ])('%s: pagination preserves microseconds and visits each row once across timestamp ties', async (_name, statement, idColumn) => {
+    // More than two pages, all within one millisecond, with pairs sharing the exact timestamp.
+    // CTEs exercise the production queries without bypassing the payout tables' integrity guards.
+    const fixture = `WITH rows AS (
+      SELECT ('00000000-0000-4000-8000-' || lpad(n::text, 12, '0'))::uuid AS id,
+             timestamptz '2026-01-01 00:00:00.000001+00' + ((n - 1) / 2) * interval '1 microsecond' AS at
+        FROM generate_series(1, 401) AS n
+    ), flow_instances AS (
+      SELECT id, at AS created_at, NULL::timestamptz AS completed_at, 'PAYSTACK_WITHDRAWAL'::text AS flow_type FROM rows
+    ), paystack_withdrawals AS (
+      SELECT id AS flow_id, at AS posted_at, NULL::timestamptz AS reversed_at, id::text AS provider_reference,
+             'NGN'::text AS currency_code, 100::bigint AS principal_minor FROM rows
+    )`;
+    let cursor: [string | null, string | null] = [null, null];
+    const visited: string[] = [];
+    const sizes: number[] = [];
+    // Bound the regression: a broken cursor fails quickly instead of leaving an endless worker behind.
+    for (let pageNumber = 0; pageNumber < 4; pageNumber += 1) {
+      const page = await harness.dataSource.query(`${fixture} ${statement}`, cursor) as Record<string, string>[];
+      sizes.push(page.length);
+      if (page.length === 0) break;
+      visited.push(...page.map((row) => row[idColumn]));
+      const last = page[page.length - 1];
+      cursor = [last.cursor_timestamp, last[idColumn]];
+    }
+    expect(sizes).toEqual([200, 200, 1, 0]);
+    expect(visited).toEqual(Array.from({ length: 401 }, (_, index) => `00000000-0000-4000-8000-${String(index + 1).padStart(12, '0')}`));
+  });
 
   it('the historical census advances its watermark 12 windows per run, resumes, and completes cycle after cycle', async () => {
     await runDaily(nextKey());

@@ -4,7 +4,8 @@ import { APP_CONFIG } from '../../../config/config.module';
 import { AppConfig } from '../../../config/configuration';
 import { UnitOfWork } from '../../../database/transaction/unit-of-work';
 import { EmailSender } from '../../notifications/email/email-sender';
-import { verificationCodeEmail } from '../../notifications/email/email-templates';
+import { EmailMessage } from '../../notifications/email/email-sender';
+import { verificationCodeEmail, withdrawalCodeEmail } from '../../notifications/email/email-templates';
 import { UserStatus } from '../../users/user.types';
 import {
   ONE_TIME_PASSWORD_TIME_TO_LIVE_SECONDS,
@@ -15,7 +16,7 @@ import {
 import { OneTimePasswordChallengeRepository } from './one-time-password-challenge.repository';
 import { OneTimePasswordChallengeStore } from './one-time-password-challenge.store';
 
-export type DispatchOutcome = 'SENT' | 'NOT_PENDING';
+export type DispatchOutcome = 'SENT' | 'NOT_PENDING' | 'NOT_ACTIVE';
 
 /**
  * Issues and emails a one-time password. Runs in the separate WORKER, when an
@@ -37,7 +38,28 @@ export class GenerateAndDispatchOneTimePasswordService {
   }
 
   async dispatchEmailVerification(userId: string, outboxEventId: string): Promise<DispatchOutcome> {
-    const purpose = OneTimePasswordPurpose.VERIFY_EMAIL;
+    const sent = await this.issue(OneTimePasswordPurpose.VERIFY_EMAIL, userId, outboxEventId, UserStatus.PENDING_VERIFICATION, verificationCodeEmail);
+    if (!sent) this.logger.log({ userId }, 'Verification code not sent: the user is no longer pending verification');
+    return sent ? 'SENT' : 'NOT_PENDING';
+  }
+
+  /**
+   * A withdrawal code (`WithdrawalCodeRequested.v1`): only for an ACTIVE user — a suspended one gets none. Like the
+   * verification code, the plaintext exists only in this process; a newer code supersedes an older one.
+   */
+  async dispatchWithdrawalCode(userId: string, outboxEventId: string): Promise<DispatchOutcome> {
+    const sent = await this.issue(OneTimePasswordPurpose.AUTHORIZE_WITHDRAWAL, userId, outboxEventId, UserStatus.ACTIVE, withdrawalCodeEmail);
+    if (!sent) this.logger.log({ userId }, 'Withdrawal code not sent: the user is not active');
+    return sent ? 'SENT' : 'NOT_ACTIVE';
+  }
+
+  private async issue(
+    purpose: OneTimePasswordPurpose,
+    userId: string,
+    outboxEventId: string,
+    requiredStatus: UserStatus,
+    template: (to: string, code: string, validForMinutes: number) => EmailMessage,
+  ): Promise<boolean> {
     const oneTimePassword = generateOneTimePassword();
     const challengeId = randomUUID();
 
@@ -46,7 +68,7 @@ export class GenerateAndDispatchOneTimePasswordService {
         email: string;
         status: UserStatus;
       }[];
-      if (user?.status !== UserStatus.PENDING_VERIFICATION) return null;
+      if (user?.status !== requiredStatus) return null;
       await this.challenges.closeOpen(purpose, userId);
       await this.challenges.insertIssued(challengeId, purpose, userId, outboxEventId, ONE_TIME_PASSWORD_TIME_TO_LIVE_SECONDS);
       await this.challengeStore.store(
@@ -58,15 +80,10 @@ export class GenerateAndDispatchOneTimePasswordService {
       );
       return user.email;
     });
-    if (recipient === null) {
-      this.logger.log({ userId }, 'Verification code not sent: the user is no longer pending verification');
-      return 'NOT_PENDING';
-    }
+    if (recipient === null) return false;
 
-    await this.emailSender.send(
-      verificationCodeEmail(recipient, oneTimePassword, ONE_TIME_PASSWORD_TIME_TO_LIVE_SECONDS / 60),
-    );
-    this.logger.log({ userId, challengeId }, 'Verification code sent');
-    return 'SENT';
+    await this.emailSender.send(template(recipient, oneTimePassword, ONE_TIME_PASSWORD_TIME_TO_LIVE_SECONDS / 60));
+    this.logger.log({ userId, challengeId, purpose }, 'One-time password sent');
+    return true;
   }
 }

@@ -11,6 +11,8 @@ export enum OutboxEventType {
   BENEFICIARY_CHANGED = 'BeneficiaryChanged.v1',
   WITHDRAWAL_CHANGED = 'WithdrawalChanged.v1',
   PROTECTED_HOLD_FLAGGED = 'ProtectedHoldFlagged.v1',
+  /** A user asked for a withdrawal code: `{userId}` (the worker generates and emails it). */
+  WITHDRAWAL_CODE_REQUESTED = 'WithdrawalCodeRequested.v1',
 }
 
 /** W4 §G.2: ids and the condition only. */

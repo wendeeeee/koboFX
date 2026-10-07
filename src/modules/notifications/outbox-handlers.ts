@@ -35,6 +35,18 @@ export class EmailVerificationRequestedHandler implements OutboxEventHandler {
   }
 }
 
+/** `WithdrawalCodeRequested.v1` → generate and email a withdrawal code (the plaintext lives only in this process). */
+@Injectable()
+export class WithdrawalCodeRequestedHandler implements OutboxEventHandler {
+  readonly eventType = OutboxEventType.WITHDRAWAL_CODE_REQUESTED;
+
+  constructor(private readonly oneTimePasswords: GenerateAndDispatchOneTimePasswordService) {}
+
+  async handle(event: ClaimedOutboxEvent): Promise<void> {
+    await this.oneTimePasswords.dispatchWithdrawalCode(userIdOf(event), event.id);
+  }
+}
+
 export const EXISTING_ACCOUNT_NOTICE_INTERVAL_SECONDS = 3600;
 
 

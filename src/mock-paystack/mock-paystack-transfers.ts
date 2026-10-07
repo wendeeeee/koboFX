@@ -90,6 +90,9 @@ const BANKS = [
   { id: 5, name: 'Zenith Bank', code: '057' },
 ];
 
+/** The bank codes `/bank` lists (and `/bank/resolve` accepts). */
+export const MOCK_BANK_CODES: readonly string[] = BANKS.map((bank) => bank.code);
+
 const FIRST_TRANSFER_ID = 9_007_199_254_741_993n;
 
 export class MockPaystackTransfers {

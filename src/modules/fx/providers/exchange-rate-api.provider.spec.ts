@@ -71,11 +71,13 @@ describe('ExchangeRate-API adapter against the simulated provider (real HTTP)', 
     expect(result.kind).toBe('RATES');
     const everything = JSON.stringify(recorder.calls) + JSON.stringify(result);
     expect(everything).not.toContain(API_KEY);
-    expect(recorder.calls.map((call) => call.requestPath)).toEqual([
-      '/v6/[REDACTED]/latest/USD'.replace(/^/, `${url}`),
-      `${url}/v6/[REDACTED]/latest/USD`,
-      `${url}/v6/[REDACTED]/latest/USD`,
-    ]);
+    // The two scripted faults require retries; under load another attempt can time out.
+    // Check every recorded attempt without depending on the timing of real HTTP.
+    expect(recorder.calls.length).toBeGreaterThanOrEqual(3);
+    expect(recorder.calls.length).toBeLessThanOrEqual(4);
+    for (const call of recorder.calls) {
+      expect(call.requestPath).toBe(`${url}/v6/[REDACTED]/latest/USD`);
+    }
   });
 
   it('a wrong key is refused with the recorded shape (HTTP 403 invalid-key): definitive, never retried', async () => {

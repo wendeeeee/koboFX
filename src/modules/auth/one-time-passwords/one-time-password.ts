@@ -2,6 +2,8 @@ import { createHmac, randomInt, timingSafeEqual } from 'node:crypto';
 
 export enum OneTimePasswordPurpose {
   VERIFY_EMAIL = 'VERIFY_EMAIL',
+  /** One withdrawal by an ACTIVE user (any amount; the code is consumed when the withdrawal is admitted). */
+  AUTHORIZE_WITHDRAWAL = 'AUTHORIZE_WITHDRAWAL',
 }
 
 export const ONE_TIME_PASSWORD_DIGITS = 6;

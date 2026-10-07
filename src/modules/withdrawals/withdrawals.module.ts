@@ -4,6 +4,7 @@ import { APP_CONFIG } from '../../config/config.module';
 import { AppConfig } from '../../config/configuration';
 import { UnitOfWork } from '../../database/transaction/unit-of-work';
 import { AuditModule } from '../audit/audit.module';
+import { OneTimePasswordsModule } from '../auth/one-time-passwords/one-time-passwords.module';
 import { FlowsModule } from '../flows/flows.module';
 import { LedgerModule } from '../ledger/ledger.module';
 import { OutboxDispatcher } from '../outbox/outbox-dispatcher';
@@ -25,6 +26,7 @@ import { WithdrawalAdmissionGate, WithdrawalWorkerHeartbeat } from './withdrawal
 import { ProtectedHoldMetrics, ProtectedHoldMonitor } from './protected-hold-monitor';
 import { WithdrawalFlow } from './withdrawal-flow';
 import { WithdrawalTrail } from './withdrawal-records';
+import { WithdrawalCodeService } from './withdrawal-code.service';
 import { WithdrawalService } from './withdrawal.service';
 import { WithdrawalsController } from './withdrawals.controller';
 
@@ -138,6 +140,7 @@ export class WithdrawalsModule implements OnModuleInit {
       BankDirectoryService,
       BeneficiaryService,
       WithdrawalService,
+      WithdrawalCodeService,
       WithdrawalAdmissionGate,
       WithdrawalTrail,
       ProtectedHoldMetrics,
@@ -165,6 +168,7 @@ export class WithdrawalsModule implements OnModuleInit {
         AuditModule,
         OutboxModule,
         UsersModule,
+        OneTimePasswordsModule,
         // With a key: the transfers boundary, and the TRANSFER component of THE Paystack reconciliation (W4).
         ...(keyed ? [PaystackTransfersModule, PaystackModule, ReconciliationModule, WebhooksModule] : []),
       ],

@@ -39,7 +39,8 @@ export const CENSUS_COMPONENT = 'transfer-census';
  * The hourly keyset over unresolved payout flows of any age (`flow_instances_unresolved_payout_index`). Exported so
  * the plan suite EXPLAINs the exact statement. `$1, $2` = the last `(created_at, id)` seen, or nulls.
  */
-export const UNRESOLVED_PAYOUT_FLOWS_PAGE = `SELECT flow_instances.id, flow_instances.created_at
+// Keep cursor timestamps as text: JavaScript Date would discard PostgreSQL microseconds and revisit the last row.
+export const UNRESOLVED_PAYOUT_FLOWS_PAGE = `SELECT flow_instances.id, flow_instances.created_at::text AS cursor_timestamp
            FROM flow_instances
           WHERE flow_instances.completed_at IS NULL AND flow_instances.flow_type IN ('PAYSTACK_WITHDRAWAL', 'PAYSTACK_BENEFICIARY')
             AND ($1::timestamptz IS NULL OR (flow_instances.created_at, flow_instances.id) > ($1::timestamptz, $2::uuid))
@@ -47,7 +48,7 @@ export const UNRESOLVED_PAYOUT_FLOWS_PAGE = `SELECT flow_instances.id, flow_inst
           LIMIT ${KEYSET_PAGE}`;
 
 /** The daily keyset over posted, not-reversed withdrawals of any age (`paystack_withdrawals_posted_unreversed_index`). */
-export const POSTED_UNREVERSED_PAGE = `SELECT flow_id, posted_at, provider_reference, currency_code, principal_minor::text AS principal_minor
+export const POSTED_UNREVERSED_PAGE = `SELECT flow_id, posted_at, posted_at::text AS cursor_timestamp, provider_reference, currency_code, principal_minor::text AS principal_minor
            FROM paystack_withdrawals
           WHERE posted_at IS NOT NULL AND reversed_at IS NULL
             AND ($1::timestamptz IS NULL OR (posted_at, flow_id) > ($1::timestamptz, $2::uuid))
@@ -128,7 +129,8 @@ export class PaystackTransferReconciliation implements PaystackReconciliationCom
     const windowStart = new Date(now.getTime() - this.config.reconciliation.lookbackDays * DAY);
     const listed = new Set<string>();
     // The moving window overlaps by a day on each side: a transfer created at the edge is never missed.
-    await this.census(context, new Date(windowStart.getTime() - DAY), new Date(now.getTime() + DAY), 'TRANSFER_LIST', listed, counts);
+    // Finish the moving scan before advancing historical coverage; an incomplete run resumes this scan first.
+    if (!(await this.census(context, new Date(windowStart.getTime() - DAY), new Date(now.getTime() + DAY), 'TRANSFER_LIST', listed, counts))) return counts;
     await context.heartbeat();
     await this.historicalCensus(context, windowStart, listed, counts);
     await context.heartbeat();
@@ -159,19 +161,19 @@ export class PaystackTransferReconciliation implements PaystackReconciliationCom
 
   private async driveUnresolved(context: ComponentRun, counts: Counts): Promise<void> {
     const cutoff = new Date(this.clock.now().getTime() - this.config.reconciliation.unresolvedFlowAgeMinutes * 60_000);
-    let after: { createdAt: Date; id: string } | null = null;
+    let after: { createdAt: string; id: string } | null = null;
     for (;;) {
       const page = (await this.unitOfWork.manager.query(
         UNRESOLVED_PAYOUT_FLOWS_PAGE,
         [after?.createdAt ?? null, after?.id ?? null],
-      )) as { id: string; created_at: Date }[];
+      )) as { id: string; cursor_timestamp: string }[];
       if (page.length === 0) break;
       for (const row of page) {
         await this.drive(context, row.id, false, counts);
         counts.unresolvedFlowsDriven += 1;
         await this.detectNotPosted(context, row.id, cutoff);
       }
-      after = { createdAt: page[page.length - 1].created_at, id: page[page.length - 1].id };
+      after = { createdAt: page[page.length - 1].cursor_timestamp, id: page[page.length - 1].id };
       await context.heartbeat();
     }
   }
@@ -381,12 +383,12 @@ export class PaystackTransferReconciliation implements PaystackReconciliationCom
   // ── daily 3: posted withdrawals, whatever their age ──
 
   private async revisitPosted(context: ComponentRun, counts: Counts): Promise<void> {
-    let after: { postedAt: Date; flowId: string } | null = null;
+    let after: { postedAt: string; flowId: string } | null = null;
     for (;;) {
       const page = (await this.unitOfWork.manager.query(
         POSTED_UNREVERSED_PAGE,
         [after?.postedAt ?? null, after?.flowId ?? null],
-      )) as { flow_id: string; posted_at: Date; provider_reference: string; currency_code: string; principal_minor: string }[];
+      )) as { flow_id: string; posted_at: Date; cursor_timestamp: string; provider_reference: string; currency_code: string; principal_minor: string }[];
       if (page.length === 0) return;
       for (const row of page) {
         counts.postedWithdrawalsChecked += 1;
@@ -410,7 +412,7 @@ export class PaystackTransferReconciliation implements PaystackReconciliationCom
           },
         });
       }
-      after = { postedAt: page[page.length - 1].posted_at, flowId: page[page.length - 1].flow_id };
+      after = { postedAt: page[page.length - 1].cursor_timestamp, flowId: page[page.length - 1].flow_id };
       await context.heartbeat();
     }
   }

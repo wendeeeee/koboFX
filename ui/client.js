@@ -20,11 +20,16 @@ const messages = {
   QUOTE_EXPIRED: 'This quote has expired. Get a fresh quote before exchanging.',
   INSUFFICIENT_FUNDS: 'There isn’t enough available money in this wallet. Add money or try a smaller amount.',
   FUNDS_RESERVED: 'Some of this balance is already in use. Please try a smaller amount.',
-  DAILY_LIMIT_EXCEEDED: 'You’ve reached today’s exchange limit. Please try again tomorrow.',
+  DAILY_LIMIT_EXCEEDED: 'You’ve reached today’s limit. Please try again tomorrow.',
   AMOUNT_TOO_SMALL: 'This amount is below the minimum. Please enter a larger amount.',
   AMOUNT_TOO_LARGE: 'This amount is above the limit. Please try a smaller amount.',
   REQUEST_IN_PROGRESS: 'We’re still processing this request. Please wait a moment, then try again.',
   DEPENDENCY_UNAVAILABLE: 'This service is temporarily unavailable. Please try again shortly.',
+  WITHDRAWAL_CODE_INVALID: 'That code didn’t work. It may be wrong, expired or already used. Tap “Send code” for a new one.',
+  WITHDRAWALS_DISABLED: 'Withdrawals are paused right now. Your money is safe in your wallet. Please try again later.',
+  BENEFICIARY_NOT_READY: 'We’re still checking that bank account. Please wait until it shows as Ready.',
+  WITHDRAWAL_BENEFICIARY_NOT_FOUND: 'We couldn’t find that bank account. Please add it again.',
+  UNSUPPORTED_CURRENCY: 'Withdrawals are in naira only.',
 };
 export class ApiError extends Error {
   constructor(body, status) { super(messages[body.code] || (status === 404 ? 'This service isn’t available yet. Please check with the person helping you try KoboFX.' : 'We couldn’t complete that request. Please try again.')); this.code = body.code; this.status = status; this.details = body.details; }

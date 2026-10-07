@@ -4,3 +4,7 @@ coverage/
 .env
 *.log
 .claude/worktrees/
+# Copies and backups of .env hold secrets too (only the example is tracked)
+.env.*
+!.env.example
+env-copy.md

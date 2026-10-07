@@ -26,6 +26,7 @@ const icons = {
   book: '<path d="M12 5c-3-2-6-2-9-1v15c3-1 6-1 9 1 3-2 6-2 9-1V4c-3-1-6-1-9 1zm0 0v15"/>',
   menu: '<path d="M4 6h16M4 12h16M4 18h16"/>',
   lock: '<rect x="5" y="10" width="14" height="11" rx="3"/><path d="M8 10V7a4 4 0 0 1 8 0v3m-4 4v3"/>',
+  bank: '<path d="M3 9 12 4l9 5M5 10v8m4.7-8v8m4.6-8v8M19 10v8M3 20h18"/>',
 };
 const icon = (name, className = '') => `<svg class="icon ${className}" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${icons[name] || icons.arrow}</svg>`;
 const names = { NGN: 'Nigerian naira', USD: 'US dollar', EUR: 'Euro', GBP: 'British pound' };
@@ -37,6 +38,7 @@ let preview = sessionStorage.getItem('kobofx.preview') === 'true' ? createPrevie
 let balances = [], rates = null, items = [], cursor = null, loading = false, loadError = '', rateError = '', historyError = '';
 let view = location.pathname, filter = '', search = '', hiddenBalance = false, pendingRegistration = null;
 let modal = null, pollGeneration = 0, quote = null, tradeAttempt = null, toastTimer, lastFocus;
+let beneficiaries = null, beneficiaryError = '', stash = null, stashItems = [], stashError = '', bankCache = null, withdrawAttempt = null, codeCooldownUntil = 0, codeTimer;
 const user = () => preview?.user || getSession()?.user;
 const request = (path, options) => preview ? preview.request(path, options) : api(path, options);
 const money = (amount, currency, minorUnit) => formatMoney(amount, currency, minorUnit ?? scaleOf(currency, balances));
@@ -55,6 +57,7 @@ function toast(message) {
 function navigate(path) {
   closeModal(); view = path; history.pushState({}, '', path); render(); window.scrollTo({ top: 0 });
   if (user() && path === '/activity') loadHistory();
+  if (user() && path === '/withdraw') loadWithdrawals();
   document.querySelector('#main h1')?.focus({ preventScroll: true });
 }
 
@@ -77,6 +80,21 @@ async function loadHistory(append = false) {
     items = append ? [...new Map([...items, ...result.items].map((item) => [item.reference, item])).values()] : result.items;
     cursor = result.nextCursor; historyError = ''; render();
   } catch (error) { historyError = error.message; render(); }
+}
+
+async function loadWithdrawals() {
+  beneficiaryError = ''; stashError = '';
+  const [list, held, receipts] = await Promise.allSettled([request('/wallet/withdrawal-beneficiaries?limit=100'), request('/stash'), request('/stash/transactions?limit=5')]);
+  if (list.status === 'fulfilled') beneficiaries = list.value.items; else { beneficiaries = null; beneficiaryError = list.reason.message; }
+  if (held.status === 'fulfilled') stash = held.value; else { stash = null; stashError = held.reason.message; }
+  stashItems = receipts.status === 'fulfilled' ? receipts.value.items : [];
+  if (view === '/withdraw') render();
+}
+
+/** `ada@example.com` → `a••@example.com`: enough to recognise, not to copy. */
+function maskEmail(email = '') {
+  const [name, domain] = email.split('@');
+  return domain ? `${name[0]}${'•'.repeat(Math.max(2, name.length - 1))}@${domain}` : 'your email';
 }
 
 function globeArtwork() {
@@ -106,10 +124,10 @@ function authPage() {
 
 function dashboardShell() {
   const page = view.split('/')[1] || 'home';
-  const navigation = [['home', 'home', 'Overview'], ['wallets', 'wallet', 'My wallets'], ['exchange', 'exchange', 'Exchange'], ['activity', 'activity', 'Activity']];
+  const navigation = [['home', 'home', 'Overview'], ['wallets', 'wallet', 'My wallets'], ['exchange', 'exchange', 'Exchange'], ['withdraw', 'bank', 'Withdraw'], ['activity', 'activity', 'Activity']];
   return `<div class="app-shell"><aside class="sidebar">${brand()}<span class="sidebar-caption">YOUR EVERYDAY, EVERYWHERE</span><nav aria-label="Wallet navigation">${navigation.map(([path, symbol, title]) => `<a href="/${path}" data-route="/${path}" class="nav-item ${page === path ? 'active' : ''}" ${page === path ? 'aria-current="page"' : ''}>${icon(symbol)}${title}${page === path ? '<span class="nav-dot"></span>' : ''}</a>`).join('')}</nav><div class="sidebar-bottom"><div class="sidebar-prompt"><span class="little-spark">✦</span><strong>A new currency.<br>A new possibility.</strong><p>Make your next move a little simpler.</p><button class="text-link" data-route="/exchange">Let’s explore ${icon('arrow')}</button></div><a href="/help" data-route="/help" class="nav-item ${page === 'help' ? 'active' : ''}">${icon('help')}A little help</a><a href="/account" data-route="/account" class="nav-item ${page === 'account' ? 'active' : ''}">${icon('user')}My account</a><button class="nav-item logout" data-action="logout">${icon('logout')}${preview ? 'Leave preview' : 'Log out'}</button><div class="sidebar-note">${icon('shield')} Built around your peace of mind.</div></div></aside><div class="workspace"><header class="app-header"><div class="mobile-brand">${brand()}</div><div class="breadcrumb">My space <span>/</span> <strong>${navigation.find(([path]) => path === page)?.[2] || (page === 'help' ? 'A little help' : 'My account')}</strong></div><div class="header-right">${preview ? '<span class="preview-badge"><span></span> Preview mode</span>' : '<span class="session-badge">Your personal wallet</span>'}<button class="avatar" data-route="/account" aria-label="Open my account">${escape(firstName()[0])}</button></div></header>
     ${preview ? `<div class="preview-banner">${icon('globe')}<span>You’re exploring a sample wallet. No real money moves.</span><button data-action="signup">Make it yours ${icon('arrow')}</button></div>` : ''}
-    <main id="main" class="app-main">${loadError ? `<div class="notice error">${icon('help')}<span>${escape(loadError)}</span><button class="text-link" data-action="refresh">Try again</button></div>` : ''}${page === 'home' ? overview() : page === 'wallets' ? walletsPage() : page === 'exchange' ? exchangePage() : page === 'activity' ? activityPage() : page === 'account' ? accountPage() : helpPage()}</main><footer class="app-footer"><span>Made for your next move.</span><span>${icon('shield')} Clear balances. Confident decisions.</span></footer><nav class="mobile-nav" aria-label="Mobile navigation">${navigation.map(([path, symbol, title]) => `<a href="/${path}" data-route="/${path}" ${page === path ? 'aria-current="page"' : ''}>${icon(symbol)}<span>${title}</span></a>`).join('')}</nav></div></div>`;
+    <main id="main" class="app-main">${loadError ? `<div class="notice error">${icon('help')}<span>${escape(loadError)}</span><button class="text-link" data-action="refresh">Try again</button></div>` : ''}${page === 'home' ? overview() : page === 'wallets' ? walletsPage() : page === 'exchange' ? exchangePage() : page === 'withdraw' ? withdrawPage() : page === 'activity' ? activityPage() : page === 'account' ? accountPage() : helpPage()}</main><footer class="app-footer"><span>Made for your next move.</span><span>${icon('shield')} Clear balances. Confident decisions.</span></footer><nav class="mobile-nav" aria-label="Mobile navigation">${navigation.map(([path, symbol, title]) => `<a href="/${path}" data-route="/${path}" ${page === path ? 'aria-current="page"' : ''}>${icon(symbol)}<span>${title}</span></a>`).join('')}</nav></div></div>`;
 }
 
 function pageHeading(title, subtitle, action = '') { return `<div class="page-heading"><div><h1 tabindex="-1">${title}</h1><p>${subtitle}</p></div>${action}</div>`; }
@@ -124,8 +142,10 @@ function walletCards() {
 
 function overview() {
   const pending = !preview && getStored('funding');
-  return `${pageHeading(`A good day for possibilities, ${escape(firstName())}.`, 'A little overview of your money, wherever it’s headed.', button(`${icon('plus')} Fund my wallet`, 'fund'))}
+  const pendingWithdrawal = !preview && getStored('withdrawal');
+  return `${pageHeading(`A good day for possibilities, ${escape(firstName())}.`, 'A little overview of your money, wherever it’s headed.', `<div class="heading-actions">${button(`${icon('bank')} Withdraw`, 'withdraw', 'secondary')}${button(`${icon('plus')} Fund my wallet`, 'fund')}</div>`)}
     ${pending ? `<div class="notice">${icon('clock')}<span>You have a payment to check on.</span><button class="text-link" data-action="fund">Check payment ${icon('arrow')}</button></div>` : ''}
+    ${pendingWithdrawal ? `<div class="notice">${icon('bank')}<span>You have a withdrawal on its way.</span><button class="text-link" data-action="withdrawal-check">Check withdrawal ${icon('arrow')}</button></div>` : ''}
     <section class="welcome-card"><div><span class="eyebrow">YOUR WORLD, A LITTLE CLOSER</span><h2>At home in naira.<br>Ready for <em>everywhere.</em></h2><p>Different currencies. One clear view.<br>Make room for whatever comes next.</p>${button(`Make your next move ${icon('arrow')}`, 'exchange', 'white')}</div>${globeArtwork()}</section>
     <section class="section"><div class="section-heading"><h2>Your little corner of the world <button class="icon-button" data-action="balance-visibility" aria-label="${hiddenBalance ? 'Show' : 'Hide'} balances" aria-pressed="${hiddenBalance}">${icon('eye')}</button></h2><a href="/wallets" data-route="/wallets">All wallets ${icon('arrow')}</a></div>${walletCards()}</section>
     <div class="overview-bottom"><section class="activity-card"><div class="section-heading"><h2>Your latest moves</h2><a href="/activity" data-route="/activity">View all ${icon('arrow')}</a></div>${transactionList(items.slice(0, 4))}</section><aside class="rates-card"><div class="section-heading"><h2>A world of rates</h2><span class="rate-dot">${preview ? 'Sample' : rates?.stale ? 'Updating' : rates ? 'Latest' : '—'}</span></div><p>A little look at what your money can do.</p>${rateRows()}<button class="text-link" data-route="/exchange">Find your exchange ${icon('arrow')}</button>${attribution()}</aside></div>
@@ -148,16 +168,19 @@ function transactionList(list) {
   if (!list.length) return `<div class="empty-state">${icon('activity')}<h3>A fresh start looks good on you.</h3><p>Your first move will appear here. Start by adding money to your wallet.</p>${button('Add your first money', 'fund', 'secondary')}</div>`;
   return `<div class="transaction-list">${list.map((item) => {
     const conversion = item.type === 'CONVERSION';
+    const withdrawal = item.type === 'WITHDRAWAL';
+    const returned = item.type === 'REVERSAL' && item.reference.startsWith('withdrawal-reversal:');
     const credit = item.legs.find((leg) => leg.direction === 'CREDIT');
     const debit = item.legs.find((leg) => leg.direction === 'DEBIT');
     const amount = credit || debit || item.requested;
-    const title = conversion ? `${debit?.currency || ''} to ${credit?.currency || ''}` : item.type === 'FUNDING' ? 'Money added' : item.type === 'PROMOTIONAL' ? 'Welcome credit' : item.type === 'REVERSAL' ? 'Payment reversed' : 'Balance adjustment';
-    return `<button class="transaction-row" data-action="transaction" data-reference="${escape(item.reference)}"><span class="transaction-icon ${conversion ? 'blue' : 'green'}">${icon(conversion ? 'exchange' : 'down')}</span><span class="transaction-label"><strong>${title}</strong><small>${readableDate(item.valueTime)}</small></span><span class="transaction-amount"><strong>${amount ? `${credit ? '+' : debit ? '−' : ''}${escape(amountVisible(amount.amount, amount.currency, amount.minorUnit))}` : '—'}</strong><small class="status-${item.status.toLowerCase()}">${stateLabel(item.status)}</small></span>${icon('chevron')}</button>`;
+    const title = conversion ? `${debit?.currency || ''} to ${credit?.currency || ''}` : withdrawal ? 'Withdrawal to bank' : returned ? 'Withdrawal returned' : item.type === 'FUNDING' ? 'Money added' : item.type === 'PROMOTIONAL' ? 'Welcome credit' : item.type === 'REVERSAL' ? 'Payment reversed' : 'Balance adjustment';
+    const sign = credit ? '+' : debit || withdrawal ? '−' : '';
+    return `<button class="transaction-row" data-action="transaction" data-reference="${escape(item.reference)}"><span class="transaction-icon ${conversion || withdrawal ? 'blue' : 'green'}">${icon(conversion ? 'exchange' : withdrawal ? 'bank' : 'down')}</span><span class="transaction-label"><strong>${title}</strong><small>${readableDate(item.valueTime)}</small></span><span class="transaction-amount"><strong>${amount ? `${sign}${escape(amountVisible(amount.amount, amount.currency, amount.minorUnit))}` : '—'}</strong><small class="status-${item.status.toLowerCase()}">${stateLabel(item.status)}</small></span>${icon('chevron')}</button>`;
   }).join('')}</div>`;
 }
 
 function walletsPage() {
-  return `${pageHeading('A home for every currency.', 'Know what you have. Make space for what’s next.', button(`${icon('plus')} Fund my wallet`, 'fund'))}${walletCards()}<section class="wallet-explanation"><span class="square-icon">${icon('wallet')}</span><h2>One account. More possibilities.</h2><p>Add naira to get started. When you exchange into a new currency, we’ll open its wallet for you automatically.</p><button class="button primary" data-route="/exchange">Explore an exchange ${icon('arrow')}</button></section><section class="activity-card"><div class="section-heading"><h2>Recent wallet activity</h2><a href="/activity" data-route="/activity">View all ${icon('arrow')}</a></div>${transactionList(items.slice(0, 3))}</section>`;
+  return `${pageHeading('A home for every currency.', 'Know what you have. Make space for what’s next.', `<div class="heading-actions">${button(`${icon('bank')} Withdraw`, 'withdraw', 'secondary')}${button(`${icon('plus')} Fund my wallet`, 'fund')}</div>`)}${walletCards()}<section class="wallet-explanation"><span class="square-icon">${icon('wallet')}</span><h2>One account. More possibilities.</h2><p>Add naira to get started. When you exchange into a new currency, we’ll open its wallet for you automatically.</p><button class="button primary" data-route="/exchange">Explore an exchange ${icon('arrow')}</button></section><section class="activity-card"><div class="section-heading"><h2>Recent wallet activity</h2><a href="/activity" data-route="/activity">View all ${icon('arrow')}</a></div>${transactionList(items.slice(0, 3))}</section>`;
 }
 
 function exchangePage() {
@@ -168,7 +191,7 @@ function exchangePage() {
 
 function activityPage() {
   const filtered = items.filter((item) => `${item.type} ${item.status} ${item.reference} ${item.legs.map((leg) => leg.currency).join(' ')}`.toLowerCase().includes(search.toLowerCase()));
-  return `${pageHeading('Every move, in one place.', 'A clear view of where your money has been.', button(`${icon('arrow')} Refresh`, 'history-refresh', 'secondary'))}<section class="activity-card full-activity"><div class="activity-toolbar"><div class="tabs" role="group" aria-label="Activity type">${[['', 'All moves'], ['FUNDING', 'Money added'], ['CONVERSION', 'Exchanges']].map(([value, label]) => `<button class="${filter === value ? 'selected' : ''}" data-action="filter" data-filter="${value}" aria-pressed="${filter === value}">${label}</button>`).join('')}</div><input class="search-input" type="search" name="search" placeholder="Search this page" aria-label="Search loaded activity" value="${escape(search)}"></div><div id="activity-results">${!filtered.length && items.length ? '<div class="empty-state"><h3>No matching moves.</h3><p>Try a different currency or search term.</p></div>' : transactionList(filtered)}</div>${cursor ? `<div class="load-more">${button('Show more moves', 'more', 'secondary')}</div>` : ''}</section>`;
+  return `${pageHeading('Every move, in one place.', 'A clear view of where your money has been.', button(`${icon('arrow')} Refresh`, 'history-refresh', 'secondary'))}<section class="activity-card full-activity"><div class="activity-toolbar"><div class="tabs" role="group" aria-label="Activity type">${[['', 'All moves'], ['FUNDING', 'Money added'], ['CONVERSION', 'Exchanges'], ['WITHDRAWAL', 'Withdrawals']].map(([value, label]) => `<button class="${filter === value ? 'selected' : ''}" data-action="filter" data-filter="${value}" aria-pressed="${filter === value}">${label}</button>`).join('')}</div><input class="search-input" type="search" name="search" placeholder="Search this page" aria-label="Search loaded activity" value="${escape(search)}"></div><div id="activity-results">${!filtered.length && items.length ? '<div class="empty-state"><h3>No matching moves.</h3><p>Try a different currency or search term.</p></div>' : transactionList(filtered)}</div>${cursor ? `<div class="load-more">${button('Show more moves', 'more', 'secondary')}</div>` : ''}</section>`;
 }
 
 function accountPage() {
@@ -176,7 +199,133 @@ function accountPage() {
 }
 
 function helpPage() {
-  return `${pageHeading('A little guidance, whenever you need it.', 'You don’t need to be a money expert to feel at home here.')}<div class="help-grid">${[['01', 'Start with your email', 'Create your account, then enter the six-digit code from your email. That’s your wallet ready to go.', 'Create an account', 'signup'], ['02', 'Add a little money', 'Choose an amount in naira. Paystack opens a secure payment page, then we check that your money has arrived.', 'Fund my wallet', 'fund'], ['03', 'Explore another currency', 'Choose what to exchange and review your quote. Confirm within 30 seconds, or get a fresh quote when you’re ready.', 'Try an exchange', 'exchange']].map(([number, title, text, label, action]) => `<article class="help-card"><span class="step-number">${number}</span><h2>${title}</h2><p>${text}</p>${button(`${label} ${icon('arrow')}`, action, 'text')}</article>`).join('')}</div><section class="faq-section"><h2>A few things you might be wondering.</h2>${[['My payment says “in progress”. What now?', 'Sometimes a payment takes a moment to confirm. Check its progress from your overview or Activity. Don’t make another payment for the same request. If it stays pending, keep your payment reference and contact the person helping you try KoboFX.'], ['What happens if I close the payment page?', 'Your wallet only changes after payment is confirmed. Reopen KoboFX in this same browser tab and choose Check payment to see the latest status.'], ['Why did my exchange quote expire?', 'Rates can change. Each quote is held for 30 seconds so you can review it. If it expires, request a new quote and check the amounts again.'], ['Is the preview real money?', 'No. Preview mode is a separate sample wallet with illustrative rates. Adding or exchanging sample money never sends a payment request.'], ['Can I send money or withdraw?', 'This version focuses on adding money, holding currencies, and exchanging between your own wallets. Sending and withdrawals are not available yet.']].map(([question, answer]) => `<details><summary>${question}${icon('plus')}</summary><p>${answer}</p></details>`).join('')}</section>`;
+  return `${pageHeading('A little guidance, whenever you need it.', 'You don’t need to be a money expert to feel at home here.')}<div class="help-grid">${[['01', 'Start with your email', 'Create your account, then enter the six-digit code from your email. That’s your wallet ready to go.', 'Create an account', 'signup'], ['02', 'Add a little money', 'Choose an amount in naira. Paystack opens a secure payment page, then we check that your money has arrived.', 'Fund my wallet', 'fund'], ['03', 'Explore another currency', 'Choose what to exchange and review your quote. Confirm within 30 seconds, or get a fresh quote when you’re ready.', 'Try an exchange', 'exchange']].map(([number, title, text, label, action]) => `<article class="help-card"><span class="step-number">${number}</span><h2>${title}</h2><p>${text}</p>${button(`${label} ${icon('arrow')}`, action, 'text')}</article>`).join('')}</div><section class="faq-section"><h2>A few things you might be wondering.</h2>${[['My payment says “in progress”. What now?', 'Sometimes a payment takes a moment to confirm. Check its progress from your overview or Activity. Don’t make another payment for the same request. If it stays pending, keep your payment reference and contact the person helping you try KoboFX.'], ['What happens if I close the payment page?', 'Your wallet only changes after payment is confirmed. Reopen KoboFX in this same browser tab and choose Check payment to see the latest status.'], ['Why did my exchange quote expire?', 'Rates can change. Each quote is held for 30 seconds so you can review it. If it expires, request a new quote and check the amounts again.'], ['Is the preview real money?', 'No. Preview mode is a separate sample wallet with illustrative rates. Adding or exchanging sample money never sends a payment request.'], ['How do withdrawals work?', 'Add a Nigerian bank account first: we check its name with your bank. Then choose Withdraw, enter the amount, tap Send code and enter the 6-digit code we email you. Each code works once, for 10 minutes. In this test version no real bank receives money: confirmed withdrawals land in your simulated bank, which you can see on the Withdraw page.']].map(([question, answer]) => `<details><summary>${question}${icon('plus')}</summary><p>${answer}</p></details>`).join('')}</section>`;
+}
+
+function withdrawPage() {
+  const ngn = balances.find((balance) => balance.currency === 'NGN');
+  const ready = (beneficiaries || []).filter((beneficiary) => beneficiary.status === 'READY');
+  const wait = Math.ceil((codeCooldownUntil - Date.now()) / 1000);
+  const form = !beneficiaries
+    ? `<div class="inline-empty">${escape(beneficiaryError || 'Finding your bank accounts…')}${beneficiaryError ? button('Try again', 'withdraw-refresh', 'text') : ''}</div>`
+    : !ready.length
+      ? `<div class="empty-state">${icon('bank')}<h3>Add a bank account first.</h3><p>We check the account name with your bank before you can send money to it.</p>${button(`${icon('plus')} Add a bank account`, 'add-beneficiary', 'secondary')}</div>`
+      : `<form data-form="withdraw" id="withdraw-form" novalidate><div class="form-error" role="alert" hidden></div>
+        <label>Send to<select name="beneficiaryId" class="plain-select" required>${ready.map((beneficiary) => `<option value="${escape(beneficiary.beneficiaryId)}">${escape(beneficiary.accountName || '')} · ${escape(beneficiary.bankName || beneficiary.bankCode)} ${escape(beneficiary.accountNumberMasked)}</option>`).join('')}</select></label>
+        <label>Amount<div class="fund-input"><span>₦</span><input name="amount" inputmode="decimal" placeholder="0.00" autocomplete="off" required aria-label="Amount to withdraw in naira"><span>NGN</span></div></label>
+        <div class="available-line">Available: ${money(ngn?.available || '0', 'NGN')}</div>
+        <label for="withdrawal-code" class="code-label">Withdrawal code</label>
+        <div class="code-row"><input id="withdrawal-code" class="code-input" name="oneTimePassword" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]{6}" maxlength="6" placeholder="000000" required aria-describedby="code-help"><button type="button" class="button secondary" id="code-button" data-action="withdraw-code" ${wait > 0 ? 'disabled' : ''}>${wait > 0 ? `Resend in ${wait}s` : 'Send code'}</button></div>
+        <small id="code-help" class="muted code-help">Tap “Send code” and we’ll email a 6-digit code to ${escape(maskEmail(user()?.email))}. It works once, for 10 minutes.</small>
+        <button class="button primary wide" type="submit">Withdraw ${icon('arrow')}</button>
+        <p class="secure-note">${icon('lock')} Test mode: no real bank receives money. Confirmed withdrawals land in your simulated bank.</p></form>`;
+  return `${pageHeading('Send money to your bank.', 'Choose an account, enter the amount, and confirm with the code we email you.')}<div class="exchange-layout"><section class="exchange-card"><div class="section-heading"><h2>Withdraw naira</h2><span class="subtle-badge">${preview ? 'Sample withdrawal' : 'Protected by an emailed code'}</span></div>${form}</section><aside class="withdraw-aside">${bankAccountsCard()}${stashCard()}</aside></div>`;
+}
+
+function beneficiaryStatus(beneficiary) {
+  if (beneficiary.status === 'READY') return ['completed', 'Ready'];
+  if (beneficiary.status === 'FAILED') return ['failed', 'Couldn’t verify'];
+  return ['pending', beneficiary.reviewRequired ? 'Being reviewed' : 'Verifying'];
+}
+
+function bankAccountsCard() {
+  const list = !beneficiaries ? '<div class="list-skeleton"><span></span></div>' : !beneficiaries.length ? '<p class="muted">No bank accounts yet.</p>'
+    : `<ul class="side-list">${beneficiaries.map((beneficiary) => { const [style, label] = beneficiaryStatus(beneficiary); return `<li><span class="square-icon">${icon('bank')}</span><span class="side-list-label"><strong>${escape(beneficiary.accountName || 'Checking the name…')}</strong><small>${escape(beneficiary.bankName || beneficiary.bankCode)} · ${escape(beneficiary.accountNumberMasked)}</small></span><span class="status-pill status-${style}">${label}</span></li>`; }).join('')}</ul>`;
+  return `<section class="side-card"><div class="section-heading"><h2>My bank accounts</h2>${button(`${icon('plus')} Add`, 'add-beneficiary', 'text')}</div>${list}</section>`;
+}
+
+function stashCard() {
+  const amount = stash?.balances.find((balance) => balance.currency === 'NGN');
+  const receipts = stashItems.length ? `<ul class="side-list">${stashItems.map((receipt) => `<li><span class="side-list-label"><strong>${receipt.direction === 'IN' ? 'Received' : 'Returned to your wallet'}</strong><small>${readableDate(receipt.recordedAt)} · ${escape(receipt.destination.bankName)} ${escape(receipt.destination.accountNumberMasked)}</small></span><strong>${receipt.direction === 'IN' ? '+' : '−'}${escape(money(receipt.amount, receipt.currency, receipt.minorUnit))}</strong></li>`).join('')}</ul>` : '<p class="muted">Your confirmed withdrawals will appear here.</p>';
+  return `<section class="side-card"><div class="section-heading"><h2>Your simulated bank</h2><span class="subtle-badge">Test mode</span></div><p class="muted">Where your withdrawals land. It isn’t part of your wallet and can’t be spent here.</p><strong class="stash-balance">${stash ? escape(money(amount?.amount || '0', 'NGN', amount?.minorUnit)) : stashError ? '—' : '…'}</strong>${receipts}</section>`;
+}
+
+function startCodeCooldown(seconds) {
+  codeCooldownUntil = Date.now() + seconds * 1000; clearInterval(codeTimer);
+  const tick = () => {
+    const left = Math.ceil((codeCooldownUntil - Date.now()) / 1000); const target = document.querySelector('#code-button');
+    if (left <= 0) { clearInterval(codeTimer); if (target) { target.disabled = false; target.textContent = 'Resend code'; } return; }
+    if (target) { target.disabled = true; target.textContent = `Resend in ${left}s`; }
+  };
+  tick(); codeTimer = setInterval(tick, 1000);
+}
+
+async function loadBanks() {
+  if (bankCache) return bankCache;
+  const banks = []; let next = null;
+  for (let page = 0; page < 20; page += 1) {
+    const result = await request(`/wallet/withdrawal-banks?${new URLSearchParams({ currency: 'NGN', limit: '100', ...(next ? { cursor: next } : {}) })}`);
+    banks.push(...result.items); next = result.nextCursor; if (!next) break;
+  }
+  bankCache = banks.sort((left, right) => left.bankName.localeCompare(right.bankName));
+  return bankCache;
+}
+
+async function openAddBeneficiary() {
+  if (!user()) { navigate('/signup'); return; }
+  modal = 'beneficiary';
+  showModal('Add a bank account.', `<p class="dialog-intro">We’ll check the account name with your bank. Nigerian (NUBAN) accounts only, in naira.</p><form data-form="beneficiary"><div class="form-error" role="alert" hidden></div><label>Bank<select name="bankCode" class="plain-select" required disabled><option value="">Loading banks…</option></select></label><label>Account number<input name="accountNumber" inputmode="numeric" pattern="[0-9]{10}" maxlength="10" placeholder="0123456789" autocomplete="off" required></label><button class="button primary wide" type="submit">Verify this account ${icon('arrow')}</button><p class="secure-note">${icon('lock')} Only the last four digits are ever shown back to you.</p></form>`);
+  const select = document.querySelector('dialog [name="bankCode"]');
+  try {
+    const banks = await loadBanks(); if (!select?.isConnected) return;
+    select.innerHTML = `<option value="">Choose your bank</option>${banks.map((bank) => `<option value="${escape(bank.bankCode)}">${escape(bank.bankName)}</option>`).join('')}`; select.disabled = false;
+  } catch (error) { if (select?.isConnected) formError(select.form, error); }
+}
+
+async function pollBeneficiary(beneficiaryId) {
+  const generation = ++pollGeneration;
+  showModal('Checking with your bank.', `<div class="payment-progress"><span class="progress-orb">${icon('bank')}</span><p>We’re confirming the account name with your bank. This usually takes a few seconds.</p></div><div class="form-error" role="alert" hidden></div><div class="progress-line"><span></span></div>`);
+  const poll = async () => {
+    if (generation !== pollGeneration) return;
+    try {
+      const beneficiary = await request(`/wallet/withdrawal-beneficiaries/${encodeURIComponent(beneficiaryId)}`);
+      if (generation !== pollGeneration) return;
+      if (beneficiary.status === 'READY') {
+        pollGeneration++; loadWithdrawals();
+        showModal('Your bank account is ready.', `<div class="success-body"><span class="success-orb">${icon('check')}</span><span class="success-label">Verified by your bank</span><p><strong>${escape(beneficiary.accountName)}</strong><br>${escape(beneficiary.bankName)} · ${escape(beneficiary.accountNumberMasked)}</p></div><p class="muted">Check the name is yours before you withdraw.</p>${button(`Withdraw to this account ${icon('arrow')}`, 'withdraw-here', 'primary wide')}`); return;
+      }
+      if (beneficiary.status === 'FAILED') {
+        pollGeneration++; loadWithdrawals();
+        showModal('We couldn’t verify that account.', `<p class="dialog-intro">${beneficiary.failureCode === 'ACCOUNT_NOT_RESOLVED' ? 'Your bank didn’t recognise that account number. Check the number and the bank, then try again.' : 'This account couldn’t be set up for withdrawals. Please try again or use another account.'}</p>${button('Try another account', 'add-beneficiary', 'primary wide')}`); return;
+      }
+      setTimeout(poll, 3000);
+    } catch (error) {
+      if (generation !== pollGeneration) return;
+      const notice = document.querySelector('dialog .form-error'); if (notice) { notice.textContent = `${error.message} We’ll keep checking.`; notice.hidden = false; }
+      setTimeout(poll, 5000);
+    }
+  };
+  await poll();
+}
+
+function showWithdrawalProgress(operation) {
+  modal = 'withdrawal';
+  showModal('On its way to your bank.', `<div class="payment-progress"><span class="progress-orb">${icon('clock')}</span><strong>${money(operation.amount, operation.currency)}</strong><p>Your money is set aside while Paystack sends it. It only leaves your wallet once Paystack confirms the transfer.</p></div><div class="form-error" role="alert" hidden></div><div class="progress-line"><span></span></div><p class="secure-note">You can close this window and check again from your overview.</p>`);
+  pollWithdrawal(operation);
+}
+
+async function pollWithdrawal(operation) {
+  const generation = ++pollGeneration;
+  const finish = () => { pollGeneration++; sessionStorage.removeItem('kobofx.withdrawal'); loadData(); loadWithdrawals(); };
+  const poll = async () => {
+    if (generation !== pollGeneration) return;
+    try {
+      const result = await request(`/wallet/withdraw/${encodeURIComponent(operation.withdrawalId)}`);
+      if (generation !== pollGeneration) return;
+      const destination = `${result.destination.bankName} ${result.destination.accountNumberMasked}`;
+      if (result.status === 'COMPLETED') { finish(); successModal('Sent to your bank.', `${money(result.amount, result.currency)} arrived at ${destination} (your simulated bank).`, 'Withdrawal complete', 'bank'); return; }
+      if (result.status === 'FAILED') { finish(); showModal('This withdrawal didn’t go through.', `<p class="dialog-intro">Paystack couldn’t complete it, so nothing left your wallet: the money set aside is available again.</p>${button('Back to my wallet', 'done', 'primary wide')}`); return; }
+      if (result.status === 'REVERSED') { finish(); showModal('Your bank returned this withdrawal.', `<p class="dialog-intro">${money(result.amount, result.currency)} is back in your wallet.</p>${button('Back to my wallet', 'done', 'primary wide')}`); return; }
+      if (result.reviewRequired) {
+        const notice = document.querySelector('dialog .form-error'); if (notice) { notice.textContent = 'This withdrawal needs a quick check by our team. Your money stays set aside meanwhile; there’s no need to try again.'; notice.hidden = false; }
+      }
+      setTimeout(poll, 4000);
+    } catch (error) {
+      if (generation !== pollGeneration) return;
+      const notice = document.querySelector('dialog .form-error'); if (notice) { notice.textContent = `${error.message} You can check this withdrawal again.`; notice.hidden = false; }
+    }
+  };
+  await poll();
 }
 
 function render() {
@@ -282,7 +431,7 @@ async function showTransaction(reference) {
   try {
     const item = await request(`/transactions/${encodeURIComponent(reference)}`);
     modal = 'transaction';
-    showModal('The details of your move.', `<span class="status-pill status-${escape(item.status.toLowerCase())}">${stateLabel(item.status)}</span><div class="receipt-legs">${(item.legs.length ? item.legs : item.requested ? [item.requested] : []).map((leg) => `<div>${flag(leg.currency)}<span>${leg.direction === 'DEBIT' ? 'From your wallet' : leg.direction === 'CREDIT' ? 'To your wallet' : 'Requested'}</span><strong>${money(leg.amount, leg.currency, leg.minorUnit)}</strong></div>`).join('')}</div><dl class="detail-list"><div><dt>Date</dt><dd>${readableDate(item.valueTime)}</dd></div><div><dt>Type</dt><dd>${item.type === 'CONVERSION' ? 'Currency exchange' : item.type === 'FUNDING' ? 'Money added' : 'Balance update'}</dd></div></dl><span class="field-caption">Payment reference</span><div class="reference-box">${escape(reference)}</div>${item.status === 'PENDING' && reference.startsWith('funding:') ? button('Check this payment', 'check-history-funding', 'primary wide', `data-reference="${escape(reference)}"`) : ''}${button('All done', 'close', 'secondary wide')}`);
+    showModal('The details of your move.', `<span class="status-pill status-${escape(item.status.toLowerCase())}">${stateLabel(item.status)}</span><div class="receipt-legs">${(item.legs.length ? item.legs : item.requested ? [item.requested] : []).map((leg) => `<div>${flag(leg.currency)}<span>${leg.direction === 'DEBIT' ? 'From your wallet' : leg.direction === 'CREDIT' ? 'To your wallet' : item.type === 'WITHDRAWAL' ? 'Set aside for this withdrawal' : 'Requested'}</span><strong>${money(leg.amount, leg.currency, leg.minorUnit)}</strong></div>`).join('')}</div><dl class="detail-list"><div><dt>Date</dt><dd>${readableDate(item.valueTime)}</dd></div><div><dt>Type</dt><dd>${item.type === 'CONVERSION' ? 'Currency exchange' : item.type === 'FUNDING' ? 'Money added' : item.type === 'WITHDRAWAL' ? 'Withdrawal to bank' : reference.startsWith('withdrawal-reversal:') ? 'Withdrawal returned' : 'Balance update'}</dd></div>${item.failureCode ? `<div><dt>Reason</dt><dd>${escape(item.failureCode)}</dd></div>` : ''}</dl><span class="field-caption">Reference</span><div class="reference-box">${escape(reference)}</div>${item.status === 'PENDING' && reference.startsWith('funding:') ? button('Check this payment', 'check-history-funding', 'primary wide', `data-reference="${escape(reference)}"`) : ''}${item.status === 'PENDING' && reference.startsWith('withdrawal:') ? button('Check this withdrawal', 'check-history-withdrawal', 'primary wide', `data-reference="${escape(reference)}"`) : ''}${button('All done', 'close', 'secondary wide')}`);
   } catch (error) { toast(error.message); }
 }
 
@@ -314,6 +463,34 @@ document.addEventListener('submit', (event) => {
       }
       if (preview) { successModal('A little more possibility.', `${money(result.amount, result.currency)} in sample money is now in your wallet.`, 'Sample money added'); loadData(); }
       else { operation.fundingId = result.fundingId; sessionStorage.setItem('kobofx.funding', JSON.stringify(operation)); showFundingProgress(operation); }
+    } else if (form.dataset.form === 'beneficiary') {
+      if (!/^\d{10}$/.test(values.accountNumber || '')) throw new Error('Enter the 10-digit account number.');
+      if (!values.bankCode) throw new Error('Choose your bank.');
+      const result = await request('/wallet/withdrawal-beneficiaries', { method: 'POST', body: { bankCode: values.bankCode, accountNumber: values.accountNumber, currency: 'NGN' }, key: crypto.randomUUID() });
+      if (result.status === 'READY') { loadWithdrawals(); closeModal(); toast('That account is already ready to use.'); return; }
+      await pollBeneficiary(result.beneficiaryId);
+    } else if (form.dataset.form === 'withdraw') {
+      if (!values.beneficiaryId) throw new Error('Choose the bank account to send to.');
+      let amount;
+      try { amount = toMinor(values.amount, scaleOf('NGN', balances)); } catch { throw new Error('Enter an amount, like 5000 or 5000.50.'); }
+      if (BigInt(amount) <= 0n) throw new Error('Enter an amount above zero.');
+      if (!preview && BigInt(amount) > BigInt(balances.find((balance) => balance.currency === 'NGN')?.available || '0')) throw new Error('That’s more than your available naira. Enter a smaller amount.');
+      if (!/^\d{6}$/.test(values.oneTimePassword || '')) throw new Error('Enter the 6-digit code from your email. Tap “Send code” if you don’t have one yet.');
+      const body = { beneficiaryId: values.beneficiaryId, amount, currency: 'NGN', oneTimePassword: values.oneTimePassword };
+      // Retrying the very same request (e.g. after a network error) reuses its key; anything else is a new withdrawal.
+      if (!withdrawAttempt || JSON.stringify(withdrawAttempt.body) !== JSON.stringify(body)) withdrawAttempt = { key: crypto.randomUUID(), body };
+      let result;
+      try { result = await request('/wallet/withdraw/paystack', { method: 'POST', body, key: withdrawAttempt.key }); }
+      catch (error) {
+        if (error.status && error.status < 500 && ![408, 429].includes(error.status) && error.code !== 'REQUEST_IN_PROGRESS') withdrawAttempt = null;
+        if (error.code === 'WITHDRAWAL_CODE_INVALID') { const field = form.querySelector('[name="oneTimePassword"]'); field.value = ''; field.focus(); }
+        throw error;
+      }
+      withdrawAttempt = null;
+      const operation = { withdrawalId: result.withdrawalId, amount: result.amount, currency: result.currency };
+      form.reset();
+      if (preview) { successModal('Sent to your bank.', `${money(result.amount, result.currency)} in sample money went to your sample bank.`, 'Sample withdrawal complete', 'bank'); loadData(); loadWithdrawals(); }
+      else { sessionStorage.setItem('kobofx.withdrawal', JSON.stringify(operation)); showWithdrawalProgress(operation); loadData(); }
     } else if (form.dataset.form === 'exchange') {
       const stored = !preview && getStored('trade');
       if (stored) { tradeAttempt = stored; quote = stored.quote; reviewQuote(quote); toast('Please check your previous exchange before starting another.'); return; }
@@ -349,6 +526,25 @@ document.addEventListener('click', async (event) => {
     else if (action === 'preview') { preview = createPreview(); sessionStorage.setItem('kobofx.preview', 'true'); navigate('/home'); loadData(); }
     else if (action === 'fund') openFunding();
     else if (action === 'exchange') navigate('/exchange');
+    else if (action === 'withdraw') { closeModal(); navigate('/withdraw'); }
+    else if (action === 'withdraw-refresh') loadWithdrawals();
+    else if (action === 'add-beneficiary') await openAddBeneficiary();
+    else if (action === 'withdraw-here') { closeModal(); navigate('/withdraw'); }
+    else if (action === 'withdraw-code') {
+      target.disabled = true;
+      try {
+        await request('/wallet/withdraw/one-time-password', { method: 'POST' });
+        startCodeCooldown(60);
+        toast(preview ? 'Preview: any 6 digits will do.' : `We’ve emailed a 6-digit code to ${maskEmail(user()?.email)}. It works for 10 minutes.`);
+        document.querySelector('[name="oneTimePassword"]')?.focus();
+      } catch (error) { if (error.code === 'RATE_LIMITED') startCodeCooldown(60); else target.disabled = false; throw error; }
+    }
+    else if (action === 'withdrawal-check') { const operation = getStored('withdrawal'); if (operation?.withdrawalId) showWithdrawalProgress(operation); }
+    else if (action === 'check-history-withdrawal') {
+      const withdrawalId = target.dataset.reference.slice('withdrawal:'.length);
+      const withdrawal = await request(`/wallet/withdraw/${encodeURIComponent(withdrawalId)}`);
+      showWithdrawalProgress({ withdrawalId, amount: withdrawal.amount, currency: withdrawal.currency });
+    }
     else if (action === 'close') closeModal();
     else if (action === 'done') { closeModal(); navigate('/home'); }
     else if (action === 'refresh') loadData();
@@ -373,7 +569,7 @@ document.addEventListener('click', async (event) => {
     } else if (action === 'new-quote') { closeModal(); document.querySelector('#exchange-form')?.requestSubmit(); }
     else if (action === 'wallet-detail') {
       const currency = target.dataset.currency; const balance = balances.find((entry) => entry.currency === currency);
-      showModal(`Your ${names[currency] || currency} wallet.`, `<div class="wallet-detail">${flag(currency)}<strong>${money(balance?.available || '0', currency)}</strong><span>Available to you</span></div><dl class="detail-list"><div><dt>Total balance</dt><dd>${money(balance?.total || '0', currency)}</dd></div><div><dt>In use by pending moves</dt><dd>${money(balance?.reserved || '0', currency)}</dd></div></dl>${button(currency === 'NGN' ? 'Add money' : 'Exchange into this wallet', currency === 'NGN' ? 'fund' : 'exchange', 'primary wide')}`);
+      showModal(`Your ${names[currency] || currency} wallet.`, `<div class="wallet-detail">${flag(currency)}<strong>${money(balance?.available || '0', currency)}</strong><span>Available to you</span></div><dl class="detail-list"><div><dt>Total balance</dt><dd>${money(balance?.total || '0', currency)}</dd></div><div><dt>In use by pending moves</dt><dd>${money(balance?.reserved || '0', currency)}</dd></div></dl>${button(currency === 'NGN' ? 'Add money' : 'Exchange into this wallet', currency === 'NGN' ? 'fund' : 'exchange', 'primary wide')}${currency === 'NGN' ? button(`${icon('bank')} Withdraw to my bank`, 'withdraw', 'secondary wide') : ''}`);
     } else if (action === 'resend') {
       const email = pendingRegistration?.email || document.querySelector('[name="email"]')?.value;
       if (!email) throw new Error('Enter your email address first.');
@@ -402,4 +598,4 @@ if (view === '/funding/return') {
   // A reference in the callback query is untrusted. Resume only our stored, user-scoped request.
   const operation = getStored('funding'); view = user() ? '/home' : '/login'; history.replaceState({}, '', view); render();
   if (user()) { loadData(); if (operation?.fundingId) showFundingProgress(operation); else toast('Check Activity for the latest payment status.'); }
-} else { if (view === '/' && user()) { view = '/home'; history.replaceState({}, '', view); } render(); if (user()) loadData(); }
+} else { if (view === '/' && user()) { view = '/home'; history.replaceState({}, '', view); } render(); if (user()) { loadData(); if (view === '/withdraw') loadWithdrawals(); } }

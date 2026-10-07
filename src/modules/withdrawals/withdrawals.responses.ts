@@ -2,6 +2,7 @@ import { ApiProperty, ApiSchema } from '@nestjs/swagger';
 import { ApiAmount, ApiCurrency, ApiInstant, ApiMinorUnit, ApiUuid } from '../../openapi/properties';
 import { BankDirectoryPage, DirectoryBank } from './bank-directory.service';
 import { BeneficiaryAccepted, BeneficiaryPage, BeneficiaryView } from './beneficiary.service';
+import { WithdrawalCodeRequested } from './withdrawal-code.service';
 import { WithdrawalAccepted, WithdrawalView } from './withdrawal.service';
 
 const BENEFICIARY_ID = '6a1f9c2e-3b4d-4e5f-8a9b-0c1d2e3f4a5b';
@@ -176,4 +177,16 @@ export class WithdrawalDocument implements WithdrawalView {
 
   @ApiInstant('When it COMPLETED or FAILED; null while PENDING.', null, { nullable: true })
   completedAt!: string | null;
+}
+
+@ApiSchema({ name: 'WithdrawalCodeRequested' })
+export class WithdrawalCodeRequestedDocument implements WithdrawalCodeRequested {
+  @ApiProperty({ enum: ['REQUESTED'], example: 'REQUESTED', description: 'The code is generated and emailed by the worker, within seconds.' })
+  status!: 'REQUESTED';
+
+  @ApiProperty({ enum: ['EMAIL'], example: 'EMAIL' })
+  channel!: 'EMAIL';
+
+  @ApiProperty({ type: 'integer', example: 600, description: 'How long the code stays valid once sent.' })
+  expiresInSeconds!: number;
 }

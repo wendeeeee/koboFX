@@ -9,11 +9,18 @@ import {
   EmailVerificationRequestedHandler,
   ExistingAccountRegistrationAttemptedHandler,
   FundingPostedHandler,
+  WithdrawalCodeRequestedHandler,
 } from './outbox-handlers';
 
 @Module({
   imports: [OutboxModule, OneTimePasswordsModule, UsersModule, EmailModule],
-  providers: [EmailVerificationRequestedHandler, ExistingAccountRegistrationAttemptedHandler, ConversionPostedHandler, FundingPostedHandler],
+  providers: [
+    EmailVerificationRequestedHandler,
+    ExistingAccountRegistrationAttemptedHandler,
+    ConversionPostedHandler,
+    FundingPostedHandler,
+    WithdrawalCodeRequestedHandler,
+  ],
 })
 export class NotificationsModule implements OnModuleInit {
   constructor(
@@ -22,6 +29,7 @@ export class NotificationsModule implements OnModuleInit {
     private readonly existingAccount: ExistingAccountRegistrationAttemptedHandler,
     private readonly conversionPosted: ConversionPostedHandler,
     private readonly fundingPosted: FundingPostedHandler,
+    private readonly withdrawalCode: WithdrawalCodeRequestedHandler,
   ) {}
 
   onModuleInit(): void {
@@ -29,5 +37,6 @@ export class NotificationsModule implements OnModuleInit {
     this.dispatcher.register(this.existingAccount);
     this.dispatcher.register(this.conversionPosted);
     this.dispatcher.register(this.fundingPosted);
+    this.dispatcher.register(this.withdrawalCode);
   }
 }

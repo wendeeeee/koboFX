@@ -15,6 +15,22 @@ export function verificationCodeEmail(to: string, code: string, validForMinutes:
   };
 }
 
+export function withdrawalCodeEmail(to: string, code: string, validForMinutes: number): EmailMessage {
+  return {
+    to,
+    subject: 'Your KoboFX withdrawal code',
+    text: [
+      `Your KoboFX withdrawal code is ${code}.`,
+      '',
+      `Enter it with the amount to confirm ONE withdrawal. It is valid for ${validForMinutes} minutes; if you asked for`,
+      'more than one code, only the most recent one works.',
+      '',
+      'Never share this code. KoboFX staff will never ask for it. If you did not ask to withdraw, do not use the code,',
+      'and change your password.',
+    ].join('\n'),
+  };
+}
+
 export function existingAccountEmail(to: string): EmailMessage {
   return {
     to,
