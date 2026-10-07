@@ -20,6 +20,25 @@ export enum BreakType {
   HASH_CHAIN_BREAK = 'HASH_CHAIN_BREAK',
   RESERVED_BALANCE_DRIFT = 'RESERVED_BALANCE_DRIFT',
   FX_PROVENANCE_MISMATCH = 'FX_PROVENANCE_MISMATCH',
+  // Withdrawals W4 (WITHDRAWAL_PLAN.md §I.2): owned by (paystack, TRANSFER).
+  /** A successful Paystack transfer no withdrawal of ours explains (never a debit to a guessed user or stash). */
+  TRANSFER_WITHOUT_INTENT = 'TRANSFER_WITHOUT_INTENT',
+  /** A transfer under one of our references whose identity (amount, currency, recipient, domain, ids) differs. */
+  TRANSFER_IDENTITY_MISMATCH = 'TRANSFER_IDENTITY_MISMATCH',
+  /** A withdrawal still unresolved past the review threshold (provider lag first: investigate). */
+  WITHDRAWAL_NOT_POSTED = 'WITHDRAWAL_NOT_POSTED',
+  /** Paystack reports a posted withdrawal reversed, and the principal return is not booked. */
+  WITHDRAWAL_RETURN_NOT_POSTED = 'WITHDRAWAL_RETURN_NOT_POSTED',
+  /** A protected hold whose flow is terminal or missing (or a withdrawal whose hold disagrees with its state). */
+  WITHDRAWAL_RESERVATION_INCONSISTENT = 'WITHDRAWAL_RESERVATION_INCONSISTENT',
+  /** Stash receipts and postings disagree (one confirmation per POSTED, one reversal per REVERSED, nets). */
+  STASH_RECEIPT_INCONSISTENT = 'STASH_RECEIPT_INCONSISTENT',
+  /** PAYSTACK_PAYOUT_IN_TRANSIT does not net to zero in a currency. */
+  PAYOUT_BALANCE_PROOF_FAILED = 'PAYOUT_BALANCE_PROOF_FAILED',
+  /** A posted withdrawal whose provider fee was never evidenced (null `fee_charged`): never booked as zero. */
+  PAYOUT_FEE_EVIDENCE_MISSING = 'PAYOUT_FEE_EVIDENCE_MISSING',
+  /** The payout balance is negative: the accepted D3 limitation (no evidenced treasury top-up), made visible. */
+  PAYOUT_TREASURY_EVIDENCE_MISSING = 'PAYOUT_TREASURY_EVIDENCE_MISSING',
 }
 
 export const BREAK_TYPES: readonly BreakType[] = Object.values(BreakType);
@@ -63,6 +82,15 @@ export const BREAK_POLICIES: Readonly<Record<BreakType, BreakPolicy>> = {
   [BreakType.HASH_CHAIN_BREAK]: { severity: 'SECURITY', escalateOnDetection: true, rederivedBy: 'INTERNAL' },
   [BreakType.RESERVED_BALANCE_DRIFT]: money('INTERNAL'),
   [BreakType.FX_PROVENANCE_MISMATCH]: money('INTERNAL'),
+  [BreakType.TRANSFER_WITHOUT_INTENT]: money('EXTERNAL_DAILY'),
+  [BreakType.TRANSFER_IDENTITY_MISMATCH]: { severity: 'SECURITY', escalateOnDetection: true, rederivedBy: 'EXTERNAL_DAILY' },
+  [BreakType.WITHDRAWAL_NOT_POSTED]: investigate(null),
+  [BreakType.WITHDRAWAL_RETURN_NOT_POSTED]: money('EXTERNAL_DAILY'),
+  [BreakType.WITHDRAWAL_RESERVATION_INCONSISTENT]: money('EXTERNAL_DAILY'),
+  [BreakType.STASH_RECEIPT_INCONSISTENT]: money('EXTERNAL_DAILY'),
+  [BreakType.PAYOUT_BALANCE_PROOF_FAILED]: money('EXTERNAL_DAILY'),
+  [BreakType.PAYOUT_FEE_EVIDENCE_MISSING]: investigate('EXTERNAL_DAILY'),
+  [BreakType.PAYOUT_TREASURY_EVIDENCE_MISSING]: investigate('EXTERNAL_DAILY'),
 };
 
 export const subjectKeys = {
@@ -74,4 +102,9 @@ export const subjectKeys = {
   currency: (currency: string) => `currency:${currency}`,
   account: (accountId: string) => `account:${accountId}`,
   transaction: (transactionId: string) => `transaction:${transactionId}`,
+  // Withdrawals W4: every one of these belongs to (paystack, TRANSFER) — see `BreakOwnership`.
+  transfer: (provider: string, transferId: string) => `transfer:${provider}:${transferId}`,
+  withdrawal: (flowId: string) => `withdrawal:${flowId}`,
+  payoutBalance: (provider: string, currency: string) => `payout-balance:${provider}:${currency}`,
+  stashReceipt: (subjectId: string) => `stash-receipt:${subjectId}`,
 } as const;

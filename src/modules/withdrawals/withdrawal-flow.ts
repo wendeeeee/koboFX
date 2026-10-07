@@ -39,8 +39,33 @@ import {
   providerReturnReferenceOf,
 } from './withdrawal-references';
 import { WithdrawalReviewReason, openReview, resolveReview } from './withdrawal-reviews';
+import { WithdrawalTrigger } from './withdrawal-trigger-context';
 
-interface WithdrawalRecord {
+/**
+ * The facts of one persisted, matched transfer observation an outcome rests on — either just recorded by a step, or
+ * read back from `paystack_transfer_observations` by an approved recovery (§I.3). Never a fresh provider answer.
+ */
+export interface VerifiedTransferFacts {
+  readonly observationId: string;
+  readonly observedAt: Date;
+  readonly transferId: string | null;
+  readonly transferredAt: Date | null;
+  readonly feeChargedMinor: bigint | null;
+}
+
+/** An approved PAYSTACK_WITHDRAWAL_RECOVERY applying an outcome (the executor has set `fx.withdrawal_recovery`). */
+export interface ApprovedRecoveryContext {
+  readonly approvalId: string;
+  readonly executedBy: string;
+  /** LATE_FACT_* modes: the approved open-period accounting date (basis APPROVED_LATE_FACT). */
+  readonly valueTime: Date | null;
+  /** A FAILED withdrawal's late success: its hold was released, so the principal is posted by `post()`, never settled. */
+  readonly lateSuccess: boolean;
+}
+
+export type ValueTimeBasis = 'PROVIDER_EVENT_TIME' | 'OBSERVED_TEST_STATE' | 'APPROVED_LATE_FACT';
+
+export interface WithdrawalRecord {
   flow_id: string;
   user_id: string;
   account_id: string;
@@ -54,6 +79,7 @@ interface WithdrawalRecord {
   provider_transfer_id: string | null;
   provider_transfer_code: string | null;
   principal_transaction_id: string | null;
+  reservation_status: string;
   beneficiary_id: string;
   sealing_key_id: string;
   provider_recipient_code_sealed: Buffer;
@@ -285,11 +311,7 @@ export class WithdrawalFlow implements FlowDefinition, OnModuleInit {
     await runtime.commit(state, { to: PaystackWithdrawalState.FAILED, complete: true, note: failureCode }, async (manager) => {
       await this.lockWithdrawal(manager, record.flow_id);
       const { observationId, observedAt } = await this.recordRefusal(manager, record, error);
-      await this.certify(manager, record, observationId, 'DEFINITIVE_FAILURE', observedAt, null);
-      await this.reservations.release(record.reservation_id);
-      await manager.query(`UPDATE paystack_withdrawals SET failed_at = now(), failure_code = $2 WHERE flow_id = $1`, [record.flow_id, failureCode]);
-      await resolveReview(manager, { table: 'paystack_withdrawals', flowId: record.flow_id });
-      await this.trail.changed('WITHDRAWAL', record.flow_id, record.user_id, state, PaystackWithdrawalState.FAILED, { failureCode });
+      await this.applyVerifiedFailure(manager, record, state, { observationId, observedAt }, failureCode);
     });
     return { kind: 'TRANSITIONED', from: state, to: PaystackWithdrawalState.FAILED };
   }
@@ -339,19 +361,50 @@ export class WithdrawalFlow implements FlowDefinition, OnModuleInit {
     fingerprint: Buffer | null,
   ): Promise<StepOutcome> {
     assertWithdrawalTransition(from, PaystackWithdrawalState.POSTED);
-    const principal = Money.fromMinorString(record.principal_minor, record.currency_code);
     const work = async (manager: EntityManager) => {
       await this.lockWithdrawal(manager, record.flow_id);
       await this.bindTransfer(manager, record, observation);
       const { observationId, observedAt } = await this.recordObservation(manager, record, exchange, observation, 'RESUMER', fingerprint);
-      const valueTime = observation.transferredAt ?? observedAt;
-      const verificationId = await this.certify(manager, record, observationId, 'SUCCESS', observedAt, observation.transferredAt);
+      await this.applyVerifiedSuccess(manager, record, from, factsOf(observationId, observedAt, observation), null);
+    };
+    try {
+      await runtime.commit(from, { to: PaystackWithdrawalState.POSTED, complete: true }, work);
+    } catch (error) {
+      if (!(error instanceof PeriodLockedError)) throw error;
+      return this.reviewWith(runtime, from, record, exchange, observation, fingerprint, WithdrawalReviewReason.PERIOD_LOCKED, 'OPERATIONS');
+    }
+    return { kind: 'TRANSITIONED', from, to: PaystackWithdrawalState.POSTED };
+  }
 
-      await this.ledger.lockUserAccounts([record.account_id]);
-      await manager.query(`SELECT id FROM reservations WHERE id = $1 FOR UPDATE`, [record.reservation_id]);
-      const accounts = await resolvePayoutAccounts(manager, record.currency_code, record.internal_bucket);
-      await this.ledger.lockInternalAccounts([accounts.payoutBalanceId, accounts.payoutInTransitId, accounts.transferFeesId]);
+  /**
+   * THE success primitive (§G.1 step 6; shared with the approved recovery, §I.3), in the caller's transaction after the
+   * withdrawal is locked and the observation persisted: the SUCCESS certificate, the provider debit (+ the actual fee,
+   * or a FEE_EVIDENCE_MISSING review — never zero), the customer's principal exactly once, the links, the stash
+   * confirmation, the trail. Normally the principal settles the protected hold (`settle()` once). An approved late
+   * success on a FAILED withdrawal (its hold already RELEASED, never pretended settled) posts it through `post()`
+   * SYSTEM_DRIVEN — it may overdraw: recorded, never clamped — and records `recovery_approval_id`.
+   */
+  async applyVerifiedSuccess(
+    manager: EntityManager,
+    record: WithdrawalRecord,
+    from: string,
+    facts: VerifiedTransferFacts,
+    recovery: ApprovedRecoveryContext | null,
+  ): Promise<string> {
+    const principal = Money.fromMinorString(record.principal_minor, record.currency_code);
+    const { valueTime, basis } = successValueTime(facts, recovery);
+    const verificationId = await this.certify(manager, record, facts.observationId, 'SUCCESS', valueTime, basis);
 
+    await this.ledger.lockUserAccounts([record.account_id]);
+    if (!recovery?.lateSuccess) await manager.query(`SELECT id FROM reservations WHERE id = $1 FOR UPDATE`, [record.reservation_id]);
+    const accounts = await resolvePayoutAccounts(manager, record.currency_code, record.internal_bucket);
+    await this.ledger.lockInternalAccounts([accounts.payoutBalanceId, accounts.payoutInTransitId, accounts.transferFeesId]);
+
+    const [booked] = (await manager.query(
+      `SELECT id FROM withdrawal_accounting_events WHERE withdrawal_id = $1 AND event_kind = 'PRINCIPAL_DEBIT'`,
+      [record.flow_id],
+    )) as { id: string }[];
+    if (!booked) {
       const debit = await this.ledger.post({
         transaction: {
           type: TransactionType.SETTLEMENT,
@@ -360,8 +413,8 @@ export class WithdrawalFlow implements FlowDefinition, OnModuleInit {
           initiatedBy: WITHDRAWAL_INITIATED_BY,
           reference: providerDebitReferenceOf(record.flow_id),
           reasonCode: 'PAYSTACK_TRANSFER_DEBIT',
-          externalReference: observation.transferId ?? undefined,
-          metadata: { flowId: record.flow_id },
+          externalReference: facts.transferId ?? undefined,
+          metadata: { flowId: record.flow_id, ...(recovery ? { approvalId: recovery.approvalId } : {}) },
         },
         entries: [
           { account: { accountId: accounts.payoutInTransitId }, direction: EntryDirection.DEBIT, amount: principal },
@@ -371,19 +424,25 @@ export class WithdrawalFlow implements FlowDefinition, OnModuleInit {
       await manager.query(
         `INSERT INTO withdrawal_accounting_events (withdrawal_id, event_kind, currency_code, amount_minor, transaction_id, evidence_basis, observation_id, provider_event_identity)
          VALUES ($1, 'PRINCIPAL_DEBIT', $2, $3, $4, 'TRANSFER_STATE', $5, $6)`,
-        [record.flow_id, record.currency_code, record.principal_minor, debit.transactionId, observationId, `transfer:${observation.transferId}`],
+        [record.flow_id, record.currency_code, record.principal_minor, debit.transactionId, facts.observationId, `transfer:${facts.transferId}`],
       );
-      if (observation.feeChargedMinor === null) {
-        await openReview(manager, { table: 'paystack_withdrawals', flowId: record.flow_id }, { reason: WithdrawalReviewReason.FEE_EVIDENCE_MISSING, observationId });
-      } else if (observation.feeChargedMinor > 0n) {
-        const fee = Money.of(observation.feeChargedMinor, record.currency_code);
+    }
+    if (facts.feeChargedMinor === null) {
+      await openReview(manager, { table: 'paystack_withdrawals', flowId: record.flow_id }, { reason: WithdrawalReviewReason.FEE_EVIDENCE_MISSING, observationId: facts.observationId });
+    } else if (facts.feeChargedMinor > 0n) {
+      const [feeBooked] = (await manager.query(
+        `SELECT id FROM withdrawal_accounting_events WHERE withdrawal_id = $1 AND event_kind = 'PROVIDER_FEE' AND provider_event_identity = $2 AND fee_component = 'transfer_fee'`,
+        [record.flow_id, facts.transferId],
+      )) as { id: string }[];
+      if (!feeBooked) {
+        const fee = Money.of(facts.feeChargedMinor, record.currency_code);
         const feePosting = await this.ledger.post({
           transaction: {
             type: TransactionType.SETTLEMENT,
             authorization: PostingAuthorization.SYSTEM_DRIVEN,
             valueTime,
             initiatedBy: WITHDRAWAL_INITIATED_BY,
-            reference: providerFeeReferenceOf(record.flow_id, observation.transferId as string, 'transfer_fee'),
+            reference: providerFeeReferenceOf(record.flow_id, facts.transferId as string, 'transfer_fee'),
             reasonCode: 'PAYSTACK_TRANSFER_FEE',
             metadata: { flowId: record.flow_id },
           },
@@ -396,43 +455,59 @@ export class WithdrawalFlow implements FlowDefinition, OnModuleInit {
           `INSERT INTO withdrawal_accounting_events (withdrawal_id, event_kind, currency_code, amount_minor, transaction_id, evidence_basis, observation_id,
              provider_event_identity, fee_component)
            VALUES ($1, 'PROVIDER_FEE', $2, $3, $4, 'TRANSFER_STATE', $5, $6, 'transfer_fee')`,
-          [record.flow_id, record.currency_code, fee.toMinorString(), feePosting.transactionId, observationId, observation.transferId],
+          [record.flow_id, record.currency_code, fee.toMinorString(), feePosting.transactionId, facts.observationId, facts.transferId],
         );
       }
+    }
 
-      const settled = await this.reservations.settle(record.reservation_id, {
-        transaction: {
-          type: TransactionType.WITHDRAWAL,
-          valueTime,
-          initiatedBy: `user:${record.user_id}`,
-          reference: principalReferenceOf(record.flow_id),
-          userId: record.user_id,
-          reasonCode: 'PAYSTACK_WITHDRAWAL',
-          externalReference: observation.transferId ?? undefined,
-          metadata: { flowId: record.flow_id, provider: 'paystack' },
-        },
-        entries: [
-          { account: { accountId: record.account_id }, direction: EntryDirection.DEBIT, amount: principal },
-          { account: { accountId: accounts.payoutInTransitId }, direction: EntryDirection.CREDIT, amount: principal },
-        ],
+    const principalPosting = {
+      transaction: {
+        type: TransactionType.WITHDRAWAL,
+        valueTime,
+        initiatedBy: `user:${record.user_id}`,
+        reference: principalReferenceOf(record.flow_id),
+        userId: record.user_id,
+        reasonCode: 'PAYSTACK_WITHDRAWAL',
+        externalReference: facts.transferId ?? undefined,
+        metadata: { flowId: record.flow_id, provider: 'paystack', ...(recovery ? { approvalId: recovery.approvalId } : {}) },
+      },
+      entries: [
+        { account: { accountId: record.account_id }, direction: EntryDirection.DEBIT, amount: principal },
+        { account: { accountId: accounts.payoutInTransitId }, direction: EntryDirection.CREDIT, amount: principal },
+      ],
+    };
+    let principalTransactionId: string;
+    if (recovery?.lateSuccess) {
+      const posted = await this.ledger.post({
+        transaction: { ...principalPosting.transaction, authorization: PostingAuthorization.SYSTEM_DRIVEN },
+        entries: principalPosting.entries,
       });
+      principalTransactionId = posted.transactionId;
+      await manager.query(
+        `UPDATE paystack_withdrawals SET principal_transaction_id = $2, confirmation_verification_id = $3, posted_at = now(), recovery_approval_id = $4
+          WHERE flow_id = $1`,
+        [record.flow_id, principalTransactionId, verificationId, recovery.approvalId],
+      );
+    } else {
+      const settled = await this.reservations.settle(record.reservation_id, principalPosting);
+      principalTransactionId = settled.settlementTransactionId as string;
       await manager.query(
         `UPDATE paystack_withdrawals SET principal_transaction_id = $2, confirmation_verification_id = $3, posted_at = now() WHERE flow_id = $1`,
-        [record.flow_id, settled.settlementTransactionId, verificationId],
+        [record.flow_id, principalTransactionId, verificationId],
       );
-      await manager.query(`SELECT record_stash_receipt($1, $2)`, [record.flow_id, verificationId]);
-      if (observation.feeChargedMinor !== null) await resolveReview(manager, { table: 'paystack_withdrawals', flowId: record.flow_id });
-      await this.trail.changed('WITHDRAWAL', record.flow_id, record.user_id, from, PaystackWithdrawalState.POSTED, {
-        transactionId: settled.settlementTransactionId as string,
-      });
-    };
-    try {
-      await runtime.commit(from, { to: PaystackWithdrawalState.POSTED, complete: true }, work);
-    } catch (error) {
-      if (!(error instanceof PeriodLockedError)) throw error;
-      return this.reviewWith(runtime, from, record, exchange, observation, fingerprint, WithdrawalReviewReason.PERIOD_LOCKED, 'OPERATIONS');
     }
-    return { kind: 'TRANSITIONED', from, to: PaystackWithdrawalState.POSTED };
+    await manager.query(`SELECT record_stash_receipt($1, $2)`, [record.flow_id, verificationId]);
+    if (facts.feeChargedMinor !== null) await resolveReview(manager, { table: 'paystack_withdrawals', flowId: record.flow_id });
+    await this.trail.changed(
+      'WITHDRAWAL',
+      record.flow_id,
+      record.user_id,
+      from,
+      PaystackWithdrawalState.POSTED,
+      { transactionId: principalTransactionId },
+      recovery ? { type: 'OPERATOR', id: recovery.executedBy } : { type: 'SYSTEM' },
+    );
+    return principalTransactionId;
   }
 
   private async failVerified(
@@ -449,13 +524,27 @@ export class WithdrawalFlow implements FlowDefinition, OnModuleInit {
       await this.lockWithdrawal(manager, record.flow_id);
       await this.bindTransfer(manager, record, observation);
       const { observationId, observedAt } = await this.recordObservation(manager, record, exchange, observation, 'RESUMER', fingerprint);
-      await this.certify(manager, record, observationId, 'DEFINITIVE_FAILURE', observedAt, null);
-      await this.reservations.release(record.reservation_id);
-      await manager.query(`UPDATE paystack_withdrawals SET failed_at = now(), failure_code = $2 WHERE flow_id = $1`, [record.flow_id, failureCode]);
-      await resolveReview(manager, { table: 'paystack_withdrawals', flowId: record.flow_id });
-      await this.trail.changed('WITHDRAWAL', record.flow_id, record.user_id, from, PaystackWithdrawalState.FAILED, { failureCode });
+      await this.applyVerifiedFailure(manager, record, from, { observationId, observedAt }, failureCode);
     });
     return { kind: 'TRANSITIONED', from, to: PaystackWithdrawalState.FAILED };
+  }
+
+  /**
+   * THE failure primitive (§G.1 step 7), in the caller's transaction: the DEFINITIVE_FAILURE certificate on a persisted
+   * observation, the protected hold released once, the failure facts, the trail. No posting, no receipt.
+   */
+  async applyVerifiedFailure(
+    manager: EntityManager,
+    record: WithdrawalRecord,
+    from: string,
+    facts: Pick<VerifiedTransferFacts, 'observationId' | 'observedAt'>,
+    failureCode: string,
+  ): Promise<void> {
+    await this.certify(manager, record, facts.observationId, 'DEFINITIVE_FAILURE', facts.observedAt, 'OBSERVED_TEST_STATE');
+    await this.reservations.release(record.reservation_id);
+    await manager.query(`UPDATE paystack_withdrawals SET failed_at = now(), failure_code = $2 WHERE flow_id = $1`, [record.flow_id, failureCode]);
+    await resolveReview(manager, { table: 'paystack_withdrawals', flowId: record.flow_id });
+    await this.trail.changed('WITHDRAWAL', record.flow_id, record.user_id, from, PaystackWithdrawalState.FAILED, { failureCode });
   }
 
   // ── POSTED: a full return after success ──
@@ -471,68 +560,122 @@ export class WithdrawalFlow implements FlowDefinition, OnModuleInit {
       // `failed` after a verified success is contradictory, not a refund instruction; partial returns are reviews.
       return this.reviewWith(runtime, state, record, verified.exchange, observation, fingerprint, WithdrawalReviewReason.PARTIAL_RETURN, 'OPERATIONS');
     }
-    const principalTransactionId = record.principal_transaction_id;
-    if (!principalTransactionId) throw new InvariantViolationError('A posted withdrawal has no principal posting.', { flowId: flow.id });
-    const principal = Money.fromMinorString(record.principal_minor, record.currency_code);
     assertWithdrawalTransition(state, PaystackWithdrawalState.REVERSED);
-    await runtime.commit(state, { to: PaystackWithdrawalState.REVERSED }, async (manager) => {
-      await this.lockWithdrawal(manager, record.flow_id);
-      const { observationId, observedAt } = await this.recordObservation(manager, record, verified.exchange, observation, 'RESUMER', fingerprint);
-      const verificationId = await this.certify(manager, record, observationId, 'FULL_RETURN', observedAt, null);
-      await manager.query(`SELECT id FROM transactions WHERE id = $1 FOR UPDATE`, [principalTransactionId]);
-      await this.ledger.lockUserAccounts([record.account_id]);
-      const accounts = await resolvePayoutAccounts(manager, record.currency_code, record.internal_bucket);
-      await this.ledger.lockInternalAccounts([accounts.payoutBalanceId, accounts.payoutInTransitId]);
-      const request = await this.ledger.buildReversalRequest(principalTransactionId, {
-        valueTime: observedAt,
-        initiatedBy: WITHDRAWAL_INITIATED_BY,
-        reasonCode: 'PAYSTACK_TRANSFER_REVERSED',
+    try {
+      await runtime.commit(state, { to: PaystackWithdrawalState.REVERSED }, async (manager) => {
+        await this.lockWithdrawal(manager, record.flow_id);
+        const { observationId, observedAt } = await this.recordObservation(manager, record, verified.exchange, observation, 'RESUMER', fingerprint);
+        await this.applyFullReturn(manager, record, factsOf(observationId, observedAt, observation), null);
       });
-      const reversal = await this.ledger.post({ transaction: { ...request.transaction, reference: principalReversalReferenceOf(record.flow_id) }, entries: request.entries });
-      const providerReturn = await this.ledger.post({
-        transaction: {
-          type: TransactionType.SETTLEMENT,
-          authorization: PostingAuthorization.SYSTEM_DRIVEN,
-          valueTime: observedAt,
-          initiatedBy: WITHDRAWAL_INITIATED_BY,
-          reference: providerReturnReferenceOf(record.flow_id),
-          reasonCode: 'PAYSTACK_TRANSFER_RETURN',
-          metadata: { flowId: record.flow_id },
-        },
-        entries: [
-          { account: { accountId: accounts.payoutBalanceId }, direction: EntryDirection.DEBIT, amount: principal },
-          { account: { accountId: accounts.payoutInTransitId }, direction: EntryDirection.CREDIT, amount: principal },
-        ],
-      });
-      const [{ id: debitEventId }] = (await manager.query(
-        `SELECT id FROM withdrawal_accounting_events WHERE withdrawal_id = $1 AND event_kind = 'PRINCIPAL_DEBIT'`,
-        [record.flow_id],
-      )) as { id: string }[];
-      await manager.query(
-        `INSERT INTO withdrawal_accounting_events (withdrawal_id, event_kind, currency_code, amount_minor, transaction_id, evidence_basis, observation_id,
-           original_event_id, provider_event_identity)
-         VALUES ($1, 'PRINCIPAL_RETURN', $2, $3, $4, 'TRANSFER_STATE', $5, $6, $7)`,
-        [record.flow_id, record.currency_code, record.principal_minor, providerReturn.transactionId, observationId, debitEventId, `transfer-return:${observation.transferId}`],
-      );
-      await manager.query(
-        `UPDATE paystack_withdrawals SET reversal_transaction_id = $2, return_verification_id = $3, reversed_at = now() WHERE flow_id = $1`,
-        [record.flow_id, reversal.transactionId, verificationId],
-      );
-      await manager.query(`SELECT record_stash_receipt($1, $2)`, [record.flow_id, verificationId]);
-      await this.trail.changed('WITHDRAWAL', record.flow_id, record.user_id, state, PaystackWithdrawalState.REVERSED, { transactionId: reversal.transactionId });
-    });
+    } catch (error) {
+      // A return observed in a locked period is never re-dated: review, kept, recoverable by an approved LATE_FACT_RETURN.
+      if (!(error instanceof PeriodLockedError)) throw error;
+      return this.reviewWith(runtime, state, record, verified.exchange, observation, fingerprint, WithdrawalReviewReason.PERIOD_LOCKED, 'OPERATIONS');
+    }
     return { kind: 'TRANSITIONED', from: state, to: PaystackWithdrawalState.REVERSED };
+  }
+
+  /**
+   * THE full-return primitive (§G.1 step 8; shared with the approved recovery), in the caller's transaction after the
+   * withdrawal is locked and the observation persisted: the FULL_RETURN certificate, the exact reversal of the principal
+   * posting (`buildReversalRequest`), the provider's principal return, the stash reversal receipt, the trail. The
+   * provider fee is never returned with it (§F.1).
+   */
+  async applyFullReturn(manager: EntityManager, record: WithdrawalRecord, facts: VerifiedTransferFacts, recovery: ApprovedRecoveryContext | null): Promise<string> {
+    const principalTransactionId = record.principal_transaction_id;
+    if (!principalTransactionId) throw new InvariantViolationError('A posted withdrawal has no principal posting.', { flowId: record.flow_id });
+    const principal = Money.fromMinorString(record.principal_minor, record.currency_code);
+    const valueTime = recovery?.valueTime ?? facts.observedAt;
+    const verificationId = await this.certify(manager, record, facts.observationId, 'FULL_RETURN', valueTime, recovery?.valueTime ? 'APPROVED_LATE_FACT' : 'OBSERVED_TEST_STATE');
+    await manager.query(`SELECT id FROM transactions WHERE id = $1 FOR UPDATE`, [principalTransactionId]);
+    await this.ledger.lockUserAccounts([record.account_id]);
+    const accounts = await resolvePayoutAccounts(manager, record.currency_code, record.internal_bucket);
+    await this.ledger.lockInternalAccounts([accounts.payoutBalanceId, accounts.payoutInTransitId]);
+    const request = await this.ledger.buildReversalRequest(principalTransactionId, {
+      valueTime,
+      initiatedBy: WITHDRAWAL_INITIATED_BY,
+      reasonCode: 'PAYSTACK_TRANSFER_REVERSED',
+    });
+    const reversal = await this.ledger.post({
+      transaction: {
+        ...request.transaction,
+        reference: principalReversalReferenceOf(record.flow_id),
+        ...(recovery ? { metadata: { ...(request.transaction.metadata ?? {}), approvalId: recovery.approvalId } } : {}),
+      },
+      entries: request.entries,
+    });
+    const providerReturn = await this.ledger.post({
+      transaction: {
+        type: TransactionType.SETTLEMENT,
+        authorization: PostingAuthorization.SYSTEM_DRIVEN,
+        valueTime,
+        initiatedBy: WITHDRAWAL_INITIATED_BY,
+        reference: providerReturnReferenceOf(record.flow_id),
+        reasonCode: 'PAYSTACK_TRANSFER_RETURN',
+        metadata: { flowId: record.flow_id, ...(recovery ? { approvalId: recovery.approvalId } : {}) },
+      },
+      entries: [
+        { account: { accountId: accounts.payoutBalanceId }, direction: EntryDirection.DEBIT, amount: principal },
+        { account: { accountId: accounts.payoutInTransitId }, direction: EntryDirection.CREDIT, amount: principal },
+      ],
+    });
+    const [{ id: debitEventId }] = (await manager.query(
+      `SELECT id FROM withdrawal_accounting_events WHERE withdrawal_id = $1 AND event_kind = 'PRINCIPAL_DEBIT'`,
+      [record.flow_id],
+    )) as { id: string }[];
+    await manager.query(
+      `INSERT INTO withdrawal_accounting_events (withdrawal_id, event_kind, currency_code, amount_minor, transaction_id, evidence_basis, observation_id,
+         original_event_id, provider_event_identity)
+       VALUES ($1, 'PRINCIPAL_RETURN', $2, $3, $4, 'TRANSFER_STATE', $5, $6, $7)`,
+      [record.flow_id, record.currency_code, record.principal_minor, providerReturn.transactionId, facts.observationId, debitEventId, `transfer-return:${facts.transferId}`],
+    );
+    await manager.query(
+      `UPDATE paystack_withdrawals SET reversal_transaction_id = $2, return_verification_id = $3, reversed_at = now() WHERE flow_id = $1`,
+      [record.flow_id, reversal.transactionId, verificationId],
+    );
+    await manager.query(`SELECT record_stash_receipt($1, $2)`, [record.flow_id, verificationId]);
+    await this.trail.changed(
+      'WITHDRAWAL',
+      record.flow_id,
+      record.user_id,
+      PaystackWithdrawalState.POSTED,
+      PaystackWithdrawalState.REVERSED,
+      { transactionId: reversal.transactionId },
+      recovery ? { type: 'OPERATOR', id: recovery.executedBy } : { type: 'SYSTEM' },
+    );
+    return reversal.transactionId;
+  }
+
+  // ── reconciliation (§I.2) ──
+
+  /**
+   * Read OUR reference's authoritative state (`transfer.verify`, outside any transaction) and keep it — sealed evidence
+   * + an observation bound to the withdrawal — in its own transaction, under the caller's trigger context (a run's id).
+   * Moves no money and no state: a late success on a FAILED withdrawal is evidence for an approved recovery, nothing
+   * more. `null` when Paystack does not know the reference.
+   */
+  async observeForReconciliation(flowId: string): Promise<{ readonly observationId: string; readonly observation: TransferObservation; readonly matches: boolean } | null> {
+    const record = await this.load(flowId);
+    const verified = await this.gateway.verifyTransfer(record.provider_reference, { flowId });
+    if (!verified.found) return null;
+    const fingerprint = await this.recipientFingerprint(record, verified.observation);
+    const { observationId } = await this.unitOfWork.run((manager) =>
+      this.recordObservation(manager, record, verified.exchange, verified.observation, 'RESUMER', fingerprint),
+    );
+    return { observationId, observation: verified.observation, matches: this.matches(record, verified.observation, fingerprint) };
   }
 
   // ── shared ──
 
-  private async load(flowId: string): Promise<WithdrawalRecord> {
+  /** The withdrawal's record (money facts + frozen destination), as committed. */
+  async load(flowId: string): Promise<WithdrawalRecord> {
     const [row] = (await this.unitOfWork.manager.query(
       `SELECT w.flow_id, w.user_id, w.account_id, w.reservation_id, w.principal_minor::text AS principal_minor, w.currency_code,
               w.provider_account_identity, w.provider_reference, w.internal_bucket, w.submission_attempts, w.provider_transfer_id,
-              w.provider_transfer_code, w.principal_transaction_id, d.beneficiary_id, d.sealing_key_id, d.provider_recipient_code_sealed,
-              d.identity_fingerprint, d.identity_fingerprint_key_id
+              w.provider_transfer_code, w.principal_transaction_id, r.status::text AS reservation_status, d.beneficiary_id, d.sealing_key_id,
+              d.provider_recipient_code_sealed, d.identity_fingerprint, d.identity_fingerprint_key_id
          FROM paystack_withdrawals w JOIN withdrawal_destinations d ON d.withdrawal_id = w.flow_id
+         JOIN reservations r ON r.id = w.reservation_id
         WHERE w.flow_id = $1`,
       [flowId],
     )) as WithdrawalRecord[];
@@ -549,7 +692,7 @@ export class WithdrawalFlow implements FlowDefinition, OnModuleInit {
   }
 
   /** The keyed fingerprint of the recipient Paystack names, under the destination's key version (null when it names none). */
-  private async recipientFingerprint(record: WithdrawalRecord, observation: TransferObservation): Promise<Buffer | null> {
+  async recipientFingerprint(record: WithdrawalRecord, observation: TransferObservation): Promise<Buffer | null> {
     const details = observation.recipient?.details;
     if (!details?.bankCode || !details.accountNumber) return null;
     return this.protection.destinationFingerprintWith(
@@ -558,7 +701,7 @@ export class WithdrawalFlow implements FlowDefinition, OnModuleInit {
     ).digest;
   }
 
-  private sameTransfer(record: WithdrawalRecord, observation: TransferObservation): boolean {
+  sameTransfer(record: WithdrawalRecord, observation: TransferObservation): boolean {
     return (
       observation.reference === record.provider_reference &&
       observation.amountMinor === BigInt(record.principal_minor) &&
@@ -569,11 +712,11 @@ export class WithdrawalFlow implements FlowDefinition, OnModuleInit {
     );
   }
 
-  private matches(record: WithdrawalRecord, observation: TransferObservation, fingerprint: Buffer | null): boolean {
+  matches(record: WithdrawalRecord, observation: TransferObservation, fingerprint: Buffer | null): boolean {
     return this.sameTransfer(record, observation) && fingerprint !== null && fingerprint.equals(record.identity_fingerprint);
   }
 
-  private async bindTransfer(manager: EntityManager, record: WithdrawalRecord, observation: TransferObservation): Promise<void> {
+  async bindTransfer(manager: EntityManager, record: WithdrawalRecord, observation: TransferObservation): Promise<void> {
     if (record.provider_transfer_id !== null || !observation.transferId || !observation.transferCode) return;
     await manager.query(
       `UPDATE paystack_withdrawals SET provider_transfer_id = $2, provider_transfer_code = $3
@@ -584,7 +727,7 @@ export class WithdrawalFlow implements FlowDefinition, OnModuleInit {
     record.provider_transfer_code = observation.transferCode;
   }
 
-  private async lockWithdrawal(manager: EntityManager, flowId: string): Promise<void> {
+  async lockWithdrawal(manager: EntityManager, flowId: string): Promise<void> {
     await manager.query(`SELECT flow_id FROM paystack_withdrawals WHERE flow_id = $1 FOR UPDATE`, [flowId]);
   }
 
@@ -594,7 +737,7 @@ export class WithdrawalFlow implements FlowDefinition, OnModuleInit {
     return stored.evidenceId;
   }
 
-  private async recordObservation(
+  async recordObservation(
     manager: EntityManager,
     record: WithdrawalRecord,
     exchange: ProviderExchange,
@@ -604,13 +747,17 @@ export class WithdrawalFlow implements FlowDefinition, OnModuleInit {
   ): Promise<{ observationId: string; observedAt: Date }> {
     const evidenceId = await this.storeIfAny(exchange);
     if (!evidenceId) throw new InvariantViolationError('An observation needs the answer\'s bytes as evidence.', { operation: exchange.operation });
+    // Provenance (§G.1): a step a reconciliation run drove is the run's; a webhook-triggered step stays RESUMER (W1 CHECK).
+    const trigger = WithdrawalTrigger.current();
+    const recordedSource = source === 'RESUMER' && trigger?.source === 'RECONCILIATION' ? 'RECONCILIATION' : source;
+    const reconciliationRunId = recordedSource === 'RECONCILIATION' ? (trigger as { reconciliationRunId: string }).reconciliationRunId : null;
     const [row] = (await manager.query(
       `INSERT INTO paystack_transfer_observations
          (withdrawal_id, provider_account_identity, operation, observed_domain, provider_reference, provider_transfer_id,
           provider_transfer_code, status_classification, raw_status, amount_minor, currency_code, recipient_identity_fingerprint,
           recipient_identity_fingerprint_key_id, provider_created_at, provider_updated_at, provider_transferred_at, fee_charged_minor,
-          evidence_id, request_sha256, response_sha256, source)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, sha256($20::bytea), $21)
+          evidence_id, request_sha256, response_sha256, source, reconciliation_run_id)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, sha256($20::bytea), $21, $22)
        RETURNING id, observed_at`,
       [
         observation.reference === record.provider_reference ? record.flow_id : null,
@@ -633,7 +780,8 @@ export class WithdrawalFlow implements FlowDefinition, OnModuleInit {
         evidenceId,
         exchange.requestSha256,
         exchange.rawResponse,
-        source,
+        recordedSource,
+        reconciliationRunId,
       ],
     )) as { id: string; observed_at: Date }[];
     return { observationId: row.id, observedAt: row.observed_at };
@@ -659,14 +807,13 @@ export class WithdrawalFlow implements FlowDefinition, OnModuleInit {
     record: WithdrawalRecord,
     observationId: string,
     outcome: 'SUCCESS' | 'DEFINITIVE_FAILURE' | 'FULL_RETURN',
-    observedAt: Date,
-    providerTime: Date | null,
+    valueTime: Date,
+    basis: ValueTimeBasis,
   ): Promise<string> {
     const [row] = (await manager.query(
       `INSERT INTO withdrawal_verifications (withdrawal_id, user_id, currency_code, amount_minor, observation_id, outcome, value_time, value_time_basis)
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING id`,
-      [record.flow_id, record.user_id, record.currency_code, record.principal_minor, observationId, outcome, providerTime ?? observedAt,
-        providerTime ? 'PROVIDER_EVENT_TIME' : 'OBSERVED_TEST_STATE'],
+      [record.flow_id, record.user_id, record.currency_code, record.principal_minor, observationId, outcome, valueTime, basis],
     )) as { id: string }[];
     return row.id;
   }
@@ -703,6 +850,23 @@ export class WithdrawalFlow implements FlowDefinition, OnModuleInit {
   private waiting(flow: ClaimedFlow, state: PaystackWithdrawalState, reason: string): StepOutcome {
     return { kind: 'WAITING', state, reason, retryInSeconds: backoff(flow.attempts) };
   }
+}
+
+function factsOf(observationId: string, observedAt: Date, observation: TransferObservation): VerifiedTransferFacts {
+  return {
+    observationId,
+    observedAt,
+    transferId: observation.transferId,
+    transferredAt: observation.transferredAt,
+    feeChargedMinor: observation.feeChargedMinor,
+  };
+}
+
+/** A success's value time (§F.3, D4): the approved late-fact date, else Paystack's transfer time, else the observation's. */
+function successValueTime(facts: VerifiedTransferFacts, recovery: ApprovedRecoveryContext | null): { valueTime: Date; basis: ValueTimeBasis } {
+  if (recovery?.valueTime) return { valueTime: recovery.valueTime, basis: 'APPROVED_LATE_FACT' };
+  if (facts.transferredAt) return { valueTime: facts.transferredAt, basis: 'PROVIDER_EVENT_TIME' };
+  return { valueTime: facts.observedAt, basis: 'OBSERVED_TEST_STATE' };
 }
 
 function backoff(attempts: number): number {

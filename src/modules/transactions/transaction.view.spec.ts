@@ -1,5 +1,5 @@
 import { ErrorCode } from '../../common/errors';
-import { HISTORY_TYPES, PUBLIC_REASON_CODES, initiatorOf, statusOfTransaction, statusOfUnpostedFunding } from './history-status';
+import { HISTORY_TYPES, PUBLIC_REASON_CODES, initiatorOf, statusOfTransaction, statusOfUnpostedFunding, statusOfUnpostedWithdrawal } from './history-status';
 import { HistoryRow, detailView, listItemView } from './transaction.view';
 
 const AT = new Date('2026-09-29T10:00:00.123Z');
@@ -168,6 +168,35 @@ describe('history views', () => {
     expect(listItemView({ ...unposted, status: 'AUTHORIZED', failure_code: null }).status).toBe('PENDING');
     expect(() => listItemView({ ...unposted, requested_amount: null })).toThrow(expect.objectContaining({ code: ErrorCode.INVARIANT_VIOLATION }));
   });
+
+  it('a withdrawal that never posted: its principal requested, no legs; status by the WITHDRAWAL table, not funding\'s', () => {
+    const unposted = row({
+      source: 'WITHDRAWAL',
+      reference: 'withdrawal:f0000000-0000-4000-8000-000000000002',
+      type: 'WITHDRAWAL',
+      status: 'PROCESSING',
+      reason_code: null,
+      rate_display: null,
+      legs: null,
+      requested_currency: 'NGN',
+      requested_minor_unit: 2,
+      requested_amount: '80000',
+    });
+    expect(detailView(unposted)).toMatchObject({
+      reference: 'withdrawal:f0000000-0000-4000-8000-000000000002',
+      type: 'WITHDRAWAL',
+      status: 'PENDING',
+      legs: [],
+      requested: { currency: 'NGN', minorUnit: 2, amount: '80000' },
+      settlementTime: null,
+      initiatedBy: 'USER',
+    });
+    expect(listItemView({ ...unposted, status: 'FAILED', failure_code: 'TRANSFER_FAILED' })).toMatchObject({ status: 'FAILED', failureCode: 'TRANSFER_FAILED' });
+    // A funding state is not a withdrawal state (and vice versa): each source has its own table.
+    expect(() => listItemView({ ...unposted, status: 'AUTHORIZED' })).toThrow(expect.objectContaining({ code: ErrorCode.INVARIANT_VIOLATION }));
+    expect(() => listItemView({ ...unposted, source: 'FUNDING', status: 'PROCESSING' })).toThrow(expect.objectContaining({ code: ErrorCode.INVARIANT_VIOLATION }));
+    expect(() => listItemView({ ...unposted, status: 'POSTED' })).toThrow(expect.objectContaining({ code: ErrorCode.INVARIANT_VIOLATION }));
+  });
 });
 
 describe('history status and initiator', () => {
@@ -178,6 +207,11 @@ describe('history status and initiator', () => {
     // A funding with a transaction is never "unposted".
     for (const state of ['POSTED', 'SETTLED', 'REVERSED', 'NONSENSE']) {
       expect(() => statusOfUnpostedFunding(state)).toThrow(expect.objectContaining({ code: ErrorCode.INVARIANT_VIOLATION }));
+    }
+    // An unposted withdrawal: held money is PENDING, a failure before posting is FAILED; a posted one is never unposted.
+    expect(['RESERVED', 'SUBMITTING', 'PROCESSING', 'FAILED'].map(statusOfUnpostedWithdrawal)).toEqual(['PENDING', 'PENDING', 'PENDING', 'FAILED']);
+    for (const state of ['POSTED', 'REVERSED', 'INITIATED', 'NONSENSE']) {
+      expect(() => statusOfUnpostedWithdrawal(state)).toThrow(expect.objectContaining({ code: ErrorCode.INVARIANT_VIOLATION }));
     }
   });
 
@@ -199,7 +233,9 @@ describe('history status and initiator', () => {
       'SETTLEMENT_AMOUNT_CORRECTION',
       'PARTIAL_CHARGEBACK',
       'WRITE_OFF',
+      'PAYSTACK_WITHDRAWAL',
+      'PAYSTACK_TRANSFER_REVERSED',
     ]);
-    expect(HISTORY_TYPES).toEqual(['FUNDING', 'CONVERSION', 'REVERSAL', 'CORRECTION', 'PROMOTIONAL', 'WRITE_OFF']);
+    expect(HISTORY_TYPES).toEqual(['FUNDING', 'CONVERSION', 'WITHDRAWAL', 'REVERSAL', 'CORRECTION', 'PROMOTIONAL', 'WRITE_OFF']);
   });
 });

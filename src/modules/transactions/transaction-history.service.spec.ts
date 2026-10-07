@@ -136,7 +136,7 @@ describe('ListTransactionsQuery', () => {
     [{ limit: '01' }, 'limit'],
     [{ limit: '1.5' }, 'limit'],
     [{ limit: '-1' }, 'limit'],
-    [{ type: 'WITHDRAWAL' }, 'type'],
+    [{ type: 'SETTLEMENT' }, 'type'],
     [{ type: 'funding' }, 'type'],
     [{ currency: 'usd' }, 'currency'],
     [{ currency: 'USDT' }, 'currency'],

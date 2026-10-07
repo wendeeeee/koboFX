@@ -350,7 +350,7 @@ describe('Transaction history (integration)', () => {
         [{ limit: '101' }, 400, 'VALIDATION_FAILED'],
         [{ limit: '1.5' }, 400, 'VALIDATION_FAILED'],
         [{ limit: 'abc' }, 400, 'VALIDATION_FAILED'],
-        [{ type: 'WITHDRAWAL' }, 400, 'VALIDATION_FAILED'],
+        [{ type: 'SETTLEMENT' }, 400, 'VALIDATION_FAILED'],
         [{ type: 'conversion' }, 400, 'VALIDATION_FAILED'],
         [{ currency: 'usd' }, 400, 'VALIDATION_FAILED'],
         [{ currency: 'XYZ' }, 400, 'UNSUPPORTED_CURRENCY'],

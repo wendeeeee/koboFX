@@ -1,5 +1,6 @@
 import { InvariantViolationError } from '../../common/errors';
 import { FundingState, fundingStatusOf, isFundingState } from '../flows/funding/funding-transitions';
+import { PAYSTACK_WITHDRAWAL_HOLDING_STATES, PaystackWithdrawalState } from '../flows/paystack-withdrawal/paystack-withdrawal-transitions';
 import { TransactionStatus, TransactionType } from '../ledger/ledger.types';
 
 
@@ -30,6 +31,17 @@ export function statusOfUnpostedFunding(state: string): HistoryStatus {
   return status;
 }
 
+/**
+ * An unposted withdrawal (WITHDRAWAL_PLAN.md §J): money still held (RESERVED, SUBMITTING, PROCESSING) is PENDING; a
+ * withdrawal that FAILED before posting is FAILED. POSTED and REVERSED have a principal transaction, so they are never
+ * read from the withdrawal branch.
+ */
+export function statusOfUnpostedWithdrawal(state: string): HistoryStatus {
+  if ((PAYSTACK_WITHDRAWAL_HOLDING_STATES as readonly string[]).includes(state)) return 'PENDING';
+  if (state === PaystackWithdrawalState.FAILED) return 'FAILED';
+  throw new InvariantViolationError(`A withdrawal in state ${state} has no unposted history item.`, { state });
+}
+
 
 export type HistoryInitiator = 'USER' | 'SYSTEM' | 'OPERATOR';
 
@@ -43,6 +55,7 @@ export function initiatorOf(initiatedBy: string): HistoryInitiator {
 export const HISTORY_TYPES = [
   TransactionType.FUNDING,
   TransactionType.CONVERSION,
+  TransactionType.WITHDRAWAL,
   TransactionType.REVERSAL,
   TransactionType.CORRECTION,
   TransactionType.PROMOTIONAL,
@@ -60,4 +73,6 @@ export const PUBLIC_REASON_CODES = [
   'SETTLEMENT_AMOUNT_CORRECTION',
   'PARTIAL_CHARGEBACK',
   'WRITE_OFF',
+  'PAYSTACK_WITHDRAWAL',
+  'PAYSTACK_TRANSFER_REVERSED',
 ] as const;

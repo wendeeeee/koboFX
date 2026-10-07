@@ -33,6 +33,18 @@ export enum RateOverrideMode {
   MANUAL_RATE = 'MANUAL_RATE',
 }
 
+/** PAYSTACK_WITHDRAWAL_RECOVERY (WITHDRAWAL_PLAN.md §I.3): apply a STORED, matched transfer outcome. Never sends money. */
+export enum WithdrawalRecoveryMode {
+  /** A matched verified success: complete an unresolved withdrawal, or a FAILED one's late success. */
+  COMPLETE_MATCHED_SUCCESS = 'COMPLETE_MATCHED_SUCCESS',
+  /** A matched full return of a POSTED withdrawal. */
+  APPLY_MATCHED_FULL_RETURN = 'APPLY_MATCHED_FULL_RETURN',
+  /** As COMPLETE_MATCHED_SUCCESS, booked at an approved open-period value time (its own time is in a locked period). */
+  LATE_FACT_POST = 'LATE_FACT_POST',
+  /** As APPLY_MATCHED_FULL_RETURN, booked at an approved open-period value time. */
+  LATE_FACT_RETURN = 'LATE_FACT_RETURN',
+}
+
 export enum RoleChangeOperation {
   GRANT = 'GRANT',
   REVOKE = 'REVOKE',
@@ -96,6 +108,16 @@ const roleChange = z
 
 const resolveBreak = z.object({ breakId: uuid }).strict();
 
+/** A value time a JavaScript `Date` carries exactly into `post()`: at most millisecond precision. */
+const millisecondInstant = instant.refine((value) => !/\.\d{4,}/.test(value), 'must have at most millisecond precision');
+const recoveryTarget = { withdrawalId: uuid, breakId: uuid, observationId: uuid };
+const withdrawalRecovery = z.discriminatedUnion('mode', [
+  z.object({ mode: z.literal(WithdrawalRecoveryMode.COMPLETE_MATCHED_SUCCESS), ...recoveryTarget }).strict(),
+  z.object({ mode: z.literal(WithdrawalRecoveryMode.APPLY_MATCHED_FULL_RETURN), ...recoveryTarget }).strict(),
+  z.object({ mode: z.literal(WithdrawalRecoveryMode.LATE_FACT_POST), ...recoveryTarget, valueTime: millisecondInstant }).strict(),
+  z.object({ mode: z.literal(WithdrawalRecoveryMode.LATE_FACT_RETURN), ...recoveryTarget, valueTime: millisecondInstant }).strict(),
+]);
+
 export const ACTION_PAYLOAD_SCHEMAS = {
   [ApprovalActionType.CORRECTION]: correction,
   [ApprovalActionType.WRITE_OFF]: writeOff,
@@ -106,6 +128,7 @@ export const ACTION_PAYLOAD_SCHEMAS = {
   [ApprovalActionType.CLOSE_PERIOD]: closePeriod,
   [ApprovalActionType.ROLE_CHANGE]: roleChange,
   [ApprovalActionType.RESOLVE_BREAK]: resolveBreak,
+  [ApprovalActionType.PAYSTACK_WITHDRAWAL_RECOVERY]: withdrawalRecovery,
 } as const;
 
 export type CorrectionPayload = z.infer<typeof correction>;
@@ -116,6 +139,7 @@ export type UserTargetPayload = z.infer<typeof userTarget>;
 export type ClosePeriodPayload = z.infer<typeof closePeriod>;
 export type RoleChangePayload = z.infer<typeof roleChange>;
 export type ResolveBreakPayload = z.infer<typeof resolveBreak>;
+export type WithdrawalRecoveryPayload = z.infer<typeof withdrawalRecovery>;
 
 export interface ActionPayloads {
   [ApprovalActionType.CORRECTION]: CorrectionPayload;
@@ -127,6 +151,7 @@ export interface ActionPayloads {
   [ApprovalActionType.CLOSE_PERIOD]: ClosePeriodPayload;
   [ApprovalActionType.ROLE_CHANGE]: RoleChangePayload;
   [ApprovalActionType.RESOLVE_BREAK]: ResolveBreakPayload;
+  [ApprovalActionType.PAYSTACK_WITHDRAWAL_RECOVERY]: WithdrawalRecoveryPayload;
 }
 
 /**

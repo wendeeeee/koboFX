@@ -100,7 +100,8 @@ describe('OpenAPI contract (integration)', () => {
       const documented = operations().map(({ method, path }) => `${method.toUpperCase()} ${path}`);
       expect([...documented].sort()).toEqual([...new Set(served)].sort());
       // +6 withdrawal routes (W3): banks, beneficiaries POST/GET/list, withdraw POST/GET — always served, refused while off.
-      expect(documented).toHaveLength(44);
+      // +2 stash reads (W4): GET /stash, GET /stash/transactions — always served.
+      expect(documented).toHaveLength(46);
     });
 
     it('is a valid OpenAPI 3 document', async () => {
@@ -375,6 +376,16 @@ describe('OpenAPI contract (integration)', () => {
       await check('get', `${PREFIX}/transactions`, auth(http().get(`${PREFIX}/transactions?cursor=garbage`)), 400);
       await check('get', `${PREFIX}/transactions/not-a-reference`, auth(http().get(`${PREFIX}/transactions/not-a-reference`)), 400);
       await check('get', `${PREFIX}/transactions/funding:${randomUUID()}`, auth(http().get(`${PREFIX}/transactions/funding:${randomUUID()}`)), 404);
+      await check('get', `${PREFIX}/transactions/withdrawal:${randomUUID()}`, auth(http().get(`${PREFIX}/transactions/withdrawal:${randomUUID()}`)), 404);
+
+      // The stash (W4): an unopened stash is a null id and NGN "0", read without a write.
+      const stash = await check('get', `${PREFIX}/stash`, auth(http().get(`${PREFIX}/stash`)), 200);
+      expect(stash.body).toEqual({ stashId: null, kind: 'SIMULATED_BANK', simulated: true, balances: [{ currency: 'NGN', minorUnit: 2, amount: '0' }] });
+      const receipts = await check('get', `${PREFIX}/stash/transactions`, auth(http().get(`${PREFIX}/stash/transactions?currency=NGN&limit=5`)), 200);
+      expect(receipts.body).toEqual({ stashId: null, kind: 'SIMULATED_BANK', simulated: true, items: [], nextCursor: null });
+      await check('get', `${PREFIX}/stash/transactions`, auth(http().get(`${PREFIX}/stash/transactions?cursor=garbage`)), 400);
+      await check('get', `${PREFIX}/stash/transactions`, auth(http().get(`${PREFIX}/stash/transactions?currency=XYZ`)), 400);
+      await check('get', `${PREFIX}/stash`, http().get(`${PREFIX}/stash`), 401);
     });
 
     it('admin: request 201 → approve 200 EXECUTED, the reads, recertification', async () => {
@@ -463,8 +474,9 @@ describe('OpenAPI contract (integration)', () => {
           checked.push(`${method} ${path}`);
         }
       }
-      // auth ×5, fund, quote ×2, convert ×2, trade, approvals ×9, reject, review, withdrawal beneficiary, withdraw.
-      expect(checked.length).toBe(25);
+      // auth ×5, fund, quote ×2, convert ×2, trade, approvals ×10 (W4: + PAYSTACK_WITHDRAWAL_RECOVERY), reject, review,
+      // withdrawal beneficiary, withdraw.
+      expect(checked.length).toBe(26);
     });
 
     it('every admin payload example matches its documented payload schema', () => {

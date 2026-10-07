@@ -8,7 +8,7 @@ import { PaystackModule } from '../../payments/paystack/paystack.module';
 import { WebhooksModule } from '../../payments/webhooks/webhooks.module';
 import { UsersModule } from '../../users/users.module';
 import { ReconciliationModule } from '../../reconciliation/reconciliation.module';
-import { PaystackReconciliationJob } from '../../reconciliation/paystack-reconciliation.job';
+import { PaystackChargeReconciliation } from '../../reconciliation/paystack/paystack-charge-reconciliation';
 import { FlowsModule } from '../flows.module';
 import { PaystackFundingController } from './paystack-funding.controller';
 import { PaystackFundingFlow } from './paystack-funding-flow';
@@ -34,7 +34,7 @@ export function isPaystackEnabled(env: Record<string, string | undefined>): bool
     ReconciliationModule,
   ],
   controllers: [PaystackFundingController],
-  providers: [PaystackFundingFlow, PaystackFundingService, PaystackWebhookResolver, PaystackReconciliationJob],
-  exports: [PaystackFundingFlow, PaystackReconciliationJob],
+  providers: [PaystackFundingFlow, PaystackFundingService, PaystackWebhookResolver, PaystackChargeReconciliation],
+  exports: [PaystackFundingFlow, PaystackChargeReconciliation],
 })
 export class PaystackFundingModule {}

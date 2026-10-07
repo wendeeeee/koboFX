@@ -9,7 +9,11 @@ import { LedgerModule } from '../ledger/ledger.module';
 import { OutboxDispatcher } from '../outbox/outbox-dispatcher';
 import { OutboxModule } from '../outbox/outbox.module';
 import { ClaimedOutboxEvent, OutboxEventHandler, OutboxEventType } from '../outbox/outbox.types';
+import { PaystackModule } from '../payments/paystack/paystack.module';
 import { PaystackTransfersModule } from '../payments/paystack/transfers/paystack-transfers.module';
+import { WebhooksModule } from '../payments/webhooks/webhooks.module';
+import { PaystackTransferReconciliation } from '../reconciliation/paystack/paystack-transfer-reconciliation';
+import { ReconciliationModule } from '../reconciliation/reconciliation.module';
 import { PaystackTransfersGateway } from '../payments/paystack/transfers/paystack-transfers.port';
 import { ProtectionModule } from '../protection/protection.module';
 import { ReservationsModule } from '../reservations/reservations.module';
@@ -18,6 +22,7 @@ import { BankDirectoryService } from './bank-directory.service';
 import { BeneficiaryFlow } from './beneficiary-flow';
 import { BeneficiaryService } from './beneficiary.service';
 import { WithdrawalAdmissionGate, WithdrawalWorkerHeartbeat } from './withdrawal-admission-gate';
+import { ProtectedHoldMetrics, ProtectedHoldMonitor } from './protected-hold-monitor';
 import { WithdrawalFlow } from './withdrawal-flow';
 import { WithdrawalTrail } from './withdrawal-records';
 import { WithdrawalService } from './withdrawal.service';
@@ -43,6 +48,23 @@ export class WithdrawalEventsHandler implements OutboxEventHandler {
       throw new InvariantViolationError(`Outbox event ${event.id} has a malformed payload.`);
     }
     this.logger.log({ eventId: event.id, eventType: this.eventType, flowId: payload.flowId, state: payload.state }, 'Withdrawal event acknowledged');
+  }
+}
+
+/** `ProtectedHoldFlagged.v1` → acknowledged (paging is the audit row, the log and the metric). Malformed fails loudly. */
+@Injectable()
+export class ProtectedHoldFlaggedHandler implements OutboxEventHandler {
+  readonly eventType = OutboxEventType.PROTECTED_HOLD_FLAGGED;
+  private readonly logger = new Logger(ProtectedHoldFlaggedHandler.name);
+
+  async handle(event: ClaimedOutboxEvent): Promise<void> {
+    const payload = event.payload as { reservationId?: unknown; flowId?: unknown; condition?: unknown };
+    const id = /^[0-9a-f-]{36}$/;
+    if (typeof payload.reservationId !== 'string' || !id.test(payload.reservationId) || typeof payload.flowId !== 'string' || !id.test(payload.flowId) ||
+        typeof payload.condition !== 'string' || !/^[A-Z_]{1,32}$/.test(payload.condition)) {
+      throw new InvariantViolationError(`Outbox event ${event.id} has a malformed payload.`);
+    }
+    this.logger.warn({ eventId: event.id, flowId: payload.flowId, condition: payload.condition }, 'Protected hold flag acknowledged');
   }
 }
 
@@ -98,7 +120,7 @@ export class WithdrawalRecoveryBootCheck implements OnApplicationBootstrap {
 export class WithdrawalsModule implements OnModuleInit {
   constructor(
     private readonly dispatcher: OutboxDispatcher,
-    @Inject('WITHDRAWAL_EVENT_HANDLERS') private readonly handlers: WithdrawalEventsHandler[],
+    @Inject('WITHDRAWAL_EVENT_HANDLERS') private readonly handlers: OutboxEventHandler[],
   ) {}
 
   onModuleInit(): void {
@@ -118,19 +140,37 @@ export class WithdrawalsModule implements OnModuleInit {
       WithdrawalService,
       WithdrawalAdmissionGate,
       WithdrawalTrail,
+      ProtectedHoldMetrics,
+      ProtectedHoldMonitor,
       {
         provide: 'WITHDRAWAL_EVENT_HANDLERS',
-        useValue: [new WithdrawalEventsHandler(OutboxEventType.BENEFICIARY_CHANGED), new WithdrawalEventsHandler(OutboxEventType.WITHDRAWAL_CHANGED)],
+        useValue: [
+          new WithdrawalEventsHandler(OutboxEventType.BENEFICIARY_CHANGED),
+          new WithdrawalEventsHandler(OutboxEventType.WITHDRAWAL_CHANGED),
+          new ProtectedHoldFlaggedHandler(),
+        ],
       },
-      ...(keyed ? [BeneficiaryFlow, WithdrawalFlow, WithdrawalWorkerHeartbeat] : [{ provide: PaystackTransfersGateway, useClass: UnconfiguredTransfersGateway }]),
+      ...(keyed
+        ? [BeneficiaryFlow, WithdrawalFlow, WithdrawalWorkerHeartbeat, PaystackTransferReconciliation]
+        : [{ provide: PaystackTransfersGateway, useClass: UnconfiguredTransfersGateway }]),
       ...(options.worker ? [WithdrawalRecoveryBootCheck] : []),
     ];
     return {
       module: WithdrawalsModule,
-      imports: [FlowsModule, LedgerModule, ReservationsModule, ProtectionModule, AuditModule, OutboxModule, UsersModule, ...(keyed ? [PaystackTransfersModule] : [])],
+      imports: [
+        FlowsModule,
+        LedgerModule,
+        ReservationsModule,
+        ProtectionModule,
+        AuditModule,
+        OutboxModule,
+        UsersModule,
+        // With a key: the transfers boundary, and the TRANSFER component of THE Paystack reconciliation (W4).
+        ...(keyed ? [PaystackTransfersModule, PaystackModule, ReconciliationModule, WebhooksModule] : []),
+      ],
       controllers: [WithdrawalsController],
       providers,
-      exports: [WithdrawalAdmissionGate, ...(keyed ? [WithdrawalWorkerHeartbeat] : [])],
+      exports: [WithdrawalAdmissionGate, ProtectedHoldMonitor, ProtectedHoldMetrics, ...(keyed ? [WithdrawalWorkerHeartbeat, WithdrawalFlow] : [])],
     };
   }
 }

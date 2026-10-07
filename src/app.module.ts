@@ -23,6 +23,7 @@ import { FxModule } from './modules/fx/fx.module';
 import { PaymentsModule } from './modules/payments/payments.module';
 import { WebhooksModule } from './modules/payments/webhooks/webhooks.module';
 import { TradingModule } from './modules/trading/trading.module';
+import { StashesModule } from './modules/stashes/stashes.module';
 import { TransactionsModule } from './modules/transactions/transactions.module';
 import { WalletsModule } from './modules/wallets/wallets.module';
 import { ReconciliationModule } from './modules/reconciliation/reconciliation.module';
@@ -102,6 +103,7 @@ export class AppModule {
         AdminModule,
         ...(isPaystackEnabled(env) ? [PaystackFundingModule] : []),
         WithdrawalsModule.forRoot(env),
+        StashesModule,
         HealthModule,
       ],
       providers: [

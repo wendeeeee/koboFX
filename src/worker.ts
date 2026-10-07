@@ -13,13 +13,15 @@ import { WorkerModule } from './worker.module';
 import { AdminMonitor } from './modules/admin/break-glass/admin-monitor';
 import { hasPaystackKey } from './modules/withdrawals/withdrawals.module';
 import { WithdrawalWorkerHeartbeat } from './modules/withdrawals/withdrawal-admission-gate';
+import { ProtectedHoldMonitor } from './modules/withdrawals/protected-hold-monitor';
 dotenv.config()
 
 async function bootstrap(): Promise<void> {
   const worker = await NestFactory.createApplicationContext(WorkerModule.forRoot(), { bufferLogs: true });
   worker.useLogger(worker.get(Logger));
-  const loops: { start(): void; stop(): Promise<void> }[] = [worker.get(OutboxPoller), worker.get(FlowResumer), worker.get(WebhookProcessor), worker.get(ReservationSweeper), worker.get(FxPoller), worker.get(ReconciliationScheduler), worker.get(AdminMonitor)];
+  const loops: { start(): void; stop(): Promise<void> }[] = [worker.get(OutboxPoller), worker.get(FlowResumer), worker.get(WebhookProcessor), worker.get(ReservationSweeper), worker.get(FxPoller), worker.get(ReconciliationScheduler), worker.get(AdminMonitor), worker.get(ProtectedHoldMonitor, { strict: false })];
   // The withdrawal heartbeat beats only where the withdrawal flows are registered (a Paystack key is configured).
+  // The protected-hold monitor (W4 §G.2) runs next to it, always: it pages, it never releases.
   if (hasPaystackKey(process.env)) loops.push(worker.get(WithdrawalWorkerHeartbeat, { strict: false }));
   for (const loop of loops) loop.start();
 

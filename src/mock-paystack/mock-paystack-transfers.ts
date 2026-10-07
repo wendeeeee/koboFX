@@ -105,6 +105,7 @@ export class MockPaystackTransfers {
   private nextFee: bigint | null = 1_000n;
   private nextDomain = 'test';
   private bankPageSize: number | undefined;
+  private listPageSize: number | undefined;
   private created = 0;
 
   constructor(private readonly dependencies: MockTransfersDependencies) {}
@@ -148,6 +149,11 @@ export class MockPaystackTransfers {
 
   setBankPageSize(size: number | undefined): void {
     this.bankPageSize = size;
+  }
+
+  /** Overrides the requested `perPage` of `/transfer` and `/balance/ledger` lists (undefined = honour the request). */
+  setListPageSize(size: number | undefined): void {
+    this.listPageSize = size;
   }
 
   /** Move a transfer; `reversed` / `failed` / … after creation return the principal (never the fee — not documented). */
@@ -482,7 +488,7 @@ export class MockPaystackTransfers {
 
   private page(response: Response, request: Request, items: unknown[]): void {
     const query = request.query as Record<string, string | undefined>;
-    const perPage = Math.max(1, Number.parseInt(query.perPage ?? '50', 10) || 50);
+    const perPage = this.listPageSize ?? Math.max(1, Number.parseInt(query.perPage ?? '50', 10) || 50);
     const page = Math.max(1, Number.parseInt(query.page ?? '1', 10) || 1);
     const pageCount = Math.max(1, Math.ceil(items.length / perPage));
     this.envelope(response, 200, 'Retrieved', items.slice((page - 1) * perPage, page * perPage), {

@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { Client } from 'pg';
 import { APPROVAL_ACTION_TYPES, APPROVAL_STATUSES } from '../../src/database/migrations/1791244800001-CreateApprovals';
+import { WITHDRAWAL_APPROVAL_ACTION_TYPES } from '../../src/database/migrations/1791676800000-AddWithdrawalReconciliationEnumValues';
 import { ACTION_POLICIES } from '../../src/modules/admin/actions/action-registry';
 import { canTransitionApproval } from '../../src/modules/admin/approvals/approval-transitions';
 import { APPROVAL_ACTION_TYPE_VALUES, APPROVAL_STATUS_VALUES, ApprovalStatus } from '../../src/modules/admin/approvals/approval.types';
@@ -50,7 +51,8 @@ describe('Admin schema: approvals, roles, corrections (real Postgres 16)', () =>
 
   describe('mirrors', () => {
     it('the enums equal their TypeScript twins', async () => {
-      expect([...APPROVAL_ACTION_TYPES]).toEqual(APPROVAL_ACTION_TYPE_VALUES);
+      // Each migration's list is frozen; the enum is their union, in creation order.
+      expect([...APPROVAL_ACTION_TYPES, ...WITHDRAWAL_APPROVAL_ACTION_TYPES]).toEqual(APPROVAL_ACTION_TYPE_VALUES);
       expect([...APPROVAL_STATUSES]).toEqual(APPROVAL_STATUS_VALUES);
       const types = (await app.query(`SELECT unnest(enum_range(NULL::approval_action_type))::text AS value`)).rows.map((row: { value: string }) => row.value);
       expect(types).toEqual(APPROVAL_ACTION_TYPE_VALUES);

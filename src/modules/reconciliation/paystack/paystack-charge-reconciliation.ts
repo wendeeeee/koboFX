@@ -1,24 +1,24 @@
 import { Inject, Injectable, Logger, OnModuleInit } from '@nestjs/common';
-import { Clock } from '../../common/clock';
-import { APP_CONFIG } from '../../config/config.module';
-import { AppConfig } from '../../config/configuration';
-import { UnitOfWork } from '../../database/transaction/unit-of-work';
-import { FlowRunner } from '../flows/flow-runner';
-import { FlowType } from '../flows/flow.types';
-import { FundingPaymentRepository } from '../flows/funding/funding-payment.repository';
-import { PaystackFundingState } from '../flows/paystack-funding/paystack-funding-transitions';
-import { PaystackDispute, PaystackGateway, PaystackTransaction } from '../payments/paystack/paystack-gateway.port';
-import { PaystackTransactionStatus } from '../payments/paystack/paystack-status';
-import { eventTypeOf, familyOfEvent, PaystackEventFamily } from '../payments/paystack/webhooks/paystack-event-family';
-import { parsePaystackWebhookHint } from '../payments/paystack/webhooks/paystack-webhook-payload';
-import { STORED_PAYLOAD_COLUMNS, StoredWebhookPayloadReader, StoredWebhookPayloadRow } from '../payments/webhooks/stored-webhook-payload';
-import { BREAK_POLICIES, BreakType, subjectKeys } from './break-types';
-import { BreakStatus, ResolutionKind } from './break-transitions';
-import { BreakCandidate, BreakService } from './break.service';
-import { ExternalRunResult } from './external-reconciliation.job';
-import { BreakOwnership, ProviderReconciliation, ProviderReconciliationRegistry } from './provider-reconciliation';
-import { ClaimedRun, ReconciliationRunRepository, ReconciliationRunStatus } from './reconciliation-run.repository';
-import { RECONCILIATION_INITIATED_BY } from './settlement-posting';
+import { Clock } from '../../../common/clock';
+import { APP_CONFIG } from '../../../config/config.module';
+import { AppConfig } from '../../../config/configuration';
+import { UnitOfWork } from '../../../database/transaction/unit-of-work';
+import { FlowRunner } from '../../flows/flow-runner';
+import { FlowType } from '../../flows/flow.types';
+import { FundingPaymentRepository } from '../../flows/funding/funding-payment.repository';
+import { PaystackFundingState } from '../../flows/paystack-funding/paystack-funding-transitions';
+import { PaystackDispute, PaystackGateway, PaystackTransaction } from '../../payments/paystack/paystack-gateway.port';
+import { PaystackTransactionStatus } from '../../payments/paystack/paystack-status';
+import { eventTypeOf, familyOfEvent, PaystackEventFamily } from '../../payments/paystack/webhooks/paystack-event-family';
+import { parsePaystackWebhookHint } from '../../payments/paystack/webhooks/paystack-webhook-payload';
+import { STORED_PAYLOAD_COLUMNS, StoredWebhookPayloadReader, StoredWebhookPayloadRow } from '../../payments/webhooks/stored-webhook-payload';
+import { BreakType, subjectKeys } from '../break-types';
+import { BreakStatus, ResolutionKind } from '../break-transitions';
+import { BreakCandidate, BreakService } from '../break.service';
+import { BreakOwnership } from '../provider-reconciliation';
+import { RECONCILIATION_INITIATED_BY } from '../settlement-posting';
+import { ComponentRun, PaystackReconciliationComponent, PaystackReconciliationFamily, Seen } from './paystack-reconciliation-run';
+import { PaystackReconciliationComposer } from './paystack-reconciliation.composer';
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const DAY = 24 * 3600 * 1000;
@@ -61,21 +61,16 @@ function toDeposit(row: DepositRow): PaystackDeposit {
   };
 }
 
-class Seen {
-  readonly detected = new Set<string>();
-  readonly resolved = new Set<string>();
-  readonly counts: Record<string, number> = {};
-
-  note(breakId: string, type: BreakType): void {
-    this.detected.add(breakId);
-    this.counts[type] = (this.counts[type] ?? 0) + 1;
-  }
-}
-
+/**
+ * Funding's share of the composed Paystack run (WITHDRAWAL_PLAN.md §I.2): the CHARGE family. It used to be THE Paystack
+ * reconciliation; now it registers with `PaystackReconciliationComposer`, which owns the claimed run, the one
+ * "no longer detected" sweep and the one finish. Its checks are unchanged.
+ */
 @Injectable()
-export class PaystackReconciliationJob implements ProviderReconciliation, OnModuleInit {
+export class PaystackChargeReconciliation implements PaystackReconciliationComponent, OnModuleInit {
+  readonly family = PaystackReconciliationFamily.CHARGE;
   readonly provider: string;
-  private readonly logger = new Logger(PaystackReconciliationJob.name);
+  private readonly logger = new Logger(PaystackChargeReconciliation.name);
 
   constructor(
     private readonly unitOfWork: UnitOfWork,
@@ -84,8 +79,7 @@ export class PaystackReconciliationJob implements ProviderReconciliation, OnModu
     private readonly fundingPayments: FundingPaymentRepository,
     private readonly breaks: BreakService,
     private readonly ownership: BreakOwnership,
-    private readonly runs: ReconciliationRunRepository,
-    private readonly registry: ProviderReconciliationRegistry,
+    private readonly composer: PaystackReconciliationComposer,
     private readonly clock: Clock,
     private readonly payloads: StoredWebhookPayloadReader,
     @Inject(APP_CONFIG) private readonly config: AppConfig,
@@ -94,35 +88,34 @@ export class PaystackReconciliationJob implements ProviderReconciliation, OnModu
   }
 
   onModuleInit(): void {
-    this.registry.register(this);
+    this.composer.addComponent(this);
   }
 
-  async runDaily(run: ClaimedRun): Promise<ExternalRunResult> {
+  async runDaily(run: ComponentRun): Promise<Record<string, number>> {
     const now = this.clock.now();
     const since = new Date(now.getTime() - this.config.reconciliation.lookbackDays * DAY);
-    const seen = new Seen();
+    const seen = run.seen;
     const listed = await this.checkTransactions(run, since, now, seen);
-    await this.heartbeat(run);
+    await run.heartbeat();
     await this.checkBookedDeposits(run, since, now, listed, seen);
     await this.checkDisputes(run, since, now, seen);
-    await this.heartbeat(run);
+    await run.heartbeat();
     await this.reprocessUnmatchedWebhooks(run, seen);
     await this.proveReceivable(run, seen);
     await this.retryAutomaticResolutions(seen);
-    await this.escalateNoLongerDetected(run, seen);
-    return this.finish(run, seen, { transactionsListed: listed.size });
+    return { transactionsListed: listed.size };
   }
 
-  async runHourly(run: ClaimedRun): Promise<ExternalRunResult> {
-    const seen = new Seen();
+  async runHourly(run: ComponentRun): Promise<Record<string, number>> {
+    const seen = run.seen;
     const driven = await this.driveUnresolvedFlows(run, this.clock.now(), seen);
     const held = await this.detectHeldFlows(run, seen);
     await this.retryAutomaticResolutions(seen);
-    return this.finish(run, seen, { unresolvedFlowsDriven: driven, heldFlowsChecked: held });
+    return { unresolvedFlowsDriven: driven, heldFlowsChecked: held };
   }
 
 
-  private async checkTransactions(run: ClaimedRun, since: Date, now: Date, seen: Seen): Promise<Set<string>> {
+  private async checkTransactions(run: ComponentRun, since: Date, now: Date, seen: Seen): Promise<Set<string>> {
     const cutoff = this.cutoff(now);
     const listed = new Set<string>();
     let cursor: string | undefined;
@@ -145,7 +138,7 @@ export class PaystackReconciliationJob implements ProviderReconciliation, OnModu
     return listed;
   }
 
-  private async checkTransaction(run: ClaimedRun, transaction: PaystackTransaction, cutoff: Date, seen: Seen): Promise<void> {
+  private async checkTransaction(run: ComponentRun, transaction: PaystackTransaction, cutoff: Date, seen: Seen): Promise<void> {
     const deposit = await this.depositFor(transaction.transactionId, transaction.reference);
     if (transaction.status === PaystackTransactionStatus.REVERSED) {
       if (deposit?.fundingTransactionId && !deposit.chargebackTransactionId) await this.missingAtPaystack(run, deposit, transaction, seen);
@@ -192,7 +185,7 @@ export class PaystackReconciliationJob implements ProviderReconciliation, OnModu
     }
   }
 
-  private detectMismatch(run: ClaimedRun, seen: Seen, deposit: PaystackDeposit, transaction: PaystackTransaction, source: string): Promise<string> {
+  private detectMismatch(run: ComponentRun, seen: Seen, deposit: PaystackDeposit, transaction: PaystackTransaction, source: string): Promise<string> {
     const type = deposit.currency !== transaction.amount.currency ? BreakType.CURRENCY_MISMATCH : BreakType.AMOUNT_MISMATCH;
     return this.detect(run, seen, {
       type,
@@ -214,7 +207,7 @@ export class PaystackReconciliationJob implements ProviderReconciliation, OnModu
   }
 
 
-  private async checkBookedDeposits(run: ClaimedRun, since: Date, now: Date, listed: Set<string>, seen: Seen): Promise<void> {
+  private async checkBookedDeposits(run: ComponentRun, since: Date, now: Date, listed: Set<string>, seen: Seen): Promise<void> {
     const booked = (await this.unitOfWork.manager.query(
       `SELECT ${DEPOSIT_COLUMNS}
          FROM funding_payments JOIN flow_instances ON flow_instances.id = funding_payments.flow_id
@@ -231,7 +224,7 @@ export class PaystackReconciliationJob implements ProviderReconciliation, OnModu
     }
   }
 
-  private async missingAtPaystack(run: ClaimedRun, deposit: PaystackDeposit, transaction: PaystackTransaction | null, seen: Seen): Promise<void> {
+  private async missingAtPaystack(run: ComponentRun, deposit: PaystackDeposit, transaction: PaystackTransaction | null, seen: Seen): Promise<void> {
     const paymentId = deposit.providerPaymentId ?? transaction?.transactionId ?? deposit.flowId;
     await this.detect(run, seen, {
       type: BreakType.MISSING_AT_PSP,
@@ -250,7 +243,7 @@ export class PaystackReconciliationJob implements ProviderReconciliation, OnModu
   }
 
 
-  private async checkDisputes(run: ClaimedRun, since: Date, now: Date, seen: Seen): Promise<void> {
+  private async checkDisputes(run: ComponentRun, since: Date, now: Date, seen: Seen): Promise<void> {
     const cutoff = this.cutoff(now);
     let cursor: string | undefined;
     for (let page = 0; page < MAXIMUM_PAGES; page += 1) {
@@ -267,7 +260,7 @@ export class PaystackReconciliationJob implements ProviderReconciliation, OnModu
     }
   }
 
-  private async chargebackNotReversed(run: ClaimedRun, deposit: PaystackDeposit, dispute: PaystackDispute, seen: Seen): Promise<void> {
+  private async chargebackNotReversed(run: ComponentRun, deposit: PaystackDeposit, dispute: PaystackDispute, seen: Seen): Promise<void> {
     const amount = dispute.refundAmount;
     const partial = !amount || amount.currency !== deposit.currency || amount.amountMinor !== deposit.amountMinor;
     const breakId = await this.detect(run, seen, {
@@ -294,7 +287,7 @@ export class PaystackReconciliationJob implements ProviderReconciliation, OnModu
   }
 
 
-  private async reprocessUnmatchedWebhooks(run: ClaimedRun, seen: Seen): Promise<void> {
+  private async reprocessUnmatchedWebhooks(run: ComponentRun, seen: Seen): Promise<void> {
     const events = (await this.unitOfWork.manager.query(
       `SELECT webhook_events.id, ${STORED_PAYLOAD_COLUMNS}
          FROM webhook_events
@@ -320,7 +313,7 @@ export class PaystackReconciliationJob implements ProviderReconciliation, OnModu
         currency: null,
         amountMinor: 0n,
         webhookEventId: event.id,
-        details: { webhookEventId: event.id, provider: this.provider },
+        details: { webhookEventId: event.id, provider: this.provider, family: PaystackReconciliationFamily.CHARGE },
       });
       const hint = parsePaystackWebhookHint(payload);
       const deposit = hint ? await this.depositFor(hint.transactionId, hint.reference) : null;
@@ -338,7 +331,7 @@ export class PaystackReconciliationJob implements ProviderReconciliation, OnModu
   }
 
 
-  private async proveReceivable(run: ClaimedRun, seen: Seen): Promise<void> {
+  private async proveReceivable(run: ComponentRun, seen: Seen): Promise<void> {
     const rows = await this.unitOfWork.runReadOnlySnapshot(
       async (manager) =>
         (await manager.query(
@@ -381,7 +374,7 @@ export class PaystackReconciliationJob implements ProviderReconciliation, OnModu
   }
 
 
-  private async driveUnresolvedFlows(run: ClaimedRun, now: Date, seen: Seen): Promise<number> {
+  private async driveUnresolvedFlows(run: ComponentRun, now: Date, seen: Seen): Promise<number> {
     const cutoff = this.cutoff(now);
     const rows = (await this.unitOfWork.manager.query(
       `SELECT ${DEPOSIT_COLUMNS}
@@ -413,7 +406,7 @@ export class PaystackReconciliationJob implements ProviderReconciliation, OnModu
     return rows.length;
   }
 
-  private async detectHeldFlows(run: ClaimedRun, seen: Seen): Promise<number> {
+  private async detectHeldFlows(run: ComponentRun, seen: Seen): Promise<number> {
     const rows = (await this.unitOfWork.manager.query(
       `SELECT ${DEPOSIT_COLUMNS}
          FROM flow_instances JOIN funding_payments ON funding_payments.flow_id = flow_instances.id
@@ -455,10 +448,8 @@ export class PaystackReconciliationJob implements ProviderReconciliation, OnModu
     return new Date(now.getTime() - this.config.reconciliation.unresolvedFlowAgeMinutes * 60_000);
   }
 
-  private async detect(run: ClaimedRun, seen: Seen, candidate: BreakCandidate): Promise<string> {
-    const detection = await this.breaks.detectAndRecord(run.id, candidate);
-    seen.note(detection.breakId, candidate.type);
-    return detection.breakId;
+  private async detect(run: ComponentRun, _seen: Seen, candidate: BreakCandidate): Promise<string> {
+    return run.detect(candidate);
   }
 
   private async driveAndResolve(breakId: string, flowId: string, seen: Seen): Promise<boolean> {
@@ -482,39 +473,10 @@ export class PaystackReconciliationJob implements ProviderReconciliation, OnModu
   private async retryAutomaticResolutions(seen: Seen): Promise<void> {
     for (const candidate of await this.breaks.live([BreakType.MISSING_IN_LEDGER, BreakType.CHARGEBACK_NOT_REVERSED])) {
       if (!candidate.flowId || candidate.details.partial === true) continue;
-      if ((await this.ownership.providerOf(candidate)) !== this.provider) continue;
+      const owner = await this.ownership.ownerOf(candidate);
+      if (owner?.provider !== this.provider || owner.family !== 'CHARGE') continue;
       await this.driveAndResolve(candidate.id, candidate.flowId, seen);
     }
   }
 
-  private async escalateNoLongerDetected(run: ClaimedRun, seen: Seen): Promise<void> {
-    const types = (Object.keys(BREAK_POLICIES) as BreakType[]).filter((type) => BREAK_POLICIES[type].rederivedBy === 'EXTERNAL_DAILY');
-    for (const live of await this.breaks.live(types)) {
-      if (seen.detected.has(live.id) || seen.resolved.has(live.id)) continue;
-      if ((await this.ownership.providerOf(live)) !== this.provider) continue;
-      const note = `No longer detected by Paystack run ${run.id} (${run.periodKey}); not resolved: no cause was named.`;
-      if (!(await this.breaks.escalate(live.id, RECONCILIATION_INITIATED_BY, note))) await this.breaks.annotate(live.id, note);
-    }
-  }
-
-  private async heartbeat(run: ClaimedRun): Promise<void> {
-    await this.runs.heartbeat(run, this.config.reconciliation.leaseSeconds);
-  }
-
-  private async finish(run: ClaimedRun, seen: Seen, counts: Record<string, number>): Promise<ExternalRunResult> {
-    const status = seen.detected.size === 0 ? ReconciliationRunStatus.CLEAN : ReconciliationRunStatus.BREAKS_FOUND;
-    const summary = {
-      clean: status === ReconciliationRunStatus.CLEAN,
-      provider: this.provider,
-      ...counts,
-      breaksDetected: seen.detected.size,
-      breaksResolved: seen.resolved.size,
-      detectedByType: seen.counts,
-    };
-    await this.runs.finish(run, status, summary, null);
-    const log = { runId: run.id, kind: run.kind, provider: this.provider, periodKey: run.periodKey, status, detected: seen.detected.size };
-    if (status === ReconciliationRunStatus.CLEAN) this.logger.log(log, 'Paystack reconciliation finished');
-    else this.logger.warn(log, 'Paystack reconciliation found breaks');
-    return { runId: run.id, status, detectedBreakIds: [...seen.detected], resolvedBreakIds: [...seen.resolved], summary };
-  }
 }

@@ -19,6 +19,8 @@ export enum ApprovalActionType {
   ROLE_CHANGE = 'ROLE_CHANGE',
   /** Close a break with an operator's documented decision (no money moves — still four-eyes). */
   RESOLVE_BREAK = 'RESOLVE_BREAK',
+  /** Apply a stored, matched Paystack transfer outcome to a withdrawal (W4, WITHDRAWAL_PLAN.md §I.3). Never sends money. */
+  PAYSTACK_WITHDRAWAL_RECOVERY = 'PAYSTACK_WITHDRAWAL_RECOVERY',
 }
 
 export const APPROVAL_ACTION_TYPE_VALUES: readonly ApprovalActionType[] = Object.values(ApprovalActionType);

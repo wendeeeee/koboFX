@@ -1,7 +1,7 @@
 import { InvariantViolationError } from '../../common/errors';
 import { dec } from '../../common/money';
 import { displayRate } from '../fx/pricing';
-import { HistoryInitiator, HistoryStatus, initiatorOf, statusOfTransaction, statusOfUnpostedFunding } from './history-status';
+import { HistoryInitiator, HistoryStatus, initiatorOf, statusOfTransaction, statusOfUnpostedFunding, statusOfUnpostedWithdrawal } from './history-status';
 
 
 export interface LegView {
@@ -61,7 +61,7 @@ export interface TransactionDetailView extends Omit<TransactionListItemView, 'le
   readonly initiatedBy: HistoryInitiator;
 }
 
-export type HistorySource = 'TRANSACTION' | 'FUNDING';
+export type HistorySource = 'TRANSACTION' | 'FUNDING' | 'WITHDRAWAL';
 
 export interface LegRow {
   readonly currency: string;
@@ -183,7 +183,7 @@ export function detailView(row: HistoryRow): TransactionDetailView {
   return {
     reference: row.reference,
     type: row.type,
-    status: posted ? statusOfTransaction(row.status) : statusOfUnpostedFunding(row.status),
+    status: statusOf(row),
     reasonCode: row.reason_code,
     legs: (row.legs ?? []).map((leg) => ({
       currency: leg.currency,
@@ -204,9 +204,22 @@ export function detailView(row: HistoryRow): TransactionDetailView {
   };
 }
 
+function statusOf(row: HistoryRow): HistoryStatus {
+  switch (row.source) {
+    case 'TRANSACTION':
+      return statusOfTransaction(row.status);
+    case 'FUNDING':
+      return statusOfUnpostedFunding(row.status);
+    case 'WITHDRAWAL':
+      return statusOfUnpostedWithdrawal(row.status);
+    default:
+      throw new InvariantViolationError('Unknown history source.', { source: row.source as string });
+  }
+}
+
 function requestedOf(row: HistoryRow): AmountView {
   if (row.requested_currency === null || row.requested_minor_unit === null || row.requested_amount === null) {
-    throw new InvariantViolationError('An unposted funding has no requested amount.', { reference: row.reference });
+    throw new InvariantViolationError('An unposted item has no requested amount.', { reference: row.reference });
   }
   return { currency: row.requested_currency, minorUnit: row.requested_minor_unit, amount: row.requested_amount };
 }

@@ -17,6 +17,7 @@ import { RateOverrideExecutor } from './actions/rate-override.executor';
 import { ResolveBreakExecutor } from './actions/resolve-break.executor';
 import { RoleChangeExecutor } from './actions/role-change.executor';
 import { SpreadChangeExecutor } from './actions/spread-change.executor';
+import { PaystackWithdrawalRecoveryExecutor } from './actions/paystack-withdrawal-recovery.executor';
 import { ReinstateUserExecutor, SuspendUserExecutor } from './actions/user-status.executor';
 import { WriteOffExecutor } from './actions/write-off.executor';
 import { ApprovalRepository } from './approvals/approval.repository';
@@ -38,6 +39,7 @@ const EXECUTORS = [
   PeriodCloseExecutor,
   RoleChangeExecutor,
   ResolveBreakExecutor,
+  PaystackWithdrawalRecoveryExecutor,
 ];
 
 /**

@@ -10,6 +10,14 @@ export enum OutboxEventType {
   EXCHANGE_RATE_OVERRIDDEN = 'ExchangeRateOverridden.v1',
   BENEFICIARY_CHANGED = 'BeneficiaryChanged.v1',
   WITHDRAWAL_CHANGED = 'WithdrawalChanged.v1',
+  PROTECTED_HOLD_FLAGGED = 'ProtectedHoldFlagged.v1',
+}
+
+/** W4 §G.2: ids and the condition only. */
+export interface ProtectedHoldFlaggedPayload {
+  readonly reservationId: string;
+  readonly flowId: string;
+  readonly condition: string;
 }
 
 export interface UserEventPayload {

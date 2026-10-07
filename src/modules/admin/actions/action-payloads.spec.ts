@@ -17,6 +17,7 @@ describe('action payloads (strict, canonical, re-parsed at execution)', () => {
     [ApprovalActionType.CLOSE_PERIOD]: { month: '2026-08' },
     [ApprovalActionType.ROLE_CHANGE]: { userId: randomUUID(), role: 'ADMIN', operation: 'GRANT' },
     [ApprovalActionType.RESOLVE_BREAK]: { breakId: randomUUID() },
+    [ApprovalActionType.PAYSTACK_WITHDRAWAL_RECOVERY]: { mode: 'LATE_FACT_POST', withdrawalId: randomUUID(), breakId: randomUUID(), observationId: randomUUID(), valueTime: now },
   };
 
   it.each(Object.values(ApprovalActionType))('%s: a valid payload parses, and its canonical form parses to itself', (type) => {

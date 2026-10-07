@@ -1,7 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { EntityManager } from 'typeorm';
 import { UnitOfWork } from '../../database/transaction/unit-of-work';
-import { FlowLeaseLostError, StaleFlowStateError } from './flow.errors';
+import { FlowLeasedError, FlowLeaseLostError, FlowNotFoundError, StaleFlowStateError } from './flow.errors';
 import { ClaimedFlow, FlowChange, FlowCommitOptions, FlowInstance, FlowType } from './flow.types';
 
 interface FlowRow {
@@ -162,6 +162,43 @@ export class FlowRepository {
       );
       await beforeCommit();
     });
+  }
+
+  /**
+   * An approved, database-only transition (WITHDRAWAL_PLAN.md §I.3): in the AMBIENT transaction (the approver's), the
+   * owner row `FOR SHARE` then the flow row `FOR UPDATE` (§G.3: approval → users → flow). Refused while a worker holds a
+   * live lease (transient: the approval is retried, never interleaved with an in-flight step) or when the state moved.
+   * The flow is left due, unleased, so the resumer re-checks it.
+   */
+  async applyApproved(
+    flowId: string,
+    expectedState: string,
+    change: { readonly to: string; readonly complete: boolean; readonly note: string },
+    work: (manager: EntityManager) => Promise<void>,
+  ): Promise<void> {
+    const manager = this.unitOfWork.requireTransaction();
+    await manager.query(
+      `SELECT users.id FROM users JOIN flow_instances ON flow_instances.user_id = users.id WHERE flow_instances.id = $1 FOR SHARE OF users`,
+      [flowId],
+    );
+    const [row] = (await manager.query(
+      `SELECT state, (leased_until IS NOT NULL AND leased_until > now()) AS leased FROM flow_instances WHERE id = $1 FOR UPDATE`,
+      [flowId],
+    )) as { state: string; leased: boolean }[];
+    if (!row) throw new FlowNotFoundError(flowId);
+    if (row.leased) throw new FlowLeasedError(flowId);
+    if (row.state !== expectedState) throw new StaleFlowStateError(flowId, expectedState, row.state);
+    await work(manager);
+    await manager.query(
+      `UPDATE flow_instances
+          SET state = $2,
+              state_changed_at = CASE WHEN state <> $2 THEN now() ELSE state_changed_at END,
+              attempts = 0,
+              completed_at = CASE WHEN $3 THEN coalesce(completed_at, now()) ELSE completed_at END,
+              next_attempt_at = now(), last_error = $4, leased_until = NULL, lease_token = NULL, updated_at = now()
+        WHERE id = $1`,
+      [flowId, change.to, change.complete, change.note.slice(0, MAXIMUM_ERROR_LENGTH)],
+    );
   }
 
   async release(flow: ClaimedFlow, retryInSeconds: number, note: string | null): Promise<void> {

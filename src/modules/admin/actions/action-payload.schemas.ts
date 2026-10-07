@@ -1,6 +1,6 @@
 import type { SchemaObject } from '@nestjs/swagger/dist/interfaces/open-api-spec.interface';
 import { ApprovalActionType } from '../approvals/approval.types';
-import { CorrectionMode, RateOverrideMode, RoleChangeOperation } from './action-payloads';
+import { CorrectionMode, RateOverrideMode, RoleChangeOperation, WithdrawalRecoveryMode } from './action-payloads';
 
 /**
  * The OpenAPI (JSON Schema) twin of `action-payloads.ts` (Phase 11 plan §E): hand-written, no generator.
@@ -32,6 +32,29 @@ const correctionVariant = (mode: CorrectionMode, description: string, extra: Rec
   strict({ mode: { type: 'string', enum: [mode] }, breakId: { ...uuid, description: 'The reconciliation break it fixes (must be live).' }, ...extra, valueTime }, undefined, {
     description,
   });
+
+const recoveryVariant = (mode: WithdrawalRecoveryMode, description: string, lateFact: boolean): SchemaObject =>
+  strict(
+    {
+      mode: { type: 'string', enum: [mode] },
+      withdrawalId: { ...uuid, description: 'The withdrawal (its flow id).' },
+      breakId: { ...uuid, description: 'The live reconciliation break about this withdrawal.' },
+      observationId: {
+        ...uuid,
+        description: 'A stored `transfer.verify` observation of this withdrawal that matches its identity, recent enough (the executor refuses stale evidence).',
+      },
+      ...(lateFact
+        ? {
+            valueTime: {
+              ...instant,
+              description: 'The approved open-period accounting date (ISO-8601 with an offset, at most millisecond precision): the original time is in a locked period.',
+            },
+          }
+        : {}),
+    },
+    undefined,
+    { description },
+  );
 
 /** Request payload per action, as accepted by `POST /admin/approvals`. */
 export const ACTION_PAYLOAD_SCHEMAS: Readonly<Record<ApprovalActionType, SchemaObject>> = {
@@ -93,6 +116,16 @@ export const ACTION_PAYLOAD_SCHEMAS: Readonly<Record<ApprovalActionType, SchemaO
     { description: 'Grant or revoke ADMIN / SECURITY. Decided by a SECURITY officer.' },
   ),
   [ApprovalActionType.RESOLVE_BREAK]: strict({ breakId: uuid }, undefined, { description: 'Close a break with a documented operator decision (no money moves).' }),
+  [ApprovalActionType.PAYSTACK_WITHDRAWAL_RECOVERY]: {
+    description:
+      'Apply a stored, matched Paystack transfer outcome to a withdrawal (database only: never sends a transfer). Refused when the break is not live, the evidence is stale, foreign or does not match, the flow is being processed, or the period is closed.',
+    oneOf: [
+      recoveryVariant(WithdrawalRecoveryMode.COMPLETE_MATCHED_SUCCESS, 'A matched verified success: complete an unresolved withdrawal, or a FAILED one\'s late success.', false),
+      recoveryVariant(WithdrawalRecoveryMode.APPLY_MATCHED_FULL_RETURN, 'A matched full return of a POSTED withdrawal.', false),
+      recoveryVariant(WithdrawalRecoveryMode.LATE_FACT_POST, 'A matched success whose own time is in a locked period, booked at the approved value time.', true),
+      recoveryVariant(WithdrawalRecoveryMode.LATE_FACT_RETURN, 'A matched full return whose own time is in a locked period, booked at the approved value time.', true),
+    ],
+  },
 };
 
 /** The stored (canonical) CLOSE_PERIOD payload: `{month}` plus its derived bounds. */
@@ -206,6 +239,19 @@ export const APPROVAL_REQUEST_EXAMPLES: Readonly<Record<string, { summary: strin
       actionType: 'ROLE_CHANGE',
       payload: { userId: '8a2b4c6d-1e3f-4a5b-8c7d-9e0f1a2b3c4d', role: 'ADMIN', operation: 'GRANT' },
       reason: 'New operations hire.',
+    },
+  },
+  withdrawalRecovery: {
+    summary: 'PAYSTACK_WITHDRAWAL_RECOVERY: a FAILED withdrawal\'s late success',
+    value: {
+      actionType: 'PAYSTACK_WITHDRAWAL_RECOVERY',
+      payload: {
+        mode: 'COMPLETE_MATCHED_SUCCESS',
+        withdrawalId: '3c2b1a09-8f7e-4d6c-9b5a-4f3e2d1c0b9a',
+        breakId: '1f2e3d4c-5b6a-4798-8a7b-6c5d4e3f2a1b',
+        observationId: '7d6c5b4a-3928-4170-8e6d-5c4b3a291807',
+      },
+      reason: 'Paystack verify shows the transfer succeeded after we recorded its failure (ticket OPS-2210).',
     },
   },
   resolveBreak: {

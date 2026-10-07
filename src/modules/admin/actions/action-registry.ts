@@ -61,4 +61,6 @@ export const ACTION_POLICIES: Readonly<Record<ApprovalActionType, ActionPolicy>>
   [ApprovalActionType.CLOSE_PERIOD]: { requesterRole: UserRole.ADMIN, deciderRole: UserRole.ADMIN, breakGlassAllowed: never },
   [ApprovalActionType.ROLE_CHANGE]: { requesterRole: UserRole.ADMIN, deciderRole: UserRole.SECURITY, breakGlassAllowed: never },
   [ApprovalActionType.RESOLVE_BREAK]: { requesterRole: UserRole.ADMIN, deciderRole: UserRole.ADMIN, breakGlassAllowed: never },
+  // Money: four-eyes, never break-glass (WITHDRAWAL_PLAN.md §I.3).
+  [ApprovalActionType.PAYSTACK_WITHDRAWAL_RECOVERY]: { requesterRole: UserRole.ADMIN, deciderRole: UserRole.ADMIN, breakGlassAllowed: never },
 };

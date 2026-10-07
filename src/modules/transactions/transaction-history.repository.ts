@@ -57,6 +57,9 @@ export class TransactionHistoryRepository {
     if (query.type === null || query.type === TransactionType.FUNDING) {
       branches.push(this.unpostedFundingBranch(parameters, user, size, query, position));
     }
+    if (query.type === null || query.type === TransactionType.WITHDRAWAL) {
+      branches.push(this.unpostedWithdrawalBranch(parameters, user, size, query, position));
+    }
     const page = `SELECT * FROM (${branches.map((branch) => `(${branch})`).join('\nUNION ALL\n')}) AS candidates
       ORDER BY sort_time DESC, id DESC LIMIT ${size}`;
     return this.select(parameters, user, page, scope.view ?? 'USER');
@@ -74,6 +77,12 @@ export class TransactionHistoryRepository {
                          FROM funding_payments
                         WHERE funding_payments.flow_id = ${parameters.bind(lookup.id)}::uuid AND funding_payments.user_id = ${user}
                           AND funding_payments.funding_transaction_id IS NULL`);
+      }
+      if (lookup.prefix === 'withdrawal') {
+        branches.push(`SELECT 'WITHDRAWAL'::text, paystack_withdrawals.flow_id, paystack_withdrawals.created_at
+                         FROM paystack_withdrawals
+                        WHERE paystack_withdrawals.flow_id = ${parameters.bind(lookup.id)}::uuid AND paystack_withdrawals.user_id = ${user}
+                          AND paystack_withdrawals.posted_at IS NULL`);
       }
     } else {
       const id = parameters.bind(lookup.id);
@@ -128,6 +137,24 @@ export class TransactionHistoryRepository {
   }
 
 
+  /**
+   * Withdrawals not posted yet (WITHDRAWAL_PLAN.md §J): held (PENDING) or FAILED before posting, listed under the reference
+   * their principal posting gets, `withdrawal:{flowId}`, sorted by admission time. Once posted, the transaction branch
+   * carries the same reference and this branch excludes it (`posted_at` is set in the posting's transaction).
+   * Streams from `paystack_withdrawals_unposted_user[_currency]_index`.
+   */
+  private unpostedWithdrawalBranch(parameters: Parameters, user: string, size: string, query: HistoryQuery, position: HistoryPosition | null): string {
+    const column = 'paystack_withdrawals.created_at';
+    const currencyFilter = query.currency === null ? '' : `AND paystack_withdrawals.currency_code = ${parameters.bind(query.currency)}`;
+    return `SELECT 'WITHDRAWAL'::text AS source, paystack_withdrawals.flow_id AS id, ${column} AS sort_time
+              FROM paystack_withdrawals
+             WHERE paystack_withdrawals.user_id = ${user} AND paystack_withdrawals.posted_at IS NULL ${currencyFilter}
+               ${rangeFilter(parameters, column, query)}
+               ${keysetFilter(parameters, column, 'paystack_withdrawals.flow_id', position)}
+             ORDER BY ${column} DESC, paystack_withdrawals.flow_id DESC
+             LIMIT ${size}`;
+  }
+
   private select(parameters: Parameters, user: string, page: string, view: HistoryView): HistoryStatement {
 
     const linkScope = (alias: string) => (view === 'ADMIN' || alias === 'corrects' ? `(${alias}.user_id = ${user} OR ${alias}.user_id IS NULL)` : `${alias}.user_id = ${user}`);
@@ -167,14 +194,17 @@ export class TransactionHistoryRepository {
       SELECT page.source,
              page.id::text AS id,
              ${timestampToMicroseconds('page.sort_time')} AS position_microseconds,
-             COALESCE(transactions.reference, 'funding:' || funding_payments.flow_id::text) AS reference,
-             COALESCE(transactions.type::text, 'FUNDING') AS type,
-             COALESCE(transactions.status::text, flow_instances.state) AS status,
+             COALESCE(transactions.reference, 'funding:' || funding_payments.flow_id::text,
+                      'withdrawal:' || paystack_withdrawals.flow_id::text) AS reference,
+             COALESCE(transactions.type::text, CASE WHEN funding_payments.flow_id IS NOT NULL THEN 'FUNDING' END,
+                      CASE WHEN paystack_withdrawals.flow_id IS NOT NULL THEN 'WITHDRAWAL' END) AS type,
+             COALESCE(transactions.status::text, flow_instances.state, withdrawal_flow.state) AS status,
              transactions.reason_code,
-             COALESCE(transactions.initiated_by, 'user:' || funding_payments.user_id::text) AS initiated_by,
-             COALESCE(transactions.failure_code, funding_payments.failure_code) AS failure_code,
-             COALESCE(transactions.value_time, funding_payments.created_at) AS value_time,
-             COALESCE(transactions.booking_time, funding_payments.created_at) AS booking_time,
+             COALESCE(transactions.initiated_by, 'user:' || funding_payments.user_id::text,
+                      'user:' || paystack_withdrawals.user_id::text) AS initiated_by,
+             COALESCE(transactions.failure_code, funding_payments.failure_code, paystack_withdrawals.failure_code) AS failure_code,
+             COALESCE(transactions.value_time, funding_payments.created_at, paystack_withdrawals.created_at) AS value_time,
+             COALESCE(transactions.booking_time, funding_payments.created_at, paystack_withdrawals.created_at) AS booking_time,
              -- A funding's transaction row is append-only (Phase 2 decision 3); when the PSP settles
              -- it (Phase 9), the settlement time is recorded on its funding payment instead.
              COALESCE(transactions.settlement_time, settled_funding.settled_at) AS settlement_time,
@@ -194,9 +224,9 @@ export class TransactionHistoryRepository {
              corrected_by.type::text AS corrected_by_type,
              (corrects.id IS NOT NULL AND corrects.user_id IS NULL) AS corrects_internal,
              legs.legs,
-             funding_payments.currency_code AS requested_currency,
+             COALESCE(funding_payments.currency_code, paystack_withdrawals.currency_code) AS requested_currency,
              requested_currency.minor_unit AS requested_minor_unit,
-             funding_payments.amount_minor::text AS requested_amount${adminColumns}
+             COALESCE(funding_payments.amount_minor, paystack_withdrawals.principal_minor)::text AS requested_amount${adminColumns}
         FROM page
         LEFT JOIN transactions
           ON page.source = 'TRANSACTION' AND transactions.id = page.id AND transactions.user_id = ${user}
@@ -210,7 +240,11 @@ export class TransactionHistoryRepository {
         LEFT JOIN funding_payments
           ON page.source = 'FUNDING' AND funding_payments.flow_id = page.id AND funding_payments.user_id = ${user}
         LEFT JOIN flow_instances ON flow_instances.id = funding_payments.flow_id
-        LEFT JOIN currencies AS requested_currency ON requested_currency.code = funding_payments.currency_code
+        LEFT JOIN paystack_withdrawals
+          ON page.source = 'WITHDRAWAL' AND paystack_withdrawals.flow_id = page.id AND paystack_withdrawals.user_id = ${user}
+        LEFT JOIN flow_instances AS withdrawal_flow ON withdrawal_flow.id = paystack_withdrawals.flow_id
+        LEFT JOIN currencies AS requested_currency
+          ON requested_currency.code = COALESCE(funding_payments.currency_code, paystack_withdrawals.currency_code)
         LEFT JOIN LATERAL (
           -- The USER's own legs only (Phase 8 decision 5): internal accounts have no wallet.
           -- Debits (money out) before credits; entry ids follow the ledger's lock order, not the draft's.

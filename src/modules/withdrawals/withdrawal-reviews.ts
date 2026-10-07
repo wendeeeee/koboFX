@@ -24,8 +24,15 @@ const logger = new Logger('WithdrawalReviews');
 export async function openReview(
   manager: EntityManager,
   subject: { readonly table: 'withdrawal_beneficiaries' | 'paystack_withdrawals'; readonly flowId: string },
-  review: { readonly reason: WithdrawalReviewReason; readonly owner?: 'OPERATIONS' | 'SECURITY'; readonly observationId?: string; readonly evidenceId?: string },
-): Promise<void> {
+  review: {
+    readonly reason: WithdrawalReviewReason;
+    readonly owner?: 'OPERATIONS' | 'SECURITY';
+    readonly observationId?: string;
+    readonly evidenceId?: string;
+    /** `job:{name}` (default the withdrawal flow's) or `operator:{id}`. */
+    readonly actor?: string;
+  },
+): Promise<boolean> {
   const [current] = (await manager.query(
     `SELECT review.id, review.event_kind, review.reason FROM ${subject.table} subject
        LEFT JOIN withdrawal_review_events review ON review.id = subject.current_review_event_id
@@ -33,15 +40,16 @@ export async function openReview(
     [subject.flowId],
   )) as { id: string | null; event_kind: string | null; reason: string | null }[];
   const open = current?.id && current.event_kind !== 'RESOLVED';
-  if (open && current.reason === review.reason) return;
+  if (open && current.reason === review.reason) return false;
   const [inserted] = (await manager.query(
     `INSERT INTO withdrawal_review_events (flow_id, event_kind, reason, owner, observation_id, evidence_id, previous_event_id, actor)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, 'job:paystack-withdrawal-flow') RETURNING id`,
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING id`,
     [subject.flowId, open ? 'UPDATED' : 'OPENED', review.reason, review.owner ?? 'OPERATIONS', review.observationId ?? null,
-      review.evidenceId ?? null, open ? current.id : null],
+      review.evidenceId ?? null, open ? current.id : null, review.actor ?? 'job:paystack-withdrawal-flow'],
   )) as { id: string }[];
   await manager.query(`UPDATE ${subject.table} SET current_review_event_id = $2 WHERE flow_id = $1`, [subject.flowId, inserted.id]);
   logger.warn({ flowId: subject.flowId, reason: review.reason }, 'Withdrawal review opened: needs attention');
+  return true;
 }
 
 /** Close an open review (the condition cleared). No-op when none is open. */

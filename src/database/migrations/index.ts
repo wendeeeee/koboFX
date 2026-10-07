@@ -47,6 +47,8 @@ import { CreateProviderEvidence1791417600003 } from './1791417600003-CreateProvi
 import { CreateWithdrawals1791417600004 } from './1791417600004-CreateWithdrawals';
 import { ProtectedEnvelopes1791504000000 } from './1791504000000-ProtectedEnvelopes';
 import { WithdrawalProgress1791590400000 } from './1791590400000-WithdrawalProgress';
+import { AddWithdrawalReconciliationEnumValues1791676800000 } from './1791676800000-AddWithdrawalReconciliationEnumValues';
+import { WithdrawalReconciliationAndRecovery1791676800001 } from './1791676800001-WithdrawalReconciliationAndRecovery';
 
 /** Explicit, ordered list — no globbing, so the CLI and the test harness run the same set. */
 export const MIGRATIONS = [
@@ -99,4 +101,6 @@ export const MIGRATIONS = [
   CreateWithdrawals1791417600004,
   ProtectedEnvelopes1791504000000,
   WithdrawalProgress1791590400000,
+  AddWithdrawalReconciliationEnumValues1791676800000,
+  WithdrawalReconciliationAndRecovery1791676800001,
 ];

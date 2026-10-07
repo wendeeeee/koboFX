@@ -1,10 +1,24 @@
-import { BREAK_TYPES as MIGRATION_BREAK_TYPES } from '../../database/migrations/1791158400004-CreateReconciliationBreaks';
+import { BREAK_TYPES as PHASE9_BREAK_TYPES } from '../../database/migrations/1791158400004-CreateReconciliationBreaks';
+import { WITHDRAWAL_BREAK_TYPES } from '../../database/migrations/1791676800000-AddWithdrawalReconciliationEnumValues';
 import { BREAK_POLICIES, BREAK_TYPES, BreakType, subjectKeys } from './break-types';
 import { BREAK_STATUSES, BREAK_TRANSITIONS, BreakStatus, assertBreakTransition, canTransitionBreak } from './break-transitions';
 
 describe('break taxonomy', () => {
-  it('the code and the database enum list the same types', () => {
-    expect([...BREAK_TYPES].sort()).toEqual([...MIGRATION_BREAK_TYPES].sort());
+  it('the code and the database enum list the same types (each migration\'s list is frozen; the enum is their union)', () => {
+    expect([...BREAK_TYPES].sort()).toEqual([...PHASE9_BREAK_TYPES, ...WITHDRAWAL_BREAK_TYPES].sort());
+    expect(new Set([...PHASE9_BREAK_TYPES, ...WITHDRAWAL_BREAK_TYPES]).size).toBe(PHASE9_BREAK_TYPES.length + WITHDRAWAL_BREAK_TYPES.length);
+  });
+
+  it('withdrawal break policies are the W4 table (§I.2)', () => {
+    const policy = (type: BreakType) => [BREAK_POLICIES[type].severity, BREAK_POLICIES[type].rederivedBy];
+    for (const type of [BreakType.TRANSFER_WITHOUT_INTENT, BreakType.WITHDRAWAL_RETURN_NOT_POSTED, BreakType.WITHDRAWAL_RESERVATION_INCONSISTENT,
+      BreakType.STASH_RECEIPT_INCONSISTENT, BreakType.PAYOUT_BALANCE_PROOF_FAILED]) {
+      expect(policy(type)).toEqual(['MONEY', 'EXTERNAL_DAILY']);
+    }
+    expect(policy(BreakType.TRANSFER_IDENTITY_MISMATCH)).toEqual(['SECURITY', 'EXTERNAL_DAILY']);
+    expect(policy(BreakType.PAYOUT_FEE_EVIDENCE_MISSING)).toEqual(['INVESTIGATE', 'EXTERNAL_DAILY']);
+    expect(policy(BreakType.PAYOUT_TREASURY_EVIDENCE_MISSING)).toEqual(['INVESTIGATE', 'EXTERNAL_DAILY']);
+    expect(policy(BreakType.WITHDRAWAL_NOT_POSTED)).toEqual(['INVESTIGATE', null]);
   });
 
   it('every type has a policy; money and security breaks escalate at detection, investigate ones do not', () => {
@@ -27,6 +41,10 @@ describe('break taxonomy', () => {
     expect(subjectKeys.currency('NGN')).toBe('currency:NGN');
     expect(subjectKeys.account('a')).toBe('account:a');
     expect(subjectKeys.transaction('t')).toBe('transaction:t');
+    expect(subjectKeys.transfer('paystack', '9007199254741994')).toBe('transfer:paystack:9007199254741994');
+    expect(subjectKeys.withdrawal('f')).toBe('withdrawal:f');
+    expect(subjectKeys.payoutBalance('paystack', 'NGN')).toBe('payout-balance:paystack:NGN');
+    expect(subjectKeys.stashReceipt('s')).toBe('stash-receipt:s');
   });
 });
 
