@@ -78,6 +78,10 @@ describe('Withdrawal history and stash (W4, integration)', () => {
     expect(pending).toMatchObject({ type: 'WITHDRAWAL', status: 'PENDING', legs: [], requested: { currency: 'NGN', minorUnit: 2, amount: '300000' }, reasonCode: null });
     expect((await get(user, `/transactions/${reference}`).expect(200)).body).toMatchObject({ reference, status: 'PENDING', initiatedBy: 'USER' });
 
+    // The worker sends the transfer (Paystack still says pending): the item stays PENDING.
+    await payments.drive({ deliverWebhooks: false });
+    expect((await items(user)).find((item) => item.reference === reference)).toMatchObject({ status: 'PENDING' });
+
     paystack.mock.transfers.setTransferStatus(`withdrawal-${withdrawalId}`, 'success');
     await payments.makeAllDue();
     await payments.drive({ deliverWebhooks: false });
