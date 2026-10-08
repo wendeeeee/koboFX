@@ -352,8 +352,9 @@ hooks or test HTTP behavior. The contract suite independently builds the documen
 app and checks it byte for byte; `UPDATE_OPENAPI=1` also lets that suite regenerate it.
 Review the generated diff. The mock suites cover signature evidence, verify-only credit, retries,
 replay, disputes, schema guards and reconciliation. Crash, race and property tests exercise recovery
-and exactly-once posting. Use `scripts/mutation-check.py` for the seven mutations listed in
-`PAYSTACK_PROMPT.md` §6; each must fail a test that passes without the mutation. Mutation execution
+and exactly-once posting. Use `scripts/mutation-check.py` to prove the key guards are tested (for
+example: crediting on a webhook alone, skipping the amount/currency match, re-sending a provider
+write); each mutation must fail a test that passes without it. Mutation execution
 and the ≥90% coverage acceptance gate must be recorded separately, not inferred from test presence.
 
 Settlement ingestion remains deferred: `PAYSTACK_RECEIVABLE` is not discharged into BANK/fees and
