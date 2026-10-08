@@ -19080,9 +19080,377 @@
         ]
       }
     },
+    "/api/v1/wallet/withdraw/one-time-password": {
+      "post": {
+        "description": "Sends a 6-digit code to your email (asynchronously, within seconds). Send it as `oneTimePassword` with `POST /wallet/withdraw/paystack`: it is valid for 10 minutes and ONE withdrawal of any amount; a newer code replaces an older one; 5 wrong tries use it up. No `Idempotency-Key`: asking again simply sends a new code (at most one a minute, five an hour).\n\n**Access:** an authenticated ACTIVE user (verified, not suspended).\n\n**Rate limit:** 100 per 60s per ip (`global`); 1 per 60s per user (`withdrawal-code-cooldown`); 5 per 3600s per user (`withdrawal-code-hourly`). Refused with `503` if the limiter is unavailable.",
+        "operationId": "WithdrawalsController_requestCode",
+        "parameters": [],
+        "responses": {
+          "202": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WithdrawalCodeRequested"
+                }
+              }
+            },
+            "headers": {
+              "X-Correlation-Id": {
+                "description": "The request's correlation id (yours, or a generated UUID). Also in every error body.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`UNAUTHENTICATED`: No valid credentials: missing/expired/revoked access token, a refused refresh token, or a bad webhook signature.",
+            "headers": {
+              "X-Correlation-Id": {
+                "description": "The request's correlation id (yours, or a generated UUID). Also in every error body.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ErrorResponse"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "statusCode": {
+                          "type": "integer",
+                          "enum": [
+                            401
+                          ]
+                        },
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "UNAUTHENTICATED"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                },
+                "examples": {
+                  "UNAUTHENTICATED": {
+                    "value": {
+                      "statusCode": 401,
+                      "code": "UNAUTHENTICATED",
+                      "message": "Authentication is required.",
+                      "correlationId": "6f1d2c3b-4a5e-4f60-8a7b-9c0d1e2f3a4b",
+                      "timestamp": "2026-09-10T11:04:22.114Z"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`ACCOUNT_SUSPENDED`: The account is suspended.\n\n`EMAIL_NOT_VERIFIED`: Verify the email address first.",
+            "headers": {
+              "X-Correlation-Id": {
+                "description": "The request's correlation id (yours, or a generated UUID). Also in every error body.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ErrorResponse"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "statusCode": {
+                          "type": "integer",
+                          "enum": [
+                            403
+                          ]
+                        },
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "ACCOUNT_SUSPENDED",
+                            "EMAIL_NOT_VERIFIED"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                },
+                "examples": {
+                  "ACCOUNT_SUSPENDED": {
+                    "value": {
+                      "statusCode": 403,
+                      "code": "ACCOUNT_SUSPENDED",
+                      "message": "The account is suspended.",
+                      "correlationId": "6f1d2c3b-4a5e-4f60-8a7b-9c0d1e2f3a4b",
+                      "timestamp": "2026-09-10T11:04:22.114Z"
+                    }
+                  },
+                  "EMAIL_NOT_VERIFIED": {
+                    "value": {
+                      "statusCode": 403,
+                      "code": "EMAIL_NOT_VERIFIED",
+                      "message": "Verify the email address first.",
+                      "correlationId": "6f1d2c3b-4a5e-4f60-8a7b-9c0d1e2f3a4b",
+                      "timestamp": "2026-09-10T11:04:22.114Z"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "`RATE_LIMITED`: Too many requests. Retry after `Retry-After` seconds.",
+            "headers": {
+              "X-Correlation-Id": {
+                "description": "The request's correlation id (yours, or a generated UUID). Also in every error body.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Retry-After": {
+                "description": "Seconds to wait before retrying.",
+                "schema": {
+                  "type": "integer",
+                  "minimum": 0
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ErrorResponse"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "statusCode": {
+                          "type": "integer",
+                          "enum": [
+                            429
+                          ]
+                        },
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "RATE_LIMITED"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                },
+                "examples": {
+                  "RATE_LIMITED": {
+                    "value": {
+                      "statusCode": 429,
+                      "code": "RATE_LIMITED",
+                      "message": "Too many requests. Retry after the time given in the Retry-After header.",
+                      "details": {
+                        "retryAfterSeconds": 42
+                      },
+                      "correlationId": "6f1d2c3b-4a5e-4f60-8a7b-9c0d1e2f3a4b",
+                      "timestamp": "2026-09-10T11:04:22.114Z"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`INVARIANT_VIOLATION`: Our bug, failed loudly. Quote the `correlationId`.\n\n`INTERNAL_ERROR`: Unexpected error. Quote the `correlationId`.",
+            "headers": {
+              "X-Correlation-Id": {
+                "description": "The request's correlation id (yours, or a generated UUID). Also in every error body.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ErrorResponse"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "statusCode": {
+                          "type": "integer",
+                          "enum": [
+                            500
+                          ]
+                        },
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "INVARIANT_VIOLATION",
+                            "INTERNAL_ERROR"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                },
+                "examples": {
+                  "INVARIANT_VIOLATION": {
+                    "value": {
+                      "statusCode": 500,
+                      "code": "INVARIANT_VIOLATION",
+                      "message": "An unexpected error occurred.",
+                      "correlationId": "6f1d2c3b-4a5e-4f60-8a7b-9c0d1e2f3a4b",
+                      "timestamp": "2026-09-10T11:04:22.114Z"
+                    }
+                  },
+                  "INTERNAL_ERROR": {
+                    "value": {
+                      "statusCode": 500,
+                      "code": "INTERNAL_ERROR",
+                      "message": "An unexpected error occurred.",
+                      "correlationId": "6f1d2c3b-4a5e-4f60-8a7b-9c0d1e2f3a4b",
+                      "timestamp": "2026-09-10T11:04:22.114Z"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "`RESOURCE_BUSY`: Transient lock or statement timeout. Retry with the SAME `Idempotency-Key`.\n\n`DEPENDENCY_UNAVAILABLE`: A dependency we cannot work without is down; we fail closed. Transient.\n\n`WITHDRAWALS_DISABLED`: New withdrawals are switched off (or no worker can process them). Earlier requests keep their answers. Transient.",
+            "headers": {
+              "X-Correlation-Id": {
+                "description": "The request's correlation id (yours, or a generated UUID). Also in every error body.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Retry-After": {
+                "description": "Seconds to wait before retrying.",
+                "schema": {
+                  "type": "integer",
+                  "minimum": 0
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ErrorResponse"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "statusCode": {
+                          "type": "integer",
+                          "enum": [
+                            503
+                          ]
+                        },
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "RESOURCE_BUSY",
+                            "DEPENDENCY_UNAVAILABLE",
+                            "WITHDRAWALS_DISABLED"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                },
+                "examples": {
+                  "RESOURCE_BUSY": {
+                    "value": {
+                      "statusCode": 503,
+                      "code": "RESOURCE_BUSY",
+                      "message": "The resource is busy. Retry the request with the same Idempotency-Key.",
+                      "details": {
+                        "reason": "lock_timeout"
+                      },
+                      "correlationId": "6f1d2c3b-4a5e-4f60-8a7b-9c0d1e2f3a4b",
+                      "timestamp": "2026-09-10T11:04:22.114Z"
+                    }
+                  },
+                  "DEPENDENCY_UNAVAILABLE": {
+                    "value": {
+                      "statusCode": 503,
+                      "code": "DEPENDENCY_UNAVAILABLE",
+                      "message": "A dependency we cannot work without is down; we fail closed. Transient.",
+                      "correlationId": "6f1d2c3b-4a5e-4f60-8a7b-9c0d1e2f3a4b",
+                      "timestamp": "2026-09-10T11:04:22.114Z"
+                    }
+                  },
+                  "WITHDRAWALS_DISABLED": {
+                    "value": {
+                      "statusCode": 503,
+                      "code": "WITHDRAWALS_DISABLED",
+                      "message": "New withdrawals are switched off (or no worker can process them). Earlier requests keep their answers. Transient.",
+                      "correlationId": "6f1d2c3b-4a5e-4f60-8a7b-9c0d1e2f3a4b",
+                      "timestamp": "2026-09-10T11:04:22.114Z"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "summary": "Email me a withdrawal code",
+        "tags": [
+          "wallet"
+        ],
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "x-authentication": "active-user",
+        "x-idempotent": false,
+        "x-rate-limits": [
+          {
+            "name": "global",
+            "subject": "ip",
+            "limit": 100,
+            "windowSeconds": 60
+          },
+          {
+            "name": "withdrawal-code-cooldown",
+            "subject": "user",
+            "limit": 1,
+            "windowSeconds": 60
+          },
+          {
+            "name": "withdrawal-code-hourly",
+            "subject": "user",
+            "limit": 5,
+            "windowSeconds": 3600
+          }
+        ]
+      }
+    },
     "/api/v1/wallet/withdraw/paystack": {
       "post": {
-        "description": "Accepted at once (`202 PENDING`) with the amount HELD from your available balance; the worker sends the transfer after this commits. It completes only when Paystack's verify API confirms the exact transfer — a webhook alone never does. If Paystack definitively fails it, the hold is released. Paystack TEST mode only: no real bank receives money; a confirmed transfer lands in your simulated-bank stash.\n\n**Access:** an authenticated ACTIVE user (verified, not suspended).\n\n**Idempotent:** requires `Idempotency-Key`; retries replay the stored outcome.\n\n**Rate limit:** 100 per 60s per ip (`global`); 30 per 60s per user (`withdrawal-writes`).",
+        "description": "Accepted at once (`202 PENDING`) with the amount HELD from your available balance; the worker sends the transfer after this commits. Needs the emailed code (`oneTimePassword`, from `POST /wallet/withdraw/one-time-password`). It completes only when Paystack's verify API confirms the exact transfer — a webhook alone never does. If Paystack definitively fails it, the hold is released. Paystack TEST mode only: no real bank receives money; a confirmed transfer lands in your simulated-bank stash.\n\n**Access:** an authenticated ACTIVE user (verified, not suspended).\n\n**Idempotent:** requires `Idempotency-Key`; retries replay the stored outcome.\n\n**Rate limit:** 100 per 60s per ip (`global`); 30 per 60s per user (`withdrawal-writes`).",
         "operationId": "WithdrawalsController_withdraw",
         "parameters": [
           {
@@ -19128,7 +19496,7 @@
             }
           },
           "400": {
-            "description": "`VALIDATION_FAILED`: The request is malformed. A body/query DTO failure lists `details.violations`; fix the request.\n\n`INVALID_AMOUNT`: The amount is not a positive whole number of minor units in range.\n\n`UNSUPPORTED_CURRENCY`: The currency is not supported for this operation.\n\n`IDEMPOTENCY_KEY_REQUIRED`: This route needs an `Idempotency-Key` header.\n\n`IDEMPOTENCY_KEY_INVALID`: `Idempotency-Key` must be 16–128 characters of `[A-Za-z0-9_-]`.",
+            "description": "`VALIDATION_FAILED`: The request is malformed. A body/query DTO failure lists `details.violations`; fix the request.\n\n`INVALID_AMOUNT`: The amount is not a positive whole number of minor units in range.\n\n`UNSUPPORTED_CURRENCY`: The currency is not supported for this operation.\n\n`IDEMPOTENCY_KEY_REQUIRED`: This route needs an `Idempotency-Key` header.\n\n`IDEMPOTENCY_KEY_INVALID`: `Idempotency-Key` must be 16–128 characters of `[A-Za-z0-9_-]`.\n\n`WITHDRAWAL_CODE_INVALID`: The withdrawal code is wrong, expired, already used or replaced by a newer one. Request a new code; retry with a NEW Idempotency-Key (this refusal is stored for the key).",
             "headers": {
               "X-Correlation-Id": {
                 "description": "The request's correlation id (yours, or a generated UUID). Also in every error body.",
@@ -19169,7 +19537,8 @@
                             "INVALID_AMOUNT",
                             "UNSUPPORTED_CURRENCY",
                             "IDEMPOTENCY_KEY_REQUIRED",
-                            "IDEMPOTENCY_KEY_INVALID"
+                            "IDEMPOTENCY_KEY_INVALID",
+                            "WITHDRAWAL_CODE_INVALID"
                           ]
                         }
                       }
@@ -19223,6 +19592,15 @@
                       "statusCode": 400,
                       "code": "IDEMPOTENCY_KEY_INVALID",
                       "message": "`Idempotency-Key` must be 16–128 characters of `[A-Za-z0-9_-]`.",
+                      "correlationId": "6f1d2c3b-4a5e-4f60-8a7b-9c0d1e2f3a4b",
+                      "timestamp": "2026-09-10T11:04:22.114Z"
+                    }
+                  },
+                  "WITHDRAWAL_CODE_INVALID": {
+                    "value": {
+                      "statusCode": 400,
+                      "code": "WITHDRAWAL_CODE_INVALID",
+                      "message": "The withdrawal code is wrong, expired, already used or replaced by a newer one. Request a new code; retry with a NEW Idempotency-Key (this refusal is stored for the key).",
                       "correlationId": "6f1d2c3b-4a5e-4f60-8a7b-9c0d1e2f3a4b",
                       "timestamp": "2026-09-10T11:04:22.114Z"
                     }
@@ -19772,7 +20150,7 @@
             }
           },
           "503": {
-            "description": "`RESOURCE_BUSY`: Transient lock or statement timeout. Retry with the SAME `Idempotency-Key`.\n\n`WITHDRAWALS_DISABLED`: New withdrawals are switched off (or no worker can process them). Earlier requests keep their answers. Transient.",
+            "description": "`RESOURCE_BUSY`: Transient lock or statement timeout. Retry with the SAME `Idempotency-Key`.\n\n`DEPENDENCY_UNAVAILABLE`: A dependency we cannot work without is down; we fail closed. Transient.\n\n`WITHDRAWALS_DISABLED`: New withdrawals are switched off (or no worker can process them). Earlier requests keep their answers. Transient.",
             "headers": {
               "X-Correlation-Id": {
                 "description": "The request's correlation id (yours, or a generated UUID). Also in every error body.",
@@ -19808,6 +20186,7 @@
                           "type": "string",
                           "enum": [
                             "RESOURCE_BUSY",
+                            "DEPENDENCY_UNAVAILABLE",
                             "WITHDRAWALS_DISABLED"
                           ]
                         }
@@ -19824,6 +20203,15 @@
                       "details": {
                         "reason": "lock_timeout"
                       },
+                      "correlationId": "6f1d2c3b-4a5e-4f60-8a7b-9c0d1e2f3a4b",
+                      "timestamp": "2026-09-10T11:04:22.114Z"
+                    }
+                  },
+                  "DEPENDENCY_UNAVAILABLE": {
+                    "value": {
+                      "statusCode": 503,
+                      "code": "DEPENDENCY_UNAVAILABLE",
+                      "message": "A dependency we cannot work without is down; we fail closed. Transient.",
                       "correlationId": "6f1d2c3b-4a5e-4f60-8a7b-9c0d1e2f3a4b",
                       "timestamp": "2026-09-10T11:04:22.114Z"
                     }
@@ -25954,6 +26342,36 @@
           "nextCursor"
         ]
       },
+      "WithdrawalCodeRequested": {
+        "type": "object",
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": [
+              "REQUESTED"
+            ],
+            "example": "REQUESTED",
+            "description": "The code is generated and emailed by the worker, within seconds."
+          },
+          "channel": {
+            "type": "string",
+            "enum": [
+              "EMAIL"
+            ],
+            "example": "EMAIL"
+          },
+          "expiresInSeconds": {
+            "type": "integer",
+            "example": 600,
+            "description": "How long the code stays valid once sent."
+          }
+        },
+        "required": [
+          "status",
+          "channel",
+          "expiresInSeconds"
+        ]
+      },
       "PaystackWithdrawRequest": {
         "type": "object",
         "properties": {
@@ -25975,12 +26393,19 @@
             "pattern": "^[A-Z]{3}$",
             "example": "NGN",
             "description": "Withdrawals are NGN only."
+          },
+          "oneTimePassword": {
+            "type": "string",
+            "pattern": "^\\d{6}$",
+            "example": "123456",
+            "description": "The 6-digit code emailed by `POST /wallet/withdraw/one-time-password`. Valid 10 minutes for ONE withdrawal."
           }
         },
         "required": [
           "beneficiaryId",
           "amount",
-          "currency"
+          "currency",
+          "oneTimePassword"
         ]
       },
       "PaystackWithdrawalAccepted": {
@@ -26647,6 +27072,7 @@
           "UNAUTHENTICATED",
           "INVALID_CREDENTIALS",
           "VERIFICATION_FAILED",
+          "WITHDRAWAL_CODE_INVALID",
           "FORBIDDEN",
           "ACCOUNT_SUSPENDED",
           "EMAIL_NOT_VERIFIED",
@@ -26701,7 +27127,7 @@
           "INTERNAL_ERROR",
           "HTTP_ERROR"
         ],
-        "description": "Stable error codes: clients branch on these. A code is never renamed or reused.\n\n- `VALIDATION_FAILED` (400): The request is malformed. A body/query DTO failure lists `details.violations`; fix the request.\n- `INVALID_AMOUNT` (400): The amount is not a positive whole number of minor units in range.\n- `UNSUPPORTED_CURRENCY` (400): The currency is not supported for this operation.\n- `SAME_CURRENCY` (400): `from` and `to` are the same currency.\n- `UNSUPPORTED_CURRENCY_PAIR` (400): The directional pair is not offered (or not active).\n- `IDEMPOTENCY_KEY_REQUIRED` (400): This route needs an `Idempotency-Key` header.\n- `IDEMPOTENCY_KEY_INVALID` (400): `Idempotency-Key` must be 16–128 characters of `[A-Za-z0-9_-]`.\n- `INVALID_CURSOR` (400): The cursor is malformed, from another version, or from a different sort/filter set. Restart from the first page.\n- `UNAUTHENTICATED` (401): No valid credentials: missing/expired/revoked access token, a refused refresh token, or a bad webhook signature.\n- `INVALID_CREDENTIALS` (401): Login refused. Deliberately the same for an unknown email, a wrong password, an unverified or a suspended account.\n- `VERIFICATION_FAILED` (400): The email, password and one-time password do not verify an account awaiting verification.\n- `FORBIDDEN` (403): Authenticated, but your role may not do this.\n- `ACCOUNT_SUSPENDED` (403): The account is suspended.\n- `EMAIL_NOT_VERIFIED` (403): Verify the email address first.\n- `NOT_FOUND` (404): No such route or resource.\n- `ACCOUNT_NOT_FOUND` (404): No such ledger account.\n- `RESERVATION_NOT_FOUND` (404): No such reservation.\n- `FUNDING_NOT_FOUND` (404): No such funding for this user (unknown and another user's are the same answer).\n- `WITHDRAWAL_NOT_FOUND` (404): No such withdrawal for this user (unknown and another user's are the same answer).\n- `WITHDRAWAL_BENEFICIARY_NOT_FOUND` (404): No such beneficiary for this user (unknown and another user's are the same answer).\n- `QUOTE_NOT_FOUND` (404): No such quote for this user (unknown and another user's are the same answer).\n- `TRANSACTION_NOT_FOUND` (404): No such transaction for this user (unknown and another user's are the same answer).\n- `RECONCILIATION_BREAK_NOT_FOUND` (404): No such reconciliation break.\n- `APPROVAL_NOT_FOUND` (404): No such approval.\n- `USER_NOT_FOUND` (404): No such user.\n- `RECONCILIATION_RUN_NOT_FOUND` (404): No such reconciliation run.\n- `SELF_APPROVAL_FORBIDDEN` (403): Four-eyes: you may not decide (or review) your own request.\n- `BREAK_GLASS_NOT_ALLOWED` (403): Break-glass is only for SUSPEND_USER and RATE_OVERRIDE (MANUAL_RATE).\n- `INSUFFICIENT_FUNDS` (409): The available balance does not cover it, even counting held funds: top up.\n- `FUNDS_RESERVED` (409): The total balance would cover it but part is held by a pending operation: wait for it.\n- `QUOTE_EXPIRED` (409): The quote's 30 seconds are over. Request a new quote.\n- `QUOTE_ALREADY_USED` (409): Quotes are single-use and this one was executed.\n- `IDEMPOTENCY_KEY_REUSE` (409): This key was used with a different request body on this route. Use a new key.\n- `REQUEST_IN_PROGRESS` (409): The same key is being processed right now. Retry after `Retry-After` with the same key.\n- `PERIOD_LOCKED` (409): The value time falls in a closed reporting period.\n- `ALREADY_CORRECTED` (409): The original transaction was already corrected.\n- `RESERVATION_NOT_ACTIVE` (409): The reservation is no longer active.\n- `RESERVATION_CONFLICT` (409): The reservation exists with different terms.\n- `PRICE_LIMIT_EXCEEDED` (409): The priced amounts breach `minimumTargetAmount` / `maximumSourceAmount`; `details` has the priced amounts.\n- `RECONCILIATION_RUN_LEASE_LOST` (409): Internal: a reconciliation run lost its lease.\n- `APPROVAL_ALREADY_DECIDED` (409): The approval is no longer PENDING (or is a break-glass use, which is never decided).\n- `APPROVAL_EXPIRED` (409): The approval passed its time to live without a decision.\n- `APPROVAL_REQUESTER_INELIGIBLE` (409): The requester no longer holds the role (or is no longer active).\n- `BREAK_GLASS_ALREADY_REVIEWED` (409): This break-glass use was already reviewed (or is not a break-glass use).\n- `ACTION_PRECONDITION_FAILED` (409): The world does not allow this action now (see `details`).\n- `BENEFICIARY_NOT_READY` (409): The beneficiary is still being verified with Paystack, or failed: only a READY one can receive a withdrawal.\n- `PAYLOAD_TOO_LARGE` (413): The body exceeds 100 KB.\n- `AMOUNT_TOO_SMALL` (422): Below the minimum for this currency or pair.\n- `AMOUNT_TOO_LARGE` (422): Above the per-operation maximum.\n- `DAILY_LIMIT_EXCEEDED` (422): The rolling 24-hour limit for this source currency would be exceeded.\n- `RATE_LIMITED` (429): Too many requests. Retry after `Retry-After` seconds.\n- `RESOURCE_BUSY` (503): Transient lock or statement timeout. Retry with the SAME `Idempotency-Key`.\n- `FX_RATE_STALE` (503): No executable rate right now (rates may still be displayed). Transient: retry later with the same key.\n- `FX_RATE_UNAVAILABLE` (503): No rate can be served at all. Transient.\n- `DEPENDENCY_UNAVAILABLE` (503): A dependency we cannot work without is down; we fail closed. Transient.\n- `WITHDRAWALS_DISABLED` (503): New withdrawals are switched off (or no worker can process them). Earlier requests keep their answers. Transient.\n- `INVARIANT_VIOLATION` (500): Our bug, failed loudly. Quote the `correlationId`.\n- `LEDGER_UNBALANCED` (500): Our bug: a posting did not balance. Quote the `correlationId`.\n- `INVALID_POSTING` (500): Our bug: an invalid posting was refused. Quote the `correlationId`.\n- `ACCOUNT_CURRENCY_MISMATCH` (500): Our bug: an entry's currency differs from its account's. Quote the `correlationId`.\n- `REVERSAL_MISMATCH` (500): Our bug: a reversal did not mirror its original. Quote the `correlationId`.\n- `INVALID_RESERVATION` (500): Our bug: an invalid reservation settlement. Quote the `correlationId`.\n- `INTERNAL_ERROR` (500): Unexpected error. Quote the `correlationId`.\n- `HTTP_ERROR` (400): An HTTP-level refusal without a dedicated code."
+        "description": "Stable error codes: clients branch on these. A code is never renamed or reused.\n\n- `VALIDATION_FAILED` (400): The request is malformed. A body/query DTO failure lists `details.violations`; fix the request.\n- `INVALID_AMOUNT` (400): The amount is not a positive whole number of minor units in range.\n- `UNSUPPORTED_CURRENCY` (400): The currency is not supported for this operation.\n- `SAME_CURRENCY` (400): `from` and `to` are the same currency.\n- `UNSUPPORTED_CURRENCY_PAIR` (400): The directional pair is not offered (or not active).\n- `IDEMPOTENCY_KEY_REQUIRED` (400): This route needs an `Idempotency-Key` header.\n- `IDEMPOTENCY_KEY_INVALID` (400): `Idempotency-Key` must be 16–128 characters of `[A-Za-z0-9_-]`.\n- `INVALID_CURSOR` (400): The cursor is malformed, from another version, or from a different sort/filter set. Restart from the first page.\n- `UNAUTHENTICATED` (401): No valid credentials: missing/expired/revoked access token, a refused refresh token, or a bad webhook signature.\n- `INVALID_CREDENTIALS` (401): Login refused. Deliberately the same for an unknown email, a wrong password, an unverified or a suspended account.\n- `VERIFICATION_FAILED` (400): The email, password and one-time password do not verify an account awaiting verification.\n- `WITHDRAWAL_CODE_INVALID` (400): The withdrawal code is wrong, expired, already used or replaced by a newer one. Request a new code; retry with a NEW Idempotency-Key (this refusal is stored for the key).\n- `FORBIDDEN` (403): Authenticated, but your role may not do this.\n- `ACCOUNT_SUSPENDED` (403): The account is suspended.\n- `EMAIL_NOT_VERIFIED` (403): Verify the email address first.\n- `NOT_FOUND` (404): No such route or resource.\n- `ACCOUNT_NOT_FOUND` (404): No such ledger account.\n- `RESERVATION_NOT_FOUND` (404): No such reservation.\n- `FUNDING_NOT_FOUND` (404): No such funding for this user (unknown and another user's are the same answer).\n- `WITHDRAWAL_NOT_FOUND` (404): No such withdrawal for this user (unknown and another user's are the same answer).\n- `WITHDRAWAL_BENEFICIARY_NOT_FOUND` (404): No such beneficiary for this user (unknown and another user's are the same answer).\n- `QUOTE_NOT_FOUND` (404): No such quote for this user (unknown and another user's are the same answer).\n- `TRANSACTION_NOT_FOUND` (404): No such transaction for this user (unknown and another user's are the same answer).\n- `RECONCILIATION_BREAK_NOT_FOUND` (404): No such reconciliation break.\n- `APPROVAL_NOT_FOUND` (404): No such approval.\n- `USER_NOT_FOUND` (404): No such user.\n- `RECONCILIATION_RUN_NOT_FOUND` (404): No such reconciliation run.\n- `SELF_APPROVAL_FORBIDDEN` (403): Four-eyes: you may not decide (or review) your own request.\n- `BREAK_GLASS_NOT_ALLOWED` (403): Break-glass is only for SUSPEND_USER and RATE_OVERRIDE (MANUAL_RATE).\n- `INSUFFICIENT_FUNDS` (409): The available balance does not cover it, even counting held funds: top up.\n- `FUNDS_RESERVED` (409): The total balance would cover it but part is held by a pending operation: wait for it.\n- `QUOTE_EXPIRED` (409): The quote's 30 seconds are over. Request a new quote.\n- `QUOTE_ALREADY_USED` (409): Quotes are single-use and this one was executed.\n- `IDEMPOTENCY_KEY_REUSE` (409): This key was used with a different request body on this route. Use a new key.\n- `REQUEST_IN_PROGRESS` (409): The same key is being processed right now. Retry after `Retry-After` with the same key.\n- `PERIOD_LOCKED` (409): The value time falls in a closed reporting period.\n- `ALREADY_CORRECTED` (409): The original transaction was already corrected.\n- `RESERVATION_NOT_ACTIVE` (409): The reservation is no longer active.\n- `RESERVATION_CONFLICT` (409): The reservation exists with different terms.\n- `PRICE_LIMIT_EXCEEDED` (409): The priced amounts breach `minimumTargetAmount` / `maximumSourceAmount`; `details` has the priced amounts.\n- `RECONCILIATION_RUN_LEASE_LOST` (409): Internal: a reconciliation run lost its lease.\n- `APPROVAL_ALREADY_DECIDED` (409): The approval is no longer PENDING (or is a break-glass use, which is never decided).\n- `APPROVAL_EXPIRED` (409): The approval passed its time to live without a decision.\n- `APPROVAL_REQUESTER_INELIGIBLE` (409): The requester no longer holds the role (or is no longer active).\n- `BREAK_GLASS_ALREADY_REVIEWED` (409): This break-glass use was already reviewed (or is not a break-glass use).\n- `ACTION_PRECONDITION_FAILED` (409): The world does not allow this action now (see `details`).\n- `BENEFICIARY_NOT_READY` (409): The beneficiary is still being verified with Paystack, or failed: only a READY one can receive a withdrawal.\n- `PAYLOAD_TOO_LARGE` (413): The body exceeds 100 KB.\n- `AMOUNT_TOO_SMALL` (422): Below the minimum for this currency or pair.\n- `AMOUNT_TOO_LARGE` (422): Above the per-operation maximum.\n- `DAILY_LIMIT_EXCEEDED` (422): The rolling 24-hour limit for this source currency would be exceeded.\n- `RATE_LIMITED` (429): Too many requests. Retry after `Retry-After` seconds.\n- `RESOURCE_BUSY` (503): Transient lock or statement timeout. Retry with the SAME `Idempotency-Key`.\n- `FX_RATE_STALE` (503): No executable rate right now (rates may still be displayed). Transient: retry later with the same key.\n- `FX_RATE_UNAVAILABLE` (503): No rate can be served at all. Transient.\n- `DEPENDENCY_UNAVAILABLE` (503): A dependency we cannot work without is down; we fail closed. Transient.\n- `WITHDRAWALS_DISABLED` (503): New withdrawals are switched off (or no worker can process them). Earlier requests keep their answers. Transient.\n- `INVARIANT_VIOLATION` (500): Our bug, failed loudly. Quote the `correlationId`.\n- `LEDGER_UNBALANCED` (500): Our bug: a posting did not balance. Quote the `correlationId`.\n- `INVALID_POSTING` (500): Our bug: an invalid posting was refused. Quote the `correlationId`.\n- `ACCOUNT_CURRENCY_MISMATCH` (500): Our bug: an entry's currency differs from its account's. Quote the `correlationId`.\n- `REVERSAL_MISMATCH` (500): Our bug: a reversal did not mirror its original. Quote the `correlationId`.\n- `INVALID_RESERVATION` (500): Our bug: an invalid reservation settlement. Quote the `correlationId`.\n- `INTERNAL_ERROR` (500): Unexpected error. Quote the `correlationId`.\n- `HTTP_ERROR` (400): An HTTP-level refusal without a dedicated code."
       },
       "ErrorResponse": {
         "type": "object",
