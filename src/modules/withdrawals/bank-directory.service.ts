@@ -30,12 +30,8 @@ const DEFAULT_LIMIT = 50;
 const MAXIMUM_LIMIT = 100;
 
 /**
- * Nigerian NGN `nuban` banks for withdrawals (WITHDRAWAL_PLAN.md §J): read from Paystack's paginated `/bank` into a
+ * Nigerian NGN `nuban` banks for withdrawals: read from Paystack's paginated `/bank` into a
  * per-process snapshot (fresh for 5 minutes, refreshes single-flighted), so provider calls never scale with requests.
- * A snapshot is only kept when EVERY page was read (a repeated cursor or the page cap is an incomplete directory —
- * an error, never a shorter list). Our cursor binds the snapshot it pages through. A failed refresh keeps serving the
- * previous complete snapshot, with its real `asOf`; with none, the answer is `503`. The selected bank is still
- * resolved authoritatively by the worker — this list certifies nothing.
  */
 @Injectable()
 export class BankDirectoryService {

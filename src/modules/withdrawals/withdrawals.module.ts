@@ -30,12 +30,12 @@ import { WithdrawalCodeService } from './withdrawal-code.service';
 import { WithdrawalService } from './withdrawal.service';
 import { WithdrawalsController } from './withdrawals.controller';
 
-/** Recorded withdrawal work is processed whenever a Paystack key is configured — whatever the admission switch says. */
+
 export function hasPaystackKey(env: Record<string, string | undefined>): boolean {
   return (env.PAYSTACK_SECRET_KEY ?? '').trim().length > 0;
 }
 
-/** Acknowledges the withdrawal events (no customer notification is in scope); a malformed payload fails loudly. */
+
 @Injectable()
 export class WithdrawalEventsHandler implements OutboxEventHandler {
   private readonly logger = new Logger(WithdrawalEventsHandler.name);
@@ -53,7 +53,7 @@ export class WithdrawalEventsHandler implements OutboxEventHandler {
   }
 }
 
-/** `ProtectedHoldFlagged.v1` → acknowledged (paging is the audit row, the log and the metric). Malformed fails loudly. */
+
 @Injectable()
 export class ProtectedHoldFlaggedHandler implements OutboxEventHandler {
   readonly eventType = OutboxEventType.PROTECTED_HOLD_FLAGGED;
@@ -70,7 +70,7 @@ export class ProtectedHoldFlaggedHandler implements OutboxEventHandler {
   }
 }
 
-/** Without a Paystack key the API still serves reads; anything that would call Paystack fails as a dependency. */
+
 class UnconfiguredTransfersGateway extends PaystackTransfersGateway {
   private refuse(): never {
     throw new DependencyUnavailableError('Paystack transfers need PAYSTACK_SECRET_KEY, which is not configured.', { dependency: 'paystack' });
@@ -88,11 +88,7 @@ class UnconfiguredTransfersGateway extends PaystackTransfersGateway {
   balanceLedger = (): never => this.refuse();
 }
 
-/**
- * Worker boot check (WITHDRAWAL_PLAN.md §K): recorded withdrawal work needs the key, the key rings and the account
- * identity to be processed. Missing any of them with work recorded is a visible startup failure — never a worker that
- * silently leaves payouts unverified.
- */
+
 @Injectable()
 export class WithdrawalRecoveryBootCheck implements OnApplicationBootstrap {
   constructor(
@@ -129,11 +125,7 @@ export class WithdrawalsModule implements OnModuleInit {
     for (const handler of this.handlers) this.dispatcher.register(handler);
   }
 
-  /**
-   * Routes, reads and admission are always present (admission refuses while switched off). With a Paystack key the
-   * transfers gateway, the TRANSFER webhook family, both flow definitions and the worker heartbeat come along, so
-   * accepted work keeps moving even when new admissions are off. `worker: true` adds the boot check.
-   */
+
   static forRoot(env: Record<string, string | undefined>, options: { worker?: boolean } = {}): DynamicModule {
     const keyed = hasPaystackKey(env);
     const providers: Provider[] = [
@@ -169,7 +161,7 @@ export class WithdrawalsModule implements OnModuleInit {
         OutboxModule,
         UsersModule,
         OneTimePasswordsModule,
-        // With a key: the transfers boundary, and the TRANSFER component of THE Paystack reconciliation (W4).
+      
         ...(keyed ? [PaystackTransfersModule, PaystackModule, ReconciliationModule, WebhooksModule] : []),
       ],
       controllers: [WithdrawalsController],

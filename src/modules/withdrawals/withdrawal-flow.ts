@@ -99,25 +99,10 @@ const FAILURE_STATUSES = [
 ];
 const IN_FLIGHT_STATUSES = [TransferStatusClassification.PENDING, TransferStatusClassification.OTP, TransferStatusClassification.RECEIVED];
 
-/** A step found its precondition changed under the owner lock (e.g. suspended meanwhile): retried, never half-applied. */
+
 class WithdrawalPreconditionChangedError extends InvariantViolationError {}
 
-/**
- * The payout (WITHDRAWAL_PLAN.md §E.2, §E.3, §F, §G; D2–D5):
- *
- * - RESERVED: the submission marker, committed under the owner's row lock taken BEFORE the flow's — a suspension that
- *   wins the lock cancels the unsent payout (release, FAILED); a marker that wins authorizes sending this payload.
- * - SUBMITTING / PROCESSING: verify the fixed reference FIRST; absent ⇒ count the attempt durably, then send the frozen
- *   request once (same reference forever: Paystack deduplicates). An answer to a send only binds ids and moves to
- *   PROCESSING — success is established by `transfer.verify` alone. Every answer is sealed evidence + an observation in
- *   the same transaction as what it causes.
- * - A matching verified success: provider debit (+ actual fee) and the customer's principal settled ONCE through
- *   `ReservationService.settle()`, the stash receipt and POSTED — one transaction (§G.1 step 6).
- * - A matching definitive failure: the hold released once, FAILED. A refusal of the FIRST send is definitive; after any
- *   lost answer a refusal proves nothing and is a review.
- * - POSTED: a matching full return reverses the principal exactly, books the provider return, appends the reversal
- *   receipt, REVERSED. Partial or contradictory answers are reviews; nothing is ever released on time alone.
- */
+
 @Injectable()
 export class WithdrawalFlow implements FlowDefinition, OnModuleInit {
   readonly flowType = FlowType.PAYSTACK_WITHDRAWAL;
@@ -166,7 +151,6 @@ export class WithdrawalFlow implements FlowDefinition, OnModuleInit {
     }
   }
 
-  // ── RESERVED: the marker, or the unsent cancellation ──
 
   private async authorize(runtime: FlowStepRuntime, record: WithdrawalRecord): Promise<StepOutcome> {
     const from = PaystackWithdrawalState.RESERVED;
@@ -226,7 +210,7 @@ export class WithdrawalFlow implements FlowDefinition, OnModuleInit {
     await runtime.checkpoint(FlowCheckpoint.AFTER_EXTERNAL_CALL);
     if (verified.found) return this.observe(flow, runtime, state, record, verified.observation, verified.exchange);
     if (state === PaystackWithdrawalState.PROCESSING) {
-      // Paystack showed the transfer before; "not found" now is a lag or a contradiction — never a reason to resend or release.
+     
       return this.waiting(flow, state, 'transfer seen before but not visible now');
     }
     return this.send(flow, runtime, record);
@@ -235,8 +219,7 @@ export class WithdrawalFlow implements FlowDefinition, OnModuleInit {
   private async send(flow: ClaimedFlow, runtime: FlowStepRuntime, record: WithdrawalRecord): Promise<StepOutcome> {
     const state = PaystackWithdrawalState.SUBMITTING;
     const recipientCode = await this.recipientCodeOf(record);
-    // Counted durably BEFORE the request leaves (fenced by this step's lease, which it keeps): only the first send's
-    // refusal can ever be definitive.
+
     await this.countAttempt(flow);
     const attempt = record.submission_attempts + 1;
     let answer;
@@ -258,7 +241,6 @@ export class WithdrawalFlow implements FlowDefinition, OnModuleInit {
     await runtime.checkpoint(FlowCheckpoint.AFTER_EXTERNAL_CALL);
     const observation = answer.value;
     if (!this.sameTransfer(record, observation) || observation.classification === TransferStatusClassification.MALFORMED) {
-      // The answer to our send is kept; verify decides. Never settle from an initiate answer.
       await runtime.commit(state, { retryInSeconds: POLL_BASE_SECONDS }, async (manager) => {
         await this.recordObservation(manager, record, answer.exchange, observation, 'SUBMISSION', null);
       });
@@ -273,7 +255,7 @@ export class WithdrawalFlow implements FlowDefinition, OnModuleInit {
     return { kind: 'TRANSITIONED', from: state, to: PaystackWithdrawalState.PROCESSING };
   }
 
-  /** +1 send attempt, fenced by the step's lease token (flow row locked first, then the withdrawal). The lease is kept. */
+
   private async countAttempt(flow: ClaimedFlow): Promise<void> {
     await this.unitOfWork.run(async (manager) => {
       const [row] = (await manager.query(`SELECT state, lease_token FROM flow_instances WHERE id = $1 FOR UPDATE`, [flow.id])) as {
@@ -288,7 +270,7 @@ export class WithdrawalFlow implements FlowDefinition, OnModuleInit {
   private async sendRefused(runtime: FlowStepRuntime, record: WithdrawalRecord, attempt: number, error: unknown): Promise<StepOutcome> {
     const state = PaystackWithdrawalState.SUBMITTING;
     if (!(error instanceof PaystackTransferCallFailedError) || error.kind === TransferCallFailureKind.TRANSIENT || error.kind === TransferCallFailureKind.INVALID) {
-      // No usable answer: the transfer may or may not exist. Verify first next time; the same reference is safe to resend.
+     
       return { kind: 'WAITING', state, reason: 'send unanswered; verifying next', retryInSeconds: POLL_BASE_SECONDS };
     }
     if (error.refusal === PaystackTransferRefusal.DUPLICATE_REFERENCE) {
@@ -316,7 +298,7 @@ export class WithdrawalFlow implements FlowDefinition, OnModuleInit {
     return { kind: 'TRANSITIONED', from: state, to: PaystackWithdrawalState.FAILED };
   }
 
-  /** A verify answer about OUR reference: matched or not, it is kept; only a match can move money. */
+ 
   private async observe(
     flow: ClaimedFlow,
     runtime: FlowStepRuntime,
@@ -376,14 +358,7 @@ export class WithdrawalFlow implements FlowDefinition, OnModuleInit {
     return { kind: 'TRANSITIONED', from, to: PaystackWithdrawalState.POSTED };
   }
 
-  /**
-   * THE success primitive (§G.1 step 6; shared with the approved recovery, §I.3), in the caller's transaction after the
-   * withdrawal is locked and the observation persisted: the SUCCESS certificate, the provider debit (+ the actual fee,
-   * or a FEE_EVIDENCE_MISSING review — never zero), the customer's principal exactly once, the links, the stash
-   * confirmation, the trail. Normally the principal settles the protected hold (`settle()` once). An approved late
-   * success on a FAILED withdrawal (its hold already RELEASED, never pretended settled) posts it through `post()`
-   * SYSTEM_DRIVEN — it may overdraw: recorded, never clamped — and records `recovery_approval_id`.
-   */
+
   async applyVerifiedSuccess(
     manager: EntityManager,
     record: WithdrawalRecord,
@@ -575,12 +550,7 @@ export class WithdrawalFlow implements FlowDefinition, OnModuleInit {
     return { kind: 'TRANSITIONED', from: state, to: PaystackWithdrawalState.REVERSED };
   }
 
-  /**
-   * THE full-return primitive (§G.1 step 8; shared with the approved recovery), in the caller's transaction after the
-   * withdrawal is locked and the observation persisted: the FULL_RETURN certificate, the exact reversal of the principal
-   * posting (`buildReversalRequest`), the provider's principal return, the stash reversal receipt, the trail. The
-   * provider fee is never returned with it (§F.1).
-   */
+
   async applyFullReturn(manager: EntityManager, record: WithdrawalRecord, facts: VerifiedTransferFacts, recovery: ApprovedRecoveryContext | null): Promise<string> {
     const principalTransactionId = record.principal_transaction_id;
     if (!principalTransactionId) throw new InvariantViolationError('A posted withdrawal has no principal posting.', { flowId: record.flow_id });
@@ -646,14 +616,8 @@ export class WithdrawalFlow implements FlowDefinition, OnModuleInit {
     return reversal.transactionId;
   }
 
-  // ── reconciliation (§I.2) ──
+  // ── reconciliation -
 
-  /**
-   * Read OUR reference's authoritative state (`transfer.verify`, outside any transaction) and keep it — sealed evidence
-   * + an observation bound to the withdrawal — in its own transaction, under the caller's trigger context (a run's id).
-   * Moves no money and no state: a late success on a FAILED withdrawal is evidence for an approved recovery, nothing
-   * more. `null` when Paystack does not know the reference.
-   */
   async observeForReconciliation(flowId: string): Promise<{ readonly observationId: string; readonly observation: TransferObservation; readonly matches: boolean } | null> {
     const record = await this.load(flowId);
     const verified = await this.gateway.verifyTransfer(record.provider_reference, { flowId });
@@ -667,7 +631,6 @@ export class WithdrawalFlow implements FlowDefinition, OnModuleInit {
 
   // ── shared ──
 
-  /** The withdrawal's record (money facts + frozen destination), as committed. */
   async load(flowId: string): Promise<WithdrawalRecord> {
     const [row] = (await this.unitOfWork.manager.query(
       `SELECT w.flow_id, w.user_id, w.account_id, w.reservation_id, w.principal_minor::text AS principal_minor, w.currency_code,
@@ -691,7 +654,7 @@ export class WithdrawalFlow implements FlowDefinition, OnModuleInit {
     return plain.toString('utf8');
   }
 
-  /** The keyed fingerprint of the recipient Paystack names, under the destination's key version (null when it names none). */
+
   async recipientFingerprint(record: WithdrawalRecord, observation: TransferObservation): Promise<Buffer | null> {
     const details = observation.recipient?.details;
     if (!details?.bankCode || !details.accountNumber) return null;
@@ -747,7 +710,7 @@ export class WithdrawalFlow implements FlowDefinition, OnModuleInit {
   ): Promise<{ observationId: string; observedAt: Date }> {
     const evidenceId = await this.storeIfAny(exchange);
     if (!evidenceId) throw new InvariantViolationError('An observation needs the answer\'s bytes as evidence.', { operation: exchange.operation });
-    // Provenance (§G.1): a step a reconciliation run drove is the run's; a webhook-triggered step stays RESUMER (W1 CHECK).
+
     const trigger = WithdrawalTrigger.current();
     const recordedSource = source === 'RESUMER' && trigger?.source === 'RECONCILIATION' ? 'RECONCILIATION' : source;
     const reconciliationRunId = recordedSource === 'RECONCILIATION' ? (trigger as { reconciliationRunId: string }).reconciliationRunId : null;
@@ -787,7 +750,7 @@ export class WithdrawalFlow implements FlowDefinition, OnModuleInit {
     return { observationId: row.id, observedAt: row.observed_at };
   }
 
-  /** The refusal of the first send, as an observation the certificate can rest on (W3 amendment of the W1 check). */
+
   private async recordRefusal(manager: EntityManager, record: WithdrawalRecord, error: PaystackTransferCallFailedError): Promise<{ observationId: string; observedAt: Date }> {
     const evidenceId = await this.storeIfAny(error.exchange);
     if (!evidenceId) throw new InvariantViolationError('A refusal without bytes cannot certify a failure.');
@@ -836,7 +799,7 @@ export class WithdrawalFlow implements FlowDefinition, OnModuleInit {
     return { kind: 'PROGRESSED', state };
   }
 
-  /** No usable verify answer: unreadable or configuration answers are reviews (kept); transient ones just back off. */
+
   private async unanswered(flow: ClaimedFlow, runtime: FlowStepRuntime, state: PaystackWithdrawalState, error: unknown): Promise<StepOutcome> {
     if (!(error instanceof PaystackTransferCallFailedError) || error.kind === TransferCallFailureKind.TRANSIENT) throw error;
     const reason = error.kind === TransferCallFailureKind.CONFIGURATION ? WithdrawalReviewReason.PROVIDER_APPROVAL_REQUIRED : WithdrawalReviewReason.PROVIDER_RESPONSE_UNRESOLVED;
@@ -862,7 +825,7 @@ function factsOf(observationId: string, observedAt: Date, observation: TransferO
   };
 }
 
-/** A success's value time (§F.3, D4): the approved late-fact date, else Paystack's transfer time, else the observation's. */
+
 function successValueTime(facts: VerifiedTransferFacts, recovery: ApprovedRecoveryContext | null): { valueTime: Date; basis: ValueTimeBasis } {
   if (recovery?.valueTime) return { valueTime: recovery.valueTime, basis: 'APPROVED_LATE_FACT' };
   if (facts.transferredAt) return { valueTime: facts.transferredAt, basis: 'PROVIDER_EVENT_TIME' };

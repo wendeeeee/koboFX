@@ -18,11 +18,7 @@ import * as transactionErrors from '../modules/transactions/transactions.errors'
 import { ERROR_CODE_DESCRIPTIONS, ERROR_CODE_HTTP_STATUS, TRANSIENT_ERROR_CODES } from './error-codes.openapi';
 import { errorExample } from './error-response.openapi';
 
-/**
- * The documented status of every code is the status the code is really sent with (Phase 11 plan §D): every concrete
- * `DomainError` subclass exported by the error modules is constructed and compared with the table, and the codes only
- * `buildErrorResponse` raises are pinned through it.
- */
+
 const MODULES = [
   commonErrors,
   providerErrors,
@@ -52,7 +48,7 @@ function domainErrorClasses(): ErrorClass[] {
   return [...classes];
 }
 
-/** Constructors differ (message + details, a currency, an id + an expiry, retry seconds…): try each shape. */
+
 const ARGUMENT_SHAPES: unknown[][] = [['x', {}], ['x', new Date()], [{}, 1]];
 
 function instantiate(errorClass: ErrorClass): DomainError {
@@ -76,7 +72,6 @@ describe('ERROR_CODE_HTTP_STATUS', () => {
   it.each(classes.map((errorClass) => [errorClass.name, errorClass]))('%s is sent with the documented status', (_name, errorClass) => {
     const error = instantiate(errorClass as ErrorClass);
     expect({ code: error.code, status: error.httpStatus }).toEqual({ code: error.code, status: ERROR_CODE_HTTP_STATUS[error.code] });
-    // The filter really answers with that status and code.
     const { status, body } = buildErrorResponse(error, 'c');
     expect({ status, code: body.code }).toEqual({ status: ERROR_CODE_HTTP_STATUS[error.code], code: error.code });
   });

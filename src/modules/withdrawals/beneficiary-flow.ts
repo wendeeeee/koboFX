@@ -35,11 +35,7 @@ const REVIEW_RETRY_SECONDS = 3600;
 const RECIPIENT_SCAN_PAGES = 20;
 
 /**
- * Prepares a withdrawal destination (WITHDRAWAL_PLAN.md §E.1): REQUESTED → RESOLVED (Paystack resolves the exact bank +
- * account; the name is Paystack's) → CREATING (the recipient payload frozen BEFORE any write) → READY (recipient created
- * or recovered, then checked against the exact identity). Every provider answer is kept as sealed evidence. A lost
- * create answer is recovered by scanning recipients for the exact identity — never by trusting a code or a name alone.
- * Only a definitive "could not resolve" fails it; anything ambiguous is a review, retried, never a guess.
+ * Prepares a withdrawal destination: REQUESTED → RESOLVED  → CREATING (the recipient payload frozen BEFORE any write) → READY (recipient created or recovered, then checked against the exact identity).
  */
 @Injectable()
 export class BeneficiaryFlow implements FlowDefinition, OnModuleInit {
@@ -113,7 +109,7 @@ export class BeneficiaryFlow implements FlowDefinition, OnModuleInit {
     return { kind: 'TRANSITIONED', from: state, to: PaystackBeneficiaryState.RESOLVED };
   }
 
-  // ── RESOLVED ── (the recipient payload is frozen by the record itself; this marks "may have been created" first)
+  // ── RESOLVED ── 
 
   private async freeze(flow: ClaimedFlow, runtime: FlowStepRuntime): Promise<StepOutcome> {
     const from = PaystackBeneficiaryState.RESOLVED;
@@ -137,7 +133,7 @@ export class BeneficiaryFlow implements FlowDefinition, OnModuleInit {
 
     let bound: Observed<PaystackRecipient | null>;
     try {
-      // Recovery first: a create whose answer was lost left a recipient behind. Exact identity only.
+      
       const found: PaystackRecipient[] = [];
       let page: string | undefined;
       for (let index = 0; index < RECIPIENT_SCAN_PAGES; index += 1) {
@@ -218,7 +214,7 @@ export class BeneficiaryFlow implements FlowDefinition, OnModuleInit {
     return plain.toString('utf8');
   }
 
-  /** One data key per row: every sealed column of a beneficiary names `sealing_key_id` (the owner's key never changes). */
+  /** One data key per row */
   private assertSameKey(record: BeneficiaryRecord, keyId: string): void {
     if (keyId !== record.sealing_key_id) {
       throw new InvariantViolationError('A beneficiary must be sealed under one data key.', { beneficiaryId: record.id });
@@ -246,7 +242,7 @@ export class BeneficiaryFlow implements FlowDefinition, OnModuleInit {
     return { kind: 'TRANSITIONED', from, to: PaystackBeneficiaryState.FAILED };
   }
 
-  /** Configuration and unreadable answers are reviews (kept, retried hourly); transient ones retry with backoff. */
+  /** Configuration and unreadable answers are reviews*/
   private async reviewOrRethrow(flow: ClaimedFlow, runtime: FlowStepRuntime, state: PaystackBeneficiaryState, error: unknown): Promise<StepOutcome> {
     if (error instanceof PaystackTransferCallFailedError && error.kind !== TransferCallFailureKind.TRANSIENT) {
       const reason = error.kind === TransferCallFailureKind.CONFIGURATION ? WithdrawalReviewReason.PROVIDER_APPROVAL_REQUIRED : WithdrawalReviewReason.PROVIDER_RESPONSE_UNRESOLVED;

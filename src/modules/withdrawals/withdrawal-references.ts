@@ -1,10 +1,6 @@
 import { InvariantViolationError } from '../../common/errors';
 
-/**
- * Stable references of one withdrawal, all derived from its flow id (WITHDRAWAL_PLAN.md §D.2). The provider reference
- * is fixed at admission and reused by every retry: Paystack deduplicates on it, so a new one could pay twice. The
- * database CHECKs the same derivation.
- */
+
 const UUID_V4 = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 
 export const PROVIDER_REFERENCE_PATTERN = /^withdrawal-[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
@@ -15,12 +11,11 @@ function flowIdOf(flowId: string): string {
   return id;
 }
 
-/** `withdrawal-{flowId}`: 47 characters, inside Paystack's 16–50 lowercase alphanumeric/hyphen rule. */
+
 export function providerReferenceOf(flowId: string): string {
   return `withdrawal-${flowIdOf(flowId)}`;
 }
 
-/** The customer's principal posting: also the public history reference from admission on. */
 export function principalReferenceOf(flowId: string): string {
   return `withdrawal:${flowIdOf(flowId)}`;
 }
@@ -39,7 +34,6 @@ export function providerReturnReferenceOf(flowId: string): string {
 
 const FEE_EVENT_IDENTITY = /^[A-Za-z0-9._:-]{1,64}$/;
 
-/** One attributed fee event: its provider identity and fee component keep two fee facts apart. */
 export function providerFeeReferenceOf(flowId: string, providerEventIdentity: string, feeComponent: string): string {
   return `withdrawal-provider-fee:${flowIdOf(flowId)}:${feeSuffix(providerEventIdentity, feeComponent)}`;
 }

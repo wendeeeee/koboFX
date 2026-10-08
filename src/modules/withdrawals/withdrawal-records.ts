@@ -15,23 +15,16 @@ export type BeneficiaryColumn =
   | 'provider_recipient_code_sealed'
   | 'provider_recipient_id_sealed';
 
-/**
- * Where a beneficiary's sealed value lives (the AAD). A frozen destination holds byte-for-byte copies, so it opens them
- * with the SAME context: the beneficiary it was copied from.
- */
+
 export function beneficiaryContext(beneficiaryId: string, userId: string, column: BeneficiaryColumn): SealingContext {
   return { table: 'withdrawal_beneficiaries', column, rowId: beneficiaryId, ownerId: userId, provider: PAYSTACK_PROVIDER };
 }
 
-/** Only the last four digits are ever shown. */
 export function maskedAccountNumber(lastFour: string): string {
   return `******${lastFour}`;
 }
 
-/**
- * The trail of every beneficiary / withdrawal change: an audit row and an outbox event, in the changing transaction.
- * Ids and states only (no PII, no amounts in the event).
- */
+
 @Injectable()
 export class WithdrawalTrail {
   constructor(

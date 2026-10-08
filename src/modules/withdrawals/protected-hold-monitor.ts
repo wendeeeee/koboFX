@@ -8,21 +8,14 @@ import { OutboxService } from '../outbox/outbox.service';
 import { OutboxEventType, ProtectedHoldFlaggedPayload } from '../outbox/outbox.types';
 import { WithdrawalReviewReason, openReview } from './withdrawal-reviews';
 
-/** Why a protected hold needs a human. Ordered: the first that applies is reported. */
 export enum ProtectedHoldCondition {
-  /** No withdrawal links the hold, or its flow is missing (impossible by deferred FKs: corruption). */
   ORPHAN = 'ORPHAN',
-  /** The flow finished but its hold is still ACTIVE (impossible by the consistency trigger: corruption). */
   TERMINAL_FLOW = 'TERMINAL_FLOW',
-  /** Recorded payout work but the credentials or key rings to process it are absent. */
   CREDENTIALS_MISSING = 'CREDENTIALS_MISSING',
-  /** Nothing will look at the flow soon: not due within two hours. */
   NO_RECOVERABLE_SCHEDULE = 'NO_RECOVERABLE_SCHEDULE',
-  /** Past its review deadline (`PAYSTACK_WITHDRAWAL_REVIEW_DEADLINE_MINUTES`): a finite review deadline, never a release. */
   OVERDUE = 'OVERDUE',
 }
 
-/** Metric hooks (no backend): `protected_holds_flagged_total{condition}`, `protected_holds_attention` (gauge). */
 @Injectable()
 export class ProtectedHoldMetrics {
   readonly flaggedTotal = new Map<ProtectedHoldCondition, number>();
@@ -46,14 +39,7 @@ interface HoldRow {
 
 const MONITOR_ACTOR = 'job:protected-hold-monitor';
 
-/**
- * The protected-hold monitor (WITHDRAWAL_PLAN.md §G.2): a worker loop over EVERY `FLOW_CONTROLLED` ACTIVE hold —
- * overdue ones included — that pages on orphans, terminal flows still holding money, holds nothing will look at soon,
- * missing recovery credentials, and holds past their review deadline. Each newly flagged hold opens a review on its
- * withdrawal (`PROTECTED_HOLD_OVERDUE`) with an audit row, a `ProtectedHoldFlagged.v1` event and a metric, in one
- * transaction; a hold is paged once per condition. It NEVER releases, expires or settles anything: the hold stays
- * until its flow resolves it with evidence. The hourly reconciliation run owns the run-linked break.
- */
+
 @Injectable()
 export class ProtectedHoldMonitor {
   private readonly logger = new Logger(ProtectedHoldMonitor.name);
@@ -84,7 +70,6 @@ export class ProtectedHoldMonitor {
     return this.loop.stop();
   }
 
-  /** One pass. Returns the holds newly flagged (each paged once per condition). */
   async tick(): Promise<{ reservationId: string; flowId: string; condition: ProtectedHoldCondition }[]> {
     const rows = (await this.unitOfWork.manager.query(
       `SELECT reservations.id AS reservation_id, reservations.flow_id,
@@ -120,7 +105,6 @@ export class ProtectedHoldMonitor {
     return null;
   }
 
-  /** Review + audit + outbox + metric, once per (hold, condition). Returns false when already paged. */
   private async flag(row: HoldRow, condition: ProtectedHoldCondition): Promise<boolean> {
     return this.unitOfWork.run(async (manager) => {
       const [already] = (await manager.query(

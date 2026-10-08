@@ -20,11 +20,10 @@ import {
   WithdrawalDocument,
 } from './withdrawals.responses';
 
-/** Abuse limits per user (WITHDRAWAL_PLAN.md §K) — separate from money limits and idempotency. */
 const READS: RateLimitRule = { name: 'withdrawal-reads', subject: 'user', limit: 120, windowSeconds: 60 };
 const BENEFICIARY_WRITES: RateLimitRule = { name: 'withdrawal-beneficiary-writes', subject: 'user', limit: 10, windowSeconds: 60 };
 const WITHDRAW_WRITES: RateLimitRule = { name: 'withdrawal-writes', subject: 'user', limit: 30, windowSeconds: 60 };
-/** Withdrawal codes: one a minute, five an hour, per user (like verification emails). */
+/** Withdrawal codes: one a minute, five an hour, per user*/
 export const WITHDRAWAL_CODE_RULES: RateLimitRule[] = [
   { name: 'withdrawal-code-cooldown', subject: 'user', limit: 1, windowSeconds: 60 },
   { name: 'withdrawal-code-hourly', subject: 'user', limit: 5, windowSeconds: 3600 },
@@ -33,12 +32,7 @@ export const WITHDRAWAL_CODE_RULES: RateLimitRule[] = [
 const TEST_MODE =
   ' Paystack TEST mode only: no real bank receives money; a confirmed transfer lands in your simulated-bank stash.';
 
-/**
- * Withdrawals to a Nigerian bank account through Paystack Transfers (WITHDRAWAL_PLAN.md §J). Every route is the
- * caller's own (scoped by the authenticated user in SQL; another user's ids are the same 404). Writes are database-only
- * behind the idempotency barrier; the worker talks to Paystack after they commit. New writes answer `503
- * WITHDRAWALS_DISABLED` while switched off — an earlier request's key still replays its original answer.
- */
+
 @ApiTags('wallet')
 @Controller('wallet')
 export class WithdrawalsController {
@@ -111,7 +105,7 @@ export class WithdrawalsController {
 
   @Post('withdraw/paystack')
   @HttpCode(HttpStatus.ACCEPTED)
-  // The body carries the emailed code: hashed with the keyed HMAC, never a plain SHA-256 of a 6-digit secret.
+
   @Idempotent({ flowIdField: 'withdrawalId', keyedRequestHash: true })
   @RateLimit({ rules: [WITHDRAW_WRITES], whenUnavailable: 'fail-open' })
   @ApiOperation({

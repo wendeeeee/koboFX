@@ -2,23 +2,17 @@ import { InvariantViolationError } from '../../common/errors';
 import { AmountTooLargeError, AmountTooSmallError } from '../flows/funding/funding.errors';
 import { DailyLimitExceededError } from '../trading/trading.errors';
 
-/**
- * Withdrawal amount limits (WITHDRAWAL_PLAN.md §K; D8). `PAYSTACK_WITHDRAWAL_LIMITS` is JSON
- * `{"NGN": {"minimum": "<minor>", "maximum": "<minor>", "dailyMaximum": "<minor>"}}`, every amount a positive string of
- * minor units (never a JSON number), `minimum ≤ maximum ≤ dailyMaximum`. No default is invented: the admission wiring
- * (W3) requires it when withdrawals are enabled.
- */
+
 export interface WithdrawalLimit {
   readonly minimumMinor: bigint;
   readonly maximumMinor: bigint;
   readonly dailyMaximumMinor: bigint;
 }
 
-/** What already counts against the 24-hour limit, measured under the source account's row lock. */
 export interface WithdrawalUsage {
-  /** Principal of every unresolved withdrawal (RESERVED / SUBMITTING / PROCESSING, review included), of ANY age. */
+
   readonly outstandingMinor: bigint;
-  /** Principal completed in the last 24 hours, reversed ones included until their completion leaves the window. */
+ 
   readonly completedInWindowMinor: bigint;
 }
 
@@ -71,10 +65,7 @@ export function parseWithdrawalLimits(
   return valid ? limits : undefined;
 }
 
-/**
- * The per-withdrawal bounds and the rolling 24-hour limit, in that order. Throws the stable 422 errors; a pass returns.
- * A later recovery of an external success is a fact and is never refused by this (§K) — call this at admission only.
- */
+
 export function assertWithinWithdrawalLimits(
   limit: WithdrawalLimit,
   currency: string,

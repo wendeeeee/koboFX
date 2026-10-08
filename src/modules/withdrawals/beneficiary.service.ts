@@ -30,7 +30,7 @@ export interface BeneficiaryView {
   readonly bankName: string | null;
   readonly currency: string;
   readonly accountNumberMasked: string;
-  /** Paystack's resolved name, once known. Never supplied by the client. */
+  /** Paystack's resolved name */
   readonly accountName: string | null;
   readonly failureCode: string | null;
   readonly reviewRequired: boolean;
@@ -67,12 +67,7 @@ const COLUMNS = `withdrawal_beneficiaries.id, withdrawal_beneficiaries.user_id, 
 
 const MAXIMUM_LIMIT = 100;
 
-/**
- * Beneficiaries (WITHDRAWAL_PLAN.md §E.1, §J): adding one is database-only behind the idempotency barrier (keyed request
- * hash: the body carries an account number). The account number is sealed under the owner's data key; the keyed
- * fingerprint (every key version) finds an existing beneficiary of the same owner, which is returned instead of a
- * duplicate. Paystack is asked nothing here — the worker resolves the account and creates the recipient.
- */
+
 @Injectable()
 export class BeneficiaryService {
   constructor(

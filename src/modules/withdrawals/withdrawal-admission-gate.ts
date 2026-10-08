@@ -8,11 +8,7 @@ import { WithdrawalsDisabledError } from './withdrawals.errors';
 export const WITHDRAWAL_WORKER_CAPABILITY = 'paystack-withdrawals';
 const HEARTBEAT_INTERVAL_MILLISECONDS = 15_000;
 
-/**
- * Whether NEW beneficiaries and withdrawals may be admitted (WITHDRAWAL_PLAN.md §K): the switch is on AND a worker able
- * to process them has beaten within the configured freshness (measured by the database's clock). Checked inside the
- * admission services — after the idempotency barrier's replay — so an earlier request keeps its original answer.
- */
+
 @Injectable()
 export class WithdrawalAdmissionGate {
   constructor(
@@ -34,7 +30,6 @@ export class WithdrawalAdmissionGate {
   }
 }
 
-/** The worker side: beats while the withdrawal flows are registered in this process. */
 @Injectable()
 export class WithdrawalWorkerHeartbeat {
   private readonly loop: PollingLoop;

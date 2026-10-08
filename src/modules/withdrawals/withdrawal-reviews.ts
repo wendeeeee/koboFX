@@ -15,12 +15,7 @@ export enum WithdrawalReviewReason {
 
 const logger = new Logger('WithdrawalReviews');
 
-/**
- * Open (or update) the review condition of a beneficiary or withdrawal (WITHDRAWAL_PLAN.md §D.1, §E): an append-only
- * event chained to the open review, and the record's `current_review_event_id` pointer moved to it — in the caller's
- * transaction. A review never changes the flow state; it makes a stuck case visible (`reviewRequired`) and paged.
- * Re-reporting the same open reason is a no-op (no event spam on every retry).
- */
+
 export async function openReview(
   manager: EntityManager,
   subject: { readonly table: 'withdrawal_beneficiaries' | 'paystack_withdrawals'; readonly flowId: string },
@@ -52,7 +47,6 @@ export async function openReview(
   return true;
 }
 
-/** Close an open review (the condition cleared). No-op when none is open. */
 export async function resolveReview(
   manager: EntityManager,
   subject: { readonly table: 'withdrawal_beneficiaries' | 'paystack_withdrawals'; readonly flowId: string },

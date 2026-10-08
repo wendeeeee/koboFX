@@ -2,7 +2,6 @@ import { EntityManager } from 'typeorm';
 import { AccountNotFoundError } from '../ledger/ledger.errors';
 import { bucketForTransaction, systemAccountCode } from '../ledger/posting/bucket';
 
-/** The payout templates (WITHDRAWAL_PLAN.md §F.1). No stash account: the stash is outside the company's books. */
 export const PAYOUT_ACCOUNT_TEMPLATES = {
   payoutBalance: 'PAYSTACK_PAYOUT_BALANCE',
   payoutInTransit: 'PAYSTACK_PAYOUT_IN_TRANSIT',
@@ -15,17 +14,10 @@ export interface PayoutAccounts {
   readonly transferFeesId: string;
 }
 
-/**
- * A withdrawal's internal bucket, chosen ONCE from its flow id and persisted on `paystack_withdrawals.internal_bucket`
- * (§G.3). Every posting of the withdrawal names these accounts by id, so its multi-posting units lock one known set
- * instead of a bucket per posting's fresh transaction id. Read the persisted value afterwards; never recompute it
- * (the configured bucket count may grow).
- */
 export function withdrawalInternalBucket(flowId: string, bucketCount: number): number {
   return bucketForTransaction(flowId, bucketCount);
 }
 
-/** The withdrawal's three payout accounts in its bucket, ids ascending is the caller's lock order. */
 export async function resolvePayoutAccounts(manager: EntityManager, currency: string, bucket: number): Promise<PayoutAccounts> {
   const codes = Object.values(PAYOUT_ACCOUNT_TEMPLATES).map((template) => systemAccountCode(template, currency));
   const rows = (await manager.query(

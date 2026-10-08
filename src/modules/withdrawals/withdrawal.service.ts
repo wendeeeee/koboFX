@@ -59,13 +59,7 @@ export interface WithdrawalView {
 
 const AMOUNT = /^[1-9]\d{0,17}$/;
 
-/**
- * Admitting a withdrawal (WITHDRAWAL_PLAN.md §G.1 step 2; D5, D8): database-only, inside the idempotency barrier, in the
- * global lock order — user (eligibility) → stash identity → new flow → beneficiary → wallet account (limits measured
- * under its lock) → the protected hold (`FLOW_CONTROLLED`, the review deadline as `expires_at`). The destination is
- * frozen byte for byte; the provider reference is fixed now (`withdrawal-{flowId}`). Paystack is asked nothing: the
- * worker sends after this commits. Any refusal rolls everything back, stash identity and hold included.
- */
+
 @Injectable()
 export class WithdrawalService {
   constructor(
@@ -91,7 +85,7 @@ export class WithdrawalService {
     const limit = this.config.withdrawals.limits?.get(WITHDRAWAL_CURRENCY);
     const accountIdentity = this.config.withdrawals.accountIdentity;
     if (!limit || !accountIdentity) throw new InvariantViolationError('Withdrawals are enabled without limits or an account identity.');
-    // The emailed code (2026-10-07): checked before any money is held, consumed as the admission's last step.
+
     const code = await this.codes.check(userId, input.oneTimePassword);
 
     return this.unitOfWork.run(async (manager) => {
