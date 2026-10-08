@@ -12,14 +12,6 @@ import { checkSanity } from '../src/modules/fx/rate-sanity';
 
 const DEFAULT_BOUNDS: Record<string, [string, string]> = { USD: ['1', '1'], NGN: ['100', '100000'], EUR: ['0.1', '10'], GBP: ['0.1', '10'] };
 
-/**
- * Manual smoke test against the REAL provider (never run in CI): one request through the
- * real adapter, parser and sanity checks, using `FX_RATE_BASE_URL` (default: the open
- * endpoint), `FX_PROVIDER_PLAN` and `EXCHANGE_RATE_API_KEY` (keyed URLs only) from the
- * environment. Prints what was read; records nothing. Needs no database or other secret.
- *
- *   npm run fx:smoke
- */
 async function main(): Promise<void> {
   const plan = (process.env.FX_PROVIDER_PLAN ?? ProviderPlan.OPEN) as ProviderPlan;
   const profile = PROVIDER_PLAN_PROFILES[plan];
