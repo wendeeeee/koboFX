@@ -46,7 +46,7 @@ describe('Withdrawal history and stash (W4, integration)', () => {
   });
 
   const http = () => request(harness.auth!.app.getHttpServer());
-  const get = (user: SignedUpUser, path: string) => http().get(`${API_PREFIX}${path}`).set('Authorization', `Bearer ${user.accessToken}`);
+  const get = (user: SignedUpUser, path: string) => http().get(`/${API_PREFIX}${path}`).set('Authorization', `Bearer ${user.accessToken}`);
   const items = async (user: SignedUpUser, query = '') => (await get(user, `/transactions${query}`).expect(200)).body.items as HistoryItem[];
 
   const fundedUserWithBeneficiary = async () => {
@@ -77,6 +77,10 @@ describe('Withdrawal history and stash (W4, integration)', () => {
     const pending = (await items(user, '?type=WITHDRAWAL')).find((item) => item.reference === reference)!;
     expect(pending).toMatchObject({ type: 'WITHDRAWAL', status: 'PENDING', legs: [], requested: { currency: 'NGN', minorUnit: 2, amount: '300000' }, reasonCode: null });
     expect((await get(user, `/transactions/${reference}`).expect(200)).body).toMatchObject({ reference, status: 'PENDING', initiatedBy: 'USER' });
+
+    // The worker sends the transfer (Paystack still says pending): the item stays PENDING.
+    await payments.drive({ deliverWebhooks: false });
+    expect((await items(user)).find((item) => item.reference === reference)).toMatchObject({ status: 'PENDING' });
 
     paystack.mock.transfers.setTransferStatus(`withdrawal-${withdrawalId}`, 'success');
     await payments.makeAllDue();
@@ -195,7 +199,7 @@ describe('Withdrawal history and stash (W4, integration)', () => {
 
   it('reads need an ACTIVE user: unauthenticated 401, suspended 403', async () => {
     const user = await payments.signUp();
-    expect((await http().get(`${API_PREFIX}/stash`)).status).toBe(401);
+    expect((await http().get(`/${API_PREFIX}/stash`)).status).toBe(401);
     const owner = await harness.db.ownerClient();
     try {
       await owner.query(`UPDATE users SET status = 'SUSPENDED' WHERE id = $1`, [user.userId]);
