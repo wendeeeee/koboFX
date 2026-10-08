@@ -118,6 +118,21 @@ describe('Chart of accounts (design §5.1, §6.6)', () => {
       expect((await harness.chartOfAccounts.openUserAccount(wallet.walletId, 'USD')).id).not.toBe(account.id);
     });
 
+    it('racing opens of the same new account all return it: no unique-index error on either index', async () => {
+      // Warm the pool first (one connection per racer), or "parallel" opens silently serialise.
+      await Promise.all(Array.from({ length: 12 }, () => harness.dataSource.query('SELECT pg_sleep(0.05)')));
+      for (let round = 0; round < 10; round += 1) {
+        const wallet = await harness.createWallet();
+        const outcomes = await Promise.allSettled(
+          Array.from({ length: 30 }, () => harness.chartOfAccounts.openUserAccount(wallet.walletId, 'USD')),
+        );
+        const failures = outcomes.filter((outcome) => outcome.status === 'rejected').map((outcome) => String((outcome as PromiseRejectedResult).reason));
+        expect(failures).toEqual([]);
+        const ids = new Set(outcomes.map((outcome) => (outcome as PromiseFulfilledResult<{ id: string }>).value.id));
+        expect(ids.size).toBe(1);
+      }
+    });
+
     it('refuses an unknown wallet, a malformed wallet id and an unsupported currency', async () => {
       await expect(harness.chartOfAccounts.openUserAccount(randomUUID(), 'NGN')).rejects.toMatchObject({ code: ErrorCode.NOT_FOUND });
       await expect(harness.chartOfAccounts.openUserAccount('wallet-1', 'NGN')).rejects.toMatchObject({
