@@ -104,14 +104,21 @@ describe('Admin concurrency (integration)', () => {
       ]);
       expect(revocation).toBe(ApprovalStatus.EXECUTED);
       expect([ApprovalStatus.EXECUTED, 'APPROVAL_REQUESTER_INELIGIBLE']).toContain(approval);
-      if (approval === ApprovalStatus.EXECUTED) {
-        // It won the user row first: its approval committed while the requester still held ADMIN.
-        const [times] = (await harness.dataSource.query(
-          `SELECT (SELECT approved_at FROM approvals WHERE id = $1) < (SELECT approved_at FROM approvals WHERE id = $2) AS approval_first`,
-          [id, revoke.id],
-        )) as { approval_first: boolean }[];
-        expect(times!.approval_first).toBe(true);
-      }
+      // Whichever side won the requester's user row, the outcome is whole: executed (target suspended) or refused
+      // (still PENDING, nothing applied). Never compare `approved_at`: it is `now()`, the transaction's START, so a
+      // revocation that started first but waited for the row would look earlier than the approval it followed.
+      // The deterministic order (revoked first ⇒ APPROVAL_REQUESTER_INELIGIBLE) is admin-approvals.int-spec.
+      const [state] = (await harness.dataSource.query(
+        `SELECT approvals.status::text AS approval_status, target.status::text AS target_status, requester.role::text AS requester_role
+           FROM approvals, users AS target, users AS requester
+          WHERE approvals.id = $1 AND target.id = $2 AND requester.id = $3`,
+        [id, target.userId, requester.userId],
+      )) as { approval_status: string; target_status: string; requester_role: string }[];
+      expect(state).toEqual(
+        approval === ApprovalStatus.EXECUTED
+          ? { approval_status: 'EXECUTED', target_status: 'SUSPENDED', requester_role: 'USER' }
+          : { approval_status: 'PENDING', target_status: 'ACTIVE', requester_role: 'USER' },
+      );
     }
   });
 
