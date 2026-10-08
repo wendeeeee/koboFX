@@ -75,7 +75,11 @@ export class ChartOfAccountsService implements OnApplicationBootstrap {
           `INSERT INTO accounts
              (code, account_type, normal_side, wallet_id, currency_code, authorizes_balance, bucket)
            VALUES ($1, 'LIABILITY', 'CREDIT', $2, $3, TRUE, 0)
-           ON CONFLICT (wallet_id, currency_code) WHERE wallet_id IS NOT NULL DO NOTHING`,
+           ON CONFLICT DO NOTHING`,
+          // No conflict target on purpose: two racing opens can collide on EITHER unique index — (wallet_id,
+          // currency_code) or accounts_code_bucket_unique — and Postgres only absorbs a conflict on the named arbiter.
+          // The code embeds the wallet id, so any conflict means this account already exists; the read below fails
+          // loudly if it somehow does not.
           [userAccountCode(walletId.toLowerCase(), currency), walletId, currency],
         );
       } catch (error) {
