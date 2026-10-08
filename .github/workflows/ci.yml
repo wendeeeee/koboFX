@@ -1,0 +1,79 @@
+name: CI
+
+on:
+  push:
+    branches: [develop, main]
+  pull_request:
+    branches: [develop, main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# A newer push to the same branch or pull request cancels the run it supersedes.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+env:
+  NODE_VERSION: '20'
+  # Every test generates its own keys and points providers at local mocks: no secrets, no .env.
+  CI: 'true'
+
+jobs:
+  build:
+    name: Typecheck, build, unit tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+      - run: npm ci
+      - name: Typecheck
+        run: npm run typecheck
+      - name: Build
+        run: npm run build
+      - name: Unit and property tests
+        run: npm test -- --ci --runInBand
+
+  integration:
+    name: Integration tests (shard ${{ matrix.shard }}/4)
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+      - run: npm ci
+      - name: Pull test container images
+        run: docker pull postgres:16-alpine && docker pull redis:7-alpine
+      # Real PostgreSQL 16 and Redis 7 through testcontainers (Docker is available on GitHub-hosted runners).
+      - name: Integration tests
+        run: npx jest --selectProjects integration --runInBand --ci --shard=${{ matrix.shard }}/4
+
+  e2e:
+    name: End-to-end tests
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+      - run: npm ci
+      - name: Pull test container images
+        run: docker pull postgres:16-alpine && docker pull redis:7-alpine && docker pull mailhog/mailhog:v1.0.1
+      - name: End-to-end tests
+        run: npm run test:e2e -- --ci
