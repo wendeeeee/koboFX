@@ -5,7 +5,7 @@ import { API_PREFIX } from '../../src/app.setup';
 import { Money } from '../../src/common/money';
 import { EntryDirection, PostingAuthorization, TransactionType } from '../../src/modules/ledger/ledger.types';
 import { ReconciliationRunKind } from '../../src/modules/reconciliation/reconciliation-schedule';
-import { Administrators, AdminHarness, FxHarness, LedgerHarness, PaymentsHarness, SignedUpUser, startLedgerHarness } from '../support/ledger-harness';
+import { Administrators, AdminHarness, FxHarness, LedgerHarness, PaymentsHarness, SignedUpUser, startLedgerHarness, HARNESS_TRANSACTION_PIN } from '../support/ledger-harness';
 
 /** The oracle's own arithmetic: far more digits than any mark needs (never the code under test's configuration). */
 const Decimal = DecimalBase.clone({ precision: 80 });
@@ -39,7 +39,7 @@ describe('Admin reads (integration)', () => {
     });
   };
   const convert = (user: SignedUpUser, body: Record<string, unknown>) =>
-    http().post(`/${API_PREFIX}/wallet/convert`).set('Authorization', `Bearer ${user.accessToken}`).set('Idempotency-Key', randomUUID()).send(body).expect(201);
+    http().post(`/${API_PREFIX}/wallet/convert`).set('Authorization', `Bearer ${user.accessToken}`).set('Idempotency-Key', randomUUID()).send({ transactionPin: HARNESS_TRANSACTION_PIN, ...body }).expect(201);
 
   beforeAll(async () => {
     harness = await startLedgerHarness({}, { fx: true });

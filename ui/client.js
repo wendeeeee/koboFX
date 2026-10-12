@@ -30,6 +30,13 @@ const messages = {
   BENEFICIARY_NOT_READY: 'We’re still checking that bank account. Please wait until it shows as Ready.',
   WITHDRAWAL_BENEFICIARY_NOT_FOUND: 'We couldn’t find that bank account. Please add it again.',
   UNSUPPORTED_CURRENCY: 'Withdrawals are in naira only.',
+  TRANSACTION_PIN_NOT_SET: 'Create your transaction PIN first. You’ll find it on your overview and in My account.',
+  TRANSACTION_PIN_ALREADY_SET: 'You already have a transaction PIN. Change it from My account.',
+  TRANSACTION_PIN_INVALID: 'That PIN isn’t right. Please try again.',
+  TRANSACTION_PIN_LOCKED: 'Your transaction PIN is locked after too many wrong tries. Reset it from My account.',
+  TRANSACTION_PIN_TOO_WEAK: 'That PIN is too easy to guess. Avoid repeated digits and straight runs like 123456.',
+  TRANSACTION_PIN_RESET_CODE_INVALID: 'That code didn’t work. It may be wrong, expired or already used. Tap “Send code” for a new one.',
+  PASSWORD_INCORRECT: 'That password isn’t right. Please try again.',
 };
 export class ApiError extends Error {
   constructor(body, status) { super(messages[body.code] || (status === 404 ? 'This service isn’t available yet. Please check with the person helping you try KoboFX.' : 'We couldn’t complete that request. Please try again.')); this.code = body.code; this.status = status; this.details = body.details; }

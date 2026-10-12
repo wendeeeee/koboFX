@@ -7,7 +7,7 @@ import { ServedSnapshot } from '../../src/modules/fx/fx-rate.service';
 import { ConvertService } from '../../src/modules/trading/convert.service';
 import { TradeService } from '../../src/modules/trading/trade.service';
 import { TestClock } from '../support/auth-test-doubles';
-import { FxHarness, LedgerHarness, PaymentsHarness, SignedUpUser, startLedgerHarness } from '../support/ledger-harness';
+import { FxHarness, LedgerHarness, PaymentsHarness, SignedUpUser, startLedgerHarness, HARNESS_TRANSACTION_PIN } from '../support/ledger-harness';
 
 const POOL_SIZE = 20;
 
@@ -121,7 +121,7 @@ describe('Trading concurrency (integration)', () => {
           .post(`/${API_PREFIX}/wallet/convert`)
           .set('Authorization', `Bearer ${alice.accessToken}`)
           .set('Idempotency-Key', randomUUID())
-          .send({ from: 'NGN', to: 'USD', sourceAmount: '80000' }),
+          .send({ from: 'NGN', to: 'USD', sourceAmount: '80000', transactionPin: HARNESS_TRANSACTION_PIN }),
       ),
     );
     expect(tally(responses.map((response) => `${response.status} ${response.body.code ?? 'POSTED'}`))).toEqual({
@@ -166,7 +166,7 @@ describe('Trading concurrency (integration)', () => {
       const quote = await fx.quote(alice, { from: 'NGN', to: 'USD', sourceAmount: '100000' }).expect(201);
       const key = randomUUID();
       const send = () =>
-        http().post(`/${API_PREFIX}/wallet/trade`).set('Authorization', `Bearer ${alice.accessToken}`).set('Idempotency-Key', key).send({ quoteId: quote.body.quoteId });
+        http().post(`/${API_PREFIX}/wallet/trade`).set('Authorization', `Bearer ${alice.accessToken}`).set('Idempotency-Key', key).send({ quoteId: quote.body.quoteId, transactionPin: HARNESS_TRANSACTION_PIN });
       await warmPool();
       const [first, second] = await Promise.all([send(), send()]);
       const posted = [first, second].filter((response) => response.status === 201 && response.headers['idempotent-replayed'] === undefined);

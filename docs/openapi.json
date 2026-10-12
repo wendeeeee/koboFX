@@ -5414,7 +5414,8 @@
                     "from": "NGN",
                     "to": "USD",
                     "sourceAmount": "153000000",
-                    "minimumTargetAmount": "98000"
+                    "minimumTargetAmount": "98000",
+                    "transactionPin": "402815"
                   }
                 },
                 "buyDollarsProtected": {
@@ -5423,7 +5424,8 @@
                     "from": "NGN",
                     "to": "USD",
                     "targetAmount": "5000",
-                    "maximumSourceAmount": "7800000"
+                    "maximumSourceAmount": "7800000",
+                    "transactionPin": "402815"
                   }
                 }
               }
@@ -5459,7 +5461,7 @@
             }
           },
           "400": {
-            "description": "`VALIDATION_FAILED`: The request is malformed. A body/query DTO failure lists `details.violations`; fix the request.\n\n`INVALID_AMOUNT`: The amount is not a positive whole number of minor units in range.\n\n`UNSUPPORTED_CURRENCY`: The currency is not supported for this operation.\n\n`SAME_CURRENCY`: `from` and `to` are the same currency.\n\n`UNSUPPORTED_CURRENCY_PAIR`: The directional pair is not offered (or not active).\n\n`IDEMPOTENCY_KEY_REQUIRED`: This route needs an `Idempotency-Key` header.\n\n`IDEMPOTENCY_KEY_INVALID`: `Idempotency-Key` must be 16–128 characters of `[A-Za-z0-9_-]`.",
+            "description": "`VALIDATION_FAILED`: The request is malformed. A body/query DTO failure lists `details.violations`; fix the request.\n\n`INVALID_AMOUNT`: The amount is not a positive whole number of minor units in range.\n\n`UNSUPPORTED_CURRENCY`: The currency is not supported for this operation.\n\n`SAME_CURRENCY`: `from` and `to` are the same currency.\n\n`UNSUPPORTED_CURRENCY_PAIR`: The directional pair is not offered (or not active).\n\n`IDEMPOTENCY_KEY_REQUIRED`: This route needs an `Idempotency-Key` header.\n\n`IDEMPOTENCY_KEY_INVALID`: `Idempotency-Key` must be 16–128 characters of `[A-Za-z0-9_-]`.\n\n`TRANSACTION_PIN_INVALID`: The transaction PIN is wrong. `details.attemptsRemaining` says how many tries are left before it locks. Nothing moved; any emailed code is still usable.",
             "headers": {
               "X-Correlation-Id": {
                 "description": "The request's correlation id (yours, or a generated UUID). Also in every error body.",
@@ -5502,7 +5504,8 @@
                             "SAME_CURRENCY",
                             "UNSUPPORTED_CURRENCY_PAIR",
                             "IDEMPOTENCY_KEY_REQUIRED",
-                            "IDEMPOTENCY_KEY_INVALID"
+                            "IDEMPOTENCY_KEY_INVALID",
+                            "TRANSACTION_PIN_INVALID"
                           ]
                         }
                       }
@@ -5574,6 +5577,15 @@
                       "statusCode": 400,
                       "code": "IDEMPOTENCY_KEY_INVALID",
                       "message": "`Idempotency-Key` must be 16–128 characters of `[A-Za-z0-9_-]`.",
+                      "correlationId": "6f1d2c3b-4a5e-4f60-8a7b-9c0d1e2f3a4b",
+                      "timestamp": "2026-09-10T11:04:22.114Z"
+                    }
+                  },
+                  "TRANSACTION_PIN_INVALID": {
+                    "value": {
+                      "statusCode": 400,
+                      "code": "TRANSACTION_PIN_INVALID",
+                      "message": "The transaction PIN is wrong. `details.attemptsRemaining` says how many tries are left before it locks. Nothing moved; any emailed code is still usable.",
                       "correlationId": "6f1d2c3b-4a5e-4f60-8a7b-9c0d1e2f3a4b",
                       "timestamp": "2026-09-10T11:04:22.114Z"
                     }
@@ -5702,7 +5714,7 @@
             }
           },
           "409": {
-            "description": "`INSUFFICIENT_FUNDS`: The available balance does not cover it, even counting held funds: top up.\n\n`FUNDS_RESERVED`: The total balance would cover it but part is held by a pending operation: wait for it.\n\n`IDEMPOTENCY_KEY_REUSE`: This key was used with a different request body on this route. Use a new key.\n\n`REQUEST_IN_PROGRESS`: The same key is being processed right now. Retry after `Retry-After` with the same key.\n\n`PRICE_LIMIT_EXCEEDED`: The priced amounts breach `minimumTargetAmount` / `maximumSourceAmount`; `details` has the priced amounts.",
+            "description": "`TRANSACTION_PIN_NOT_SET`: You have no transaction PIN yet: create one (POST /users/me/transaction-pin) before withdrawing or converting.\n\n`INSUFFICIENT_FUNDS`: The available balance does not cover it, even counting held funds: top up.\n\n`FUNDS_RESERVED`: The total balance would cover it but part is held by a pending operation: wait for it.\n\n`IDEMPOTENCY_KEY_REUSE`: This key was used with a different request body on this route. Use a new key.\n\n`REQUEST_IN_PROGRESS`: The same key is being processed right now. Retry after `Retry-After` with the same key.\n\n`PRICE_LIMIT_EXCEEDED`: The priced amounts breach `minimumTargetAmount` / `maximumSourceAmount`; `details` has the priced amounts.",
             "headers": {
               "X-Correlation-Id": {
                 "description": "The request's correlation id (yours, or a generated UUID). Also in every error body.",
@@ -5746,6 +5758,7 @@
                         "code": {
                           "type": "string",
                           "enum": [
+                            "TRANSACTION_PIN_NOT_SET",
                             "INSUFFICIENT_FUNDS",
                             "FUNDS_RESERVED",
                             "IDEMPOTENCY_KEY_REUSE",
@@ -5758,6 +5771,15 @@
                   ]
                 },
                 "examples": {
+                  "TRANSACTION_PIN_NOT_SET": {
+                    "value": {
+                      "statusCode": 409,
+                      "code": "TRANSACTION_PIN_NOT_SET",
+                      "message": "You have no transaction PIN yet: create one (POST /users/me/transaction-pin) before withdrawing or converting.",
+                      "correlationId": "6f1d2c3b-4a5e-4f60-8a7b-9c0d1e2f3a4b",
+                      "timestamp": "2026-09-10T11:04:22.114Z"
+                    }
+                  },
                   "INSUFFICIENT_FUNDS": {
                     "value": {
                       "statusCode": 409,
@@ -5944,6 +5966,65 @@
                       "statusCode": 422,
                       "code": "DAILY_LIMIT_EXCEEDED",
                       "message": "The rolling 24-hour limit for this source currency would be exceeded.",
+                      "correlationId": "6f1d2c3b-4a5e-4f60-8a7b-9c0d1e2f3a4b",
+                      "timestamp": "2026-09-10T11:04:22.114Z"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "423": {
+            "description": "`TRANSACTION_PIN_LOCKED`: Too many wrong PINs: the PIN is locked until it is reset with your password and an emailed code. Nothing moved.",
+            "headers": {
+              "X-Correlation-Id": {
+                "description": "The request's correlation id (yours, or a generated UUID). Also in every error body.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Idempotent-Replayed": {
+                "description": "Present (`true`) when this is the stored outcome of an earlier request with the same `Idempotency-Key`.",
+                "schema": {
+                  "type": "string",
+                  "enum": [
+                    "true"
+                  ]
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ErrorResponse"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "statusCode": {
+                          "type": "integer",
+                          "enum": [
+                            423
+                          ]
+                        },
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "TRANSACTION_PIN_LOCKED"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                },
+                "examples": {
+                  "TRANSACTION_PIN_LOCKED": {
+                    "value": {
+                      "statusCode": 423,
+                      "code": "TRANSACTION_PIN_LOCKED",
+                      "message": "Too many wrong PINs: the PIN is locked until it is reset with your password and an emailed code. Nothing moved.",
                       "correlationId": "6f1d2c3b-4a5e-4f60-8a7b-9c0d1e2f3a4b",
                       "timestamp": "2026-09-10T11:04:22.114Z"
                     }
@@ -6262,7 +6343,7 @@
             }
           },
           "400": {
-            "description": "`VALIDATION_FAILED`: The request is malformed. A body/query DTO failure lists `details.violations`; fix the request.\n\n`IDEMPOTENCY_KEY_REQUIRED`: This route needs an `Idempotency-Key` header.\n\n`IDEMPOTENCY_KEY_INVALID`: `Idempotency-Key` must be 16–128 characters of `[A-Za-z0-9_-]`.",
+            "description": "`VALIDATION_FAILED`: The request is malformed. A body/query DTO failure lists `details.violations`; fix the request.\n\n`IDEMPOTENCY_KEY_REQUIRED`: This route needs an `Idempotency-Key` header.\n\n`IDEMPOTENCY_KEY_INVALID`: `Idempotency-Key` must be 16–128 characters of `[A-Za-z0-9_-]`.\n\n`TRANSACTION_PIN_INVALID`: The transaction PIN is wrong. `details.attemptsRemaining` says how many tries are left before it locks. Nothing moved; any emailed code is still usable.",
             "headers": {
               "X-Correlation-Id": {
                 "description": "The request's correlation id (yours, or a generated UUID). Also in every error body.",
@@ -6301,7 +6382,8 @@
                           "enum": [
                             "VALIDATION_FAILED",
                             "IDEMPOTENCY_KEY_REQUIRED",
-                            "IDEMPOTENCY_KEY_INVALID"
+                            "IDEMPOTENCY_KEY_INVALID",
+                            "TRANSACTION_PIN_INVALID"
                           ]
                         }
                       }
@@ -6337,6 +6419,15 @@
                       "statusCode": 400,
                       "code": "IDEMPOTENCY_KEY_INVALID",
                       "message": "`Idempotency-Key` must be 16–128 characters of `[A-Za-z0-9_-]`.",
+                      "correlationId": "6f1d2c3b-4a5e-4f60-8a7b-9c0d1e2f3a4b",
+                      "timestamp": "2026-09-10T11:04:22.114Z"
+                    }
+                  },
+                  "TRANSACTION_PIN_INVALID": {
+                    "value": {
+                      "statusCode": 400,
+                      "code": "TRANSACTION_PIN_INVALID",
+                      "message": "The transaction PIN is wrong. `details.attemptsRemaining` says how many tries are left before it locks. Nothing moved; any emailed code is still usable.",
                       "correlationId": "6f1d2c3b-4a5e-4f60-8a7b-9c0d1e2f3a4b",
                       "timestamp": "2026-09-10T11:04:22.114Z"
                     }
@@ -6524,7 +6615,7 @@
             }
           },
           "409": {
-            "description": "`INSUFFICIENT_FUNDS`: The available balance does not cover it, even counting held funds: top up.\n\n`FUNDS_RESERVED`: The total balance would cover it but part is held by a pending operation: wait for it.\n\n`QUOTE_EXPIRED`: The quote's 30 seconds are over. Request a new quote.\n\n`QUOTE_ALREADY_USED`: Quotes are single-use and this one was executed.\n\n`IDEMPOTENCY_KEY_REUSE`: This key was used with a different request body on this route. Use a new key.\n\n`REQUEST_IN_PROGRESS`: The same key is being processed right now. Retry after `Retry-After` with the same key.",
+            "description": "`TRANSACTION_PIN_NOT_SET`: You have no transaction PIN yet: create one (POST /users/me/transaction-pin) before withdrawing or converting.\n\n`INSUFFICIENT_FUNDS`: The available balance does not cover it, even counting held funds: top up.\n\n`FUNDS_RESERVED`: The total balance would cover it but part is held by a pending operation: wait for it.\n\n`QUOTE_EXPIRED`: The quote's 30 seconds are over. Request a new quote.\n\n`QUOTE_ALREADY_USED`: Quotes are single-use and this one was executed.\n\n`IDEMPOTENCY_KEY_REUSE`: This key was used with a different request body on this route. Use a new key.\n\n`REQUEST_IN_PROGRESS`: The same key is being processed right now. Retry after `Retry-After` with the same key.",
             "headers": {
               "X-Correlation-Id": {
                 "description": "The request's correlation id (yours, or a generated UUID). Also in every error body.",
@@ -6568,6 +6659,7 @@
                         "code": {
                           "type": "string",
                           "enum": [
+                            "TRANSACTION_PIN_NOT_SET",
                             "INSUFFICIENT_FUNDS",
                             "FUNDS_RESERVED",
                             "QUOTE_EXPIRED",
@@ -6581,6 +6673,15 @@
                   ]
                 },
                 "examples": {
+                  "TRANSACTION_PIN_NOT_SET": {
+                    "value": {
+                      "statusCode": 409,
+                      "code": "TRANSACTION_PIN_NOT_SET",
+                      "message": "You have no transaction PIN yet: create one (POST /users/me/transaction-pin) before withdrawing or converting.",
+                      "correlationId": "6f1d2c3b-4a5e-4f60-8a7b-9c0d1e2f3a4b",
+                      "timestamp": "2026-09-10T11:04:22.114Z"
+                    }
+                  },
                   "INSUFFICIENT_FUNDS": {
                     "value": {
                       "statusCode": 409,
@@ -6766,6 +6867,65 @@
                       "statusCode": 422,
                       "code": "DAILY_LIMIT_EXCEEDED",
                       "message": "The rolling 24-hour limit for this source currency would be exceeded.",
+                      "correlationId": "6f1d2c3b-4a5e-4f60-8a7b-9c0d1e2f3a4b",
+                      "timestamp": "2026-09-10T11:04:22.114Z"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "423": {
+            "description": "`TRANSACTION_PIN_LOCKED`: Too many wrong PINs: the PIN is locked until it is reset with your password and an emailed code. Nothing moved.",
+            "headers": {
+              "X-Correlation-Id": {
+                "description": "The request's correlation id (yours, or a generated UUID). Also in every error body.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Idempotent-Replayed": {
+                "description": "Present (`true`) when this is the stored outcome of an earlier request with the same `Idempotency-Key`.",
+                "schema": {
+                  "type": "string",
+                  "enum": [
+                    "true"
+                  ]
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ErrorResponse"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "statusCode": {
+                          "type": "integer",
+                          "enum": [
+                            423
+                          ]
+                        },
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "TRANSACTION_PIN_LOCKED"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                },
+                "examples": {
+                  "TRANSACTION_PIN_LOCKED": {
+                    "value": {
+                      "statusCode": 423,
+                      "code": "TRANSACTION_PIN_LOCKED",
+                      "message": "Too many wrong PINs: the PIN is locked until it is reset with your password and an emailed code. Nothing moved.",
                       "correlationId": "6f1d2c3b-4a5e-4f60-8a7b-9c0d1e2f3a4b",
                       "timestamp": "2026-09-10T11:04:22.114Z"
                     }
@@ -19496,7 +19656,7 @@
             }
           },
           "400": {
-            "description": "`VALIDATION_FAILED`: The request is malformed. A body/query DTO failure lists `details.violations`; fix the request.\n\n`INVALID_AMOUNT`: The amount is not a positive whole number of minor units in range.\n\n`UNSUPPORTED_CURRENCY`: The currency is not supported for this operation.\n\n`IDEMPOTENCY_KEY_REQUIRED`: This route needs an `Idempotency-Key` header.\n\n`IDEMPOTENCY_KEY_INVALID`: `Idempotency-Key` must be 16–128 characters of `[A-Za-z0-9_-]`.\n\n`WITHDRAWAL_CODE_INVALID`: The withdrawal code is wrong, expired, already used or replaced by a newer one. Request a new code; retry with a NEW Idempotency-Key (this refusal is stored for the key).",
+            "description": "`VALIDATION_FAILED`: The request is malformed. A body/query DTO failure lists `details.violations`; fix the request.\n\n`INVALID_AMOUNT`: The amount is not a positive whole number of minor units in range.\n\n`UNSUPPORTED_CURRENCY`: The currency is not supported for this operation.\n\n`IDEMPOTENCY_KEY_REQUIRED`: This route needs an `Idempotency-Key` header.\n\n`IDEMPOTENCY_KEY_INVALID`: `Idempotency-Key` must be 16–128 characters of `[A-Za-z0-9_-]`.\n\n`WITHDRAWAL_CODE_INVALID`: The withdrawal code is wrong, expired, already used or replaced by a newer one. Request a new code; retry with a NEW Idempotency-Key (this refusal is stored for the key).\n\n`TRANSACTION_PIN_INVALID`: The transaction PIN is wrong. `details.attemptsRemaining` says how many tries are left before it locks. Nothing moved; any emailed code is still usable.",
             "headers": {
               "X-Correlation-Id": {
                 "description": "The request's correlation id (yours, or a generated UUID). Also in every error body.",
@@ -19538,7 +19698,8 @@
                             "UNSUPPORTED_CURRENCY",
                             "IDEMPOTENCY_KEY_REQUIRED",
                             "IDEMPOTENCY_KEY_INVALID",
-                            "WITHDRAWAL_CODE_INVALID"
+                            "WITHDRAWAL_CODE_INVALID",
+                            "TRANSACTION_PIN_INVALID"
                           ]
                         }
                       }
@@ -19601,6 +19762,15 @@
                       "statusCode": 400,
                       "code": "WITHDRAWAL_CODE_INVALID",
                       "message": "The withdrawal code is wrong, expired, already used or replaced by a newer one. Request a new code; retry with a NEW Idempotency-Key (this refusal is stored for the key).",
+                      "correlationId": "6f1d2c3b-4a5e-4f60-8a7b-9c0d1e2f3a4b",
+                      "timestamp": "2026-09-10T11:04:22.114Z"
+                    }
+                  },
+                  "TRANSACTION_PIN_INVALID": {
+                    "value": {
+                      "statusCode": 400,
+                      "code": "TRANSACTION_PIN_INVALID",
+                      "message": "The transaction PIN is wrong. `details.attemptsRemaining` says how many tries are left before it locks. Nothing moved; any emailed code is still usable.",
                       "correlationId": "6f1d2c3b-4a5e-4f60-8a7b-9c0d1e2f3a4b",
                       "timestamp": "2026-09-10T11:04:22.114Z"
                     }
@@ -19779,7 +19949,7 @@
             }
           },
           "409": {
-            "description": "`INSUFFICIENT_FUNDS`: The available balance does not cover it, even counting held funds: top up.\n\n`FUNDS_RESERVED`: The total balance would cover it but part is held by a pending operation: wait for it.\n\n`IDEMPOTENCY_KEY_REUSE`: This key was used with a different request body on this route. Use a new key.\n\n`REQUEST_IN_PROGRESS`: The same key is being processed right now. Retry after `Retry-After` with the same key.\n\n`BENEFICIARY_NOT_READY`: The beneficiary is still being verified with Paystack, or failed: only a READY one can receive a withdrawal.",
+            "description": "`TRANSACTION_PIN_NOT_SET`: You have no transaction PIN yet: create one (POST /users/me/transaction-pin) before withdrawing or converting.\n\n`INSUFFICIENT_FUNDS`: The available balance does not cover it, even counting held funds: top up.\n\n`FUNDS_RESERVED`: The total balance would cover it but part is held by a pending operation: wait for it.\n\n`IDEMPOTENCY_KEY_REUSE`: This key was used with a different request body on this route. Use a new key.\n\n`REQUEST_IN_PROGRESS`: The same key is being processed right now. Retry after `Retry-After` with the same key.\n\n`BENEFICIARY_NOT_READY`: The beneficiary is still being verified with Paystack, or failed: only a READY one can receive a withdrawal.",
             "headers": {
               "X-Correlation-Id": {
                 "description": "The request's correlation id (yours, or a generated UUID). Also in every error body.",
@@ -19823,6 +19993,7 @@
                         "code": {
                           "type": "string",
                           "enum": [
+                            "TRANSACTION_PIN_NOT_SET",
                             "INSUFFICIENT_FUNDS",
                             "FUNDS_RESERVED",
                             "IDEMPOTENCY_KEY_REUSE",
@@ -19835,6 +20006,15 @@
                   ]
                 },
                 "examples": {
+                  "TRANSACTION_PIN_NOT_SET": {
+                    "value": {
+                      "statusCode": 409,
+                      "code": "TRANSACTION_PIN_NOT_SET",
+                      "message": "You have no transaction PIN yet: create one (POST /users/me/transaction-pin) before withdrawing or converting.",
+                      "correlationId": "6f1d2c3b-4a5e-4f60-8a7b-9c0d1e2f3a4b",
+                      "timestamp": "2026-09-10T11:04:22.114Z"
+                    }
+                  },
                   "INSUFFICIENT_FUNDS": {
                     "value": {
                       "statusCode": 409,
@@ -20021,6 +20201,65 @@
                       "statusCode": 422,
                       "code": "DAILY_LIMIT_EXCEEDED",
                       "message": "The rolling 24-hour limit for this source currency would be exceeded.",
+                      "correlationId": "6f1d2c3b-4a5e-4f60-8a7b-9c0d1e2f3a4b",
+                      "timestamp": "2026-09-10T11:04:22.114Z"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "423": {
+            "description": "`TRANSACTION_PIN_LOCKED`: Too many wrong PINs: the PIN is locked until it is reset with your password and an emailed code. Nothing moved.",
+            "headers": {
+              "X-Correlation-Id": {
+                "description": "The request's correlation id (yours, or a generated UUID). Also in every error body.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Idempotent-Replayed": {
+                "description": "Present (`true`) when this is the stored outcome of an earlier request with the same `Idempotency-Key`.",
+                "schema": {
+                  "type": "string",
+                  "enum": [
+                    "true"
+                  ]
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ErrorResponse"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "statusCode": {
+                          "type": "integer",
+                          "enum": [
+                            423
+                          ]
+                        },
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "TRANSACTION_PIN_LOCKED"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                },
+                "examples": {
+                  "TRANSACTION_PIN_LOCKED": {
+                    "value": {
+                      "statusCode": 423,
+                      "code": "TRANSACTION_PIN_LOCKED",
+                      "message": "Too many wrong PINs: the PIN is locked until it is reset with your password and an emailed code. Nothing moved.",
                       "correlationId": "6f1d2c3b-4a5e-4f60-8a7b-9c0d1e2f3a4b",
                       "timestamp": "2026-09-10T11:04:22.114Z"
                     }
@@ -21501,6 +21740,2083 @@
             "subject": "user",
             "limit": 120,
             "windowSeconds": 60
+          }
+        ]
+      }
+    },
+    "/api/v1/users/me/transaction-pin": {
+      "post": {
+        "description": "Six digits, confirmed with your account password. Required before you can withdraw or convert. You get an email when it is created.\n\n**Access:** an authenticated ACTIVE user (verified, not suspended).\n\n**Rate limit:** 100 per 60s per ip (`global`); 10 per 3600s per user (`transaction-pin-writes`). Refused with `503` if the limiter is unavailable.",
+        "operationId": "TransactionPinsController_create",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateTransactionPinRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TransactionPinStatus"
+                }
+              }
+            },
+            "headers": {
+              "X-Correlation-Id": {
+                "description": "The request's correlation id (yours, or a generated UUID). Also in every error body.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`VALIDATION_FAILED`: The request is malformed. A body/query DTO failure lists `details.violations`; fix the request.\n\n`TRANSACTION_PIN_TOO_WEAK`: The PIN must be 6 digits, not all the same digit, not a straight sequence (123456, 654321) and not your current PIN.\n\n`PASSWORD_INCORRECT`: The account password is incorrect.",
+            "headers": {
+              "X-Correlation-Id": {
+                "description": "The request's correlation id (yours, or a generated UUID). Also in every error body.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ErrorResponse"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "statusCode": {
+                          "type": "integer",
+                          "enum": [
+                            400
+                          ]
+                        },
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "VALIDATION_FAILED",
+                            "TRANSACTION_PIN_TOO_WEAK",
+                            "PASSWORD_INCORRECT"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                },
+                "examples": {
+                  "VALIDATION_FAILED": {
+                    "value": {
+                      "statusCode": 400,
+                      "code": "VALIDATION_FAILED",
+                      "message": "Request validation failed.",
+                      "details": {
+                        "violations": [
+                          "amount must be a positive whole number of minor units, as a string"
+                        ]
+                      },
+                      "correlationId": "6f1d2c3b-4a5e-4f60-8a7b-9c0d1e2f3a4b",
+                      "timestamp": "2026-09-10T11:04:22.114Z"
+                    }
+                  },
+                  "TRANSACTION_PIN_TOO_WEAK": {
+                    "value": {
+                      "statusCode": 400,
+                      "code": "TRANSACTION_PIN_TOO_WEAK",
+                      "message": "The PIN must be 6 digits, not all the same digit, not a straight sequence (123456, 654321) and not your current PIN.",
+                      "correlationId": "6f1d2c3b-4a5e-4f60-8a7b-9c0d1e2f3a4b",
+                      "timestamp": "2026-09-10T11:04:22.114Z"
+                    }
+                  },
+                  "PASSWORD_INCORRECT": {
+                    "value": {
+                      "statusCode": 400,
+                      "code": "PASSWORD_INCORRECT",
+                      "message": "The account password is incorrect.",
+                      "correlationId": "6f1d2c3b-4a5e-4f60-8a7b-9c0d1e2f3a4b",
+                      "timestamp": "2026-09-10T11:04:22.114Z"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`UNAUTHENTICATED`: No valid credentials: missing/expired/revoked access token, a refused refresh token, or a bad webhook signature.",
+            "headers": {
+              "X-Correlation-Id": {
+                "description": "The request's correlation id (yours, or a generated UUID). Also in every error body.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ErrorResponse"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "statusCode": {
+                          "type": "integer",
+                          "enum": [
+                            401
+                          ]
+                        },
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "UNAUTHENTICATED"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                },
+                "examples": {
+                  "UNAUTHENTICATED": {
+                    "value": {
+                      "statusCode": 401,
+                      "code": "UNAUTHENTICATED",
+                      "message": "Authentication is required.",
+                      "correlationId": "6f1d2c3b-4a5e-4f60-8a7b-9c0d1e2f3a4b",
+                      "timestamp": "2026-09-10T11:04:22.114Z"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`ACCOUNT_SUSPENDED`: The account is suspended.\n\n`EMAIL_NOT_VERIFIED`: Verify the email address first.",
+            "headers": {
+              "X-Correlation-Id": {
+                "description": "The request's correlation id (yours, or a generated UUID). Also in every error body.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ErrorResponse"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "statusCode": {
+                          "type": "integer",
+                          "enum": [
+                            403
+                          ]
+                        },
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "ACCOUNT_SUSPENDED",
+                            "EMAIL_NOT_VERIFIED"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                },
+                "examples": {
+                  "ACCOUNT_SUSPENDED": {
+                    "value": {
+                      "statusCode": 403,
+                      "code": "ACCOUNT_SUSPENDED",
+                      "message": "The account is suspended.",
+                      "correlationId": "6f1d2c3b-4a5e-4f60-8a7b-9c0d1e2f3a4b",
+                      "timestamp": "2026-09-10T11:04:22.114Z"
+                    }
+                  },
+                  "EMAIL_NOT_VERIFIED": {
+                    "value": {
+                      "statusCode": 403,
+                      "code": "EMAIL_NOT_VERIFIED",
+                      "message": "Verify the email address first.",
+                      "correlationId": "6f1d2c3b-4a5e-4f60-8a7b-9c0d1e2f3a4b",
+                      "timestamp": "2026-09-10T11:04:22.114Z"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`TRANSACTION_PIN_ALREADY_SET`: A transaction PIN already exists: change it (PUT) or reset it if forgotten.",
+            "headers": {
+              "X-Correlation-Id": {
+                "description": "The request's correlation id (yours, or a generated UUID). Also in every error body.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ErrorResponse"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "statusCode": {
+                          "type": "integer",
+                          "enum": [
+                            409
+                          ]
+                        },
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "TRANSACTION_PIN_ALREADY_SET"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                },
+                "examples": {
+                  "TRANSACTION_PIN_ALREADY_SET": {
+                    "value": {
+                      "statusCode": 409,
+                      "code": "TRANSACTION_PIN_ALREADY_SET",
+                      "message": "A transaction PIN already exists: change it (PUT) or reset it if forgotten.",
+                      "correlationId": "6f1d2c3b-4a5e-4f60-8a7b-9c0d1e2f3a4b",
+                      "timestamp": "2026-09-10T11:04:22.114Z"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "`PAYLOAD_TOO_LARGE`: The body exceeds 100 KB.",
+            "headers": {
+              "X-Correlation-Id": {
+                "description": "The request's correlation id (yours, or a generated UUID). Also in every error body.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ErrorResponse"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "statusCode": {
+                          "type": "integer",
+                          "enum": [
+                            413
+                          ]
+                        },
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "PAYLOAD_TOO_LARGE"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                },
+                "examples": {
+                  "PAYLOAD_TOO_LARGE": {
+                    "value": {
+                      "statusCode": 413,
+                      "code": "PAYLOAD_TOO_LARGE",
+                      "message": "The body exceeds 100 KB.",
+                      "correlationId": "6f1d2c3b-4a5e-4f60-8a7b-9c0d1e2f3a4b",
+                      "timestamp": "2026-09-10T11:04:22.114Z"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "`RATE_LIMITED`: Too many requests. Retry after `Retry-After` seconds.",
+            "headers": {
+              "X-Correlation-Id": {
+                "description": "The request's correlation id (yours, or a generated UUID). Also in every error body.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Retry-After": {
+                "description": "Seconds to wait before retrying.",
+                "schema": {
+                  "type": "integer",
+                  "minimum": 0
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ErrorResponse"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "statusCode": {
+                          "type": "integer",
+                          "enum": [
+                            429
+                          ]
+                        },
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "RATE_LIMITED"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                },
+                "examples": {
+                  "RATE_LIMITED": {
+                    "value": {
+                      "statusCode": 429,
+                      "code": "RATE_LIMITED",
+                      "message": "Too many requests. Retry after the time given in the Retry-After header.",
+                      "details": {
+                        "retryAfterSeconds": 42
+                      },
+                      "correlationId": "6f1d2c3b-4a5e-4f60-8a7b-9c0d1e2f3a4b",
+                      "timestamp": "2026-09-10T11:04:22.114Z"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`INVARIANT_VIOLATION`: Our bug, failed loudly. Quote the `correlationId`.\n\n`INTERNAL_ERROR`: Unexpected error. Quote the `correlationId`.",
+            "headers": {
+              "X-Correlation-Id": {
+                "description": "The request's correlation id (yours, or a generated UUID). Also in every error body.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ErrorResponse"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "statusCode": {
+                          "type": "integer",
+                          "enum": [
+                            500
+                          ]
+                        },
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "INVARIANT_VIOLATION",
+                            "INTERNAL_ERROR"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                },
+                "examples": {
+                  "INVARIANT_VIOLATION": {
+                    "value": {
+                      "statusCode": 500,
+                      "code": "INVARIANT_VIOLATION",
+                      "message": "An unexpected error occurred.",
+                      "correlationId": "6f1d2c3b-4a5e-4f60-8a7b-9c0d1e2f3a4b",
+                      "timestamp": "2026-09-10T11:04:22.114Z"
+                    }
+                  },
+                  "INTERNAL_ERROR": {
+                    "value": {
+                      "statusCode": 500,
+                      "code": "INTERNAL_ERROR",
+                      "message": "An unexpected error occurred.",
+                      "correlationId": "6f1d2c3b-4a5e-4f60-8a7b-9c0d1e2f3a4b",
+                      "timestamp": "2026-09-10T11:04:22.114Z"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "`RESOURCE_BUSY`: Transient lock or statement timeout. Retry with the SAME `Idempotency-Key`.\n\n`DEPENDENCY_UNAVAILABLE`: A dependency we cannot work without is down; we fail closed. Transient.",
+            "headers": {
+              "X-Correlation-Id": {
+                "description": "The request's correlation id (yours, or a generated UUID). Also in every error body.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Retry-After": {
+                "description": "Seconds to wait before retrying.",
+                "schema": {
+                  "type": "integer",
+                  "minimum": 0
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ErrorResponse"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "statusCode": {
+                          "type": "integer",
+                          "enum": [
+                            503
+                          ]
+                        },
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "RESOURCE_BUSY",
+                            "DEPENDENCY_UNAVAILABLE"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                },
+                "examples": {
+                  "RESOURCE_BUSY": {
+                    "value": {
+                      "statusCode": 503,
+                      "code": "RESOURCE_BUSY",
+                      "message": "The resource is busy. Retry the request with the same Idempotency-Key.",
+                      "details": {
+                        "reason": "lock_timeout"
+                      },
+                      "correlationId": "6f1d2c3b-4a5e-4f60-8a7b-9c0d1e2f3a4b",
+                      "timestamp": "2026-09-10T11:04:22.114Z"
+                    }
+                  },
+                  "DEPENDENCY_UNAVAILABLE": {
+                    "value": {
+                      "statusCode": 503,
+                      "code": "DEPENDENCY_UNAVAILABLE",
+                      "message": "A dependency we cannot work without is down; we fail closed. Transient.",
+                      "correlationId": "6f1d2c3b-4a5e-4f60-8a7b-9c0d1e2f3a4b",
+                      "timestamp": "2026-09-10T11:04:22.114Z"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "summary": "Create my transaction PIN",
+        "tags": [
+          "users"
+        ],
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "x-authentication": "active-user",
+        "x-idempotent": false,
+        "x-rate-limits": [
+          {
+            "name": "global",
+            "subject": "ip",
+            "limit": 100,
+            "windowSeconds": 60
+          },
+          {
+            "name": "transaction-pin-writes",
+            "subject": "user",
+            "limit": 10,
+            "windowSeconds": 3600
+          }
+        ]
+      },
+      "put": {
+        "description": "Give the current PIN and a new one. A wrong current PIN counts towards the lock (5 wrong in a row lock it until a reset).\n\n**Access:** an authenticated ACTIVE user (verified, not suspended).\n\n**Rate limit:** 100 per 60s per ip (`global`); 10 per 3600s per user (`transaction-pin-writes`). Refused with `503` if the limiter is unavailable.",
+        "operationId": "TransactionPinsController_change",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ChangeTransactionPinRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TransactionPinStatus"
+                }
+              }
+            },
+            "headers": {
+              "X-Correlation-Id": {
+                "description": "The request's correlation id (yours, or a generated UUID). Also in every error body.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`VALIDATION_FAILED`: The request is malformed. A body/query DTO failure lists `details.violations`; fix the request.\n\n`TRANSACTION_PIN_INVALID`: The transaction PIN is wrong. `details.attemptsRemaining` says how many tries are left before it locks. Nothing moved; any emailed code is still usable.\n\n`TRANSACTION_PIN_TOO_WEAK`: The PIN must be 6 digits, not all the same digit, not a straight sequence (123456, 654321) and not your current PIN.",
+            "headers": {
+              "X-Correlation-Id": {
+                "description": "The request's correlation id (yours, or a generated UUID). Also in every error body.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ErrorResponse"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "statusCode": {
+                          "type": "integer",
+                          "enum": [
+                            400
+                          ]
+                        },
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "VALIDATION_FAILED",
+                            "TRANSACTION_PIN_INVALID",
+                            "TRANSACTION_PIN_TOO_WEAK"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                },
+                "examples": {
+                  "VALIDATION_FAILED": {
+                    "value": {
+                      "statusCode": 400,
+                      "code": "VALIDATION_FAILED",
+                      "message": "Request validation failed.",
+                      "details": {
+                        "violations": [
+                          "amount must be a positive whole number of minor units, as a string"
+                        ]
+                      },
+                      "correlationId": "6f1d2c3b-4a5e-4f60-8a7b-9c0d1e2f3a4b",
+                      "timestamp": "2026-09-10T11:04:22.114Z"
+                    }
+                  },
+                  "TRANSACTION_PIN_INVALID": {
+                    "value": {
+                      "statusCode": 400,
+                      "code": "TRANSACTION_PIN_INVALID",
+                      "message": "The transaction PIN is wrong. `details.attemptsRemaining` says how many tries are left before it locks. Nothing moved; any emailed code is still usable.",
+                      "correlationId": "6f1d2c3b-4a5e-4f60-8a7b-9c0d1e2f3a4b",
+                      "timestamp": "2026-09-10T11:04:22.114Z"
+                    }
+                  },
+                  "TRANSACTION_PIN_TOO_WEAK": {
+                    "value": {
+                      "statusCode": 400,
+                      "code": "TRANSACTION_PIN_TOO_WEAK",
+                      "message": "The PIN must be 6 digits, not all the same digit, not a straight sequence (123456, 654321) and not your current PIN.",
+                      "correlationId": "6f1d2c3b-4a5e-4f60-8a7b-9c0d1e2f3a4b",
+                      "timestamp": "2026-09-10T11:04:22.114Z"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`UNAUTHENTICATED`: No valid credentials: missing/expired/revoked access token, a refused refresh token, or a bad webhook signature.",
+            "headers": {
+              "X-Correlation-Id": {
+                "description": "The request's correlation id (yours, or a generated UUID). Also in every error body.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ErrorResponse"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "statusCode": {
+                          "type": "integer",
+                          "enum": [
+                            401
+                          ]
+                        },
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "UNAUTHENTICATED"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                },
+                "examples": {
+                  "UNAUTHENTICATED": {
+                    "value": {
+                      "statusCode": 401,
+                      "code": "UNAUTHENTICATED",
+                      "message": "Authentication is required.",
+                      "correlationId": "6f1d2c3b-4a5e-4f60-8a7b-9c0d1e2f3a4b",
+                      "timestamp": "2026-09-10T11:04:22.114Z"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`ACCOUNT_SUSPENDED`: The account is suspended.\n\n`EMAIL_NOT_VERIFIED`: Verify the email address first.",
+            "headers": {
+              "X-Correlation-Id": {
+                "description": "The request's correlation id (yours, or a generated UUID). Also in every error body.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ErrorResponse"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "statusCode": {
+                          "type": "integer",
+                          "enum": [
+                            403
+                          ]
+                        },
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "ACCOUNT_SUSPENDED",
+                            "EMAIL_NOT_VERIFIED"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                },
+                "examples": {
+                  "ACCOUNT_SUSPENDED": {
+                    "value": {
+                      "statusCode": 403,
+                      "code": "ACCOUNT_SUSPENDED",
+                      "message": "The account is suspended.",
+                      "correlationId": "6f1d2c3b-4a5e-4f60-8a7b-9c0d1e2f3a4b",
+                      "timestamp": "2026-09-10T11:04:22.114Z"
+                    }
+                  },
+                  "EMAIL_NOT_VERIFIED": {
+                    "value": {
+                      "statusCode": 403,
+                      "code": "EMAIL_NOT_VERIFIED",
+                      "message": "Verify the email address first.",
+                      "correlationId": "6f1d2c3b-4a5e-4f60-8a7b-9c0d1e2f3a4b",
+                      "timestamp": "2026-09-10T11:04:22.114Z"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`TRANSACTION_PIN_NOT_SET`: You have no transaction PIN yet: create one (POST /users/me/transaction-pin) before withdrawing or converting.",
+            "headers": {
+              "X-Correlation-Id": {
+                "description": "The request's correlation id (yours, or a generated UUID). Also in every error body.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ErrorResponse"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "statusCode": {
+                          "type": "integer",
+                          "enum": [
+                            409
+                          ]
+                        },
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "TRANSACTION_PIN_NOT_SET"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                },
+                "examples": {
+                  "TRANSACTION_PIN_NOT_SET": {
+                    "value": {
+                      "statusCode": 409,
+                      "code": "TRANSACTION_PIN_NOT_SET",
+                      "message": "You have no transaction PIN yet: create one (POST /users/me/transaction-pin) before withdrawing or converting.",
+                      "correlationId": "6f1d2c3b-4a5e-4f60-8a7b-9c0d1e2f3a4b",
+                      "timestamp": "2026-09-10T11:04:22.114Z"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "`PAYLOAD_TOO_LARGE`: The body exceeds 100 KB.",
+            "headers": {
+              "X-Correlation-Id": {
+                "description": "The request's correlation id (yours, or a generated UUID). Also in every error body.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ErrorResponse"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "statusCode": {
+                          "type": "integer",
+                          "enum": [
+                            413
+                          ]
+                        },
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "PAYLOAD_TOO_LARGE"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                },
+                "examples": {
+                  "PAYLOAD_TOO_LARGE": {
+                    "value": {
+                      "statusCode": 413,
+                      "code": "PAYLOAD_TOO_LARGE",
+                      "message": "The body exceeds 100 KB.",
+                      "correlationId": "6f1d2c3b-4a5e-4f60-8a7b-9c0d1e2f3a4b",
+                      "timestamp": "2026-09-10T11:04:22.114Z"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "423": {
+            "description": "`TRANSACTION_PIN_LOCKED`: Too many wrong PINs: the PIN is locked until it is reset with your password and an emailed code. Nothing moved.",
+            "headers": {
+              "X-Correlation-Id": {
+                "description": "The request's correlation id (yours, or a generated UUID). Also in every error body.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ErrorResponse"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "statusCode": {
+                          "type": "integer",
+                          "enum": [
+                            423
+                          ]
+                        },
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "TRANSACTION_PIN_LOCKED"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                },
+                "examples": {
+                  "TRANSACTION_PIN_LOCKED": {
+                    "value": {
+                      "statusCode": 423,
+                      "code": "TRANSACTION_PIN_LOCKED",
+                      "message": "Too many wrong PINs: the PIN is locked until it is reset with your password and an emailed code. Nothing moved.",
+                      "correlationId": "6f1d2c3b-4a5e-4f60-8a7b-9c0d1e2f3a4b",
+                      "timestamp": "2026-09-10T11:04:22.114Z"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "`RATE_LIMITED`: Too many requests. Retry after `Retry-After` seconds.",
+            "headers": {
+              "X-Correlation-Id": {
+                "description": "The request's correlation id (yours, or a generated UUID). Also in every error body.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Retry-After": {
+                "description": "Seconds to wait before retrying.",
+                "schema": {
+                  "type": "integer",
+                  "minimum": 0
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ErrorResponse"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "statusCode": {
+                          "type": "integer",
+                          "enum": [
+                            429
+                          ]
+                        },
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "RATE_LIMITED"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                },
+                "examples": {
+                  "RATE_LIMITED": {
+                    "value": {
+                      "statusCode": 429,
+                      "code": "RATE_LIMITED",
+                      "message": "Too many requests. Retry after the time given in the Retry-After header.",
+                      "details": {
+                        "retryAfterSeconds": 42
+                      },
+                      "correlationId": "6f1d2c3b-4a5e-4f60-8a7b-9c0d1e2f3a4b",
+                      "timestamp": "2026-09-10T11:04:22.114Z"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`INVARIANT_VIOLATION`: Our bug, failed loudly. Quote the `correlationId`.\n\n`INTERNAL_ERROR`: Unexpected error. Quote the `correlationId`.",
+            "headers": {
+              "X-Correlation-Id": {
+                "description": "The request's correlation id (yours, or a generated UUID). Also in every error body.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ErrorResponse"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "statusCode": {
+                          "type": "integer",
+                          "enum": [
+                            500
+                          ]
+                        },
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "INVARIANT_VIOLATION",
+                            "INTERNAL_ERROR"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                },
+                "examples": {
+                  "INVARIANT_VIOLATION": {
+                    "value": {
+                      "statusCode": 500,
+                      "code": "INVARIANT_VIOLATION",
+                      "message": "An unexpected error occurred.",
+                      "correlationId": "6f1d2c3b-4a5e-4f60-8a7b-9c0d1e2f3a4b",
+                      "timestamp": "2026-09-10T11:04:22.114Z"
+                    }
+                  },
+                  "INTERNAL_ERROR": {
+                    "value": {
+                      "statusCode": 500,
+                      "code": "INTERNAL_ERROR",
+                      "message": "An unexpected error occurred.",
+                      "correlationId": "6f1d2c3b-4a5e-4f60-8a7b-9c0d1e2f3a4b",
+                      "timestamp": "2026-09-10T11:04:22.114Z"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "`RESOURCE_BUSY`: Transient lock or statement timeout. Retry with the SAME `Idempotency-Key`.\n\n`DEPENDENCY_UNAVAILABLE`: A dependency we cannot work without is down; we fail closed. Transient.",
+            "headers": {
+              "X-Correlation-Id": {
+                "description": "The request's correlation id (yours, or a generated UUID). Also in every error body.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Retry-After": {
+                "description": "Seconds to wait before retrying.",
+                "schema": {
+                  "type": "integer",
+                  "minimum": 0
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ErrorResponse"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "statusCode": {
+                          "type": "integer",
+                          "enum": [
+                            503
+                          ]
+                        },
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "RESOURCE_BUSY",
+                            "DEPENDENCY_UNAVAILABLE"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                },
+                "examples": {
+                  "RESOURCE_BUSY": {
+                    "value": {
+                      "statusCode": 503,
+                      "code": "RESOURCE_BUSY",
+                      "message": "The resource is busy. Retry the request with the same Idempotency-Key.",
+                      "details": {
+                        "reason": "lock_timeout"
+                      },
+                      "correlationId": "6f1d2c3b-4a5e-4f60-8a7b-9c0d1e2f3a4b",
+                      "timestamp": "2026-09-10T11:04:22.114Z"
+                    }
+                  },
+                  "DEPENDENCY_UNAVAILABLE": {
+                    "value": {
+                      "statusCode": 503,
+                      "code": "DEPENDENCY_UNAVAILABLE",
+                      "message": "A dependency we cannot work without is down; we fail closed. Transient.",
+                      "correlationId": "6f1d2c3b-4a5e-4f60-8a7b-9c0d1e2f3a4b",
+                      "timestamp": "2026-09-10T11:04:22.114Z"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "summary": "Change my transaction PIN",
+        "tags": [
+          "users"
+        ],
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "x-authentication": "active-user",
+        "x-idempotent": false,
+        "x-rate-limits": [
+          {
+            "name": "global",
+            "subject": "ip",
+            "limit": 100,
+            "windowSeconds": 60
+          },
+          {
+            "name": "transaction-pin-writes",
+            "subject": "user",
+            "limit": 10,
+            "windowSeconds": 3600
+          }
+        ]
+      }
+    },
+    "/api/v1/users/me/transaction-pin/reset-code": {
+      "post": {
+        "description": "For a forgotten or locked PIN. The 6-digit code is valid for 10 minutes; a newer code replaces an older one.\n\n**Access:** an authenticated ACTIVE user (verified, not suspended).\n\n**Rate limit:** 100 per 60s per ip (`global`); 1 per 60s per user (`transaction-pin-reset-code-cooldown`); 5 per 3600s per user (`transaction-pin-reset-code-hourly`). Refused with `503` if the limiter is unavailable.",
+        "operationId": "TransactionPinsController_requestResetCode",
+        "parameters": [],
+        "responses": {
+          "202": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TransactionPinResetCodeRequested"
+                }
+              }
+            },
+            "headers": {
+              "X-Correlation-Id": {
+                "description": "The request's correlation id (yours, or a generated UUID). Also in every error body.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`UNAUTHENTICATED`: No valid credentials: missing/expired/revoked access token, a refused refresh token, or a bad webhook signature.",
+            "headers": {
+              "X-Correlation-Id": {
+                "description": "The request's correlation id (yours, or a generated UUID). Also in every error body.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ErrorResponse"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "statusCode": {
+                          "type": "integer",
+                          "enum": [
+                            401
+                          ]
+                        },
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "UNAUTHENTICATED"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                },
+                "examples": {
+                  "UNAUTHENTICATED": {
+                    "value": {
+                      "statusCode": 401,
+                      "code": "UNAUTHENTICATED",
+                      "message": "Authentication is required.",
+                      "correlationId": "6f1d2c3b-4a5e-4f60-8a7b-9c0d1e2f3a4b",
+                      "timestamp": "2026-09-10T11:04:22.114Z"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`ACCOUNT_SUSPENDED`: The account is suspended.\n\n`EMAIL_NOT_VERIFIED`: Verify the email address first.",
+            "headers": {
+              "X-Correlation-Id": {
+                "description": "The request's correlation id (yours, or a generated UUID). Also in every error body.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ErrorResponse"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "statusCode": {
+                          "type": "integer",
+                          "enum": [
+                            403
+                          ]
+                        },
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "ACCOUNT_SUSPENDED",
+                            "EMAIL_NOT_VERIFIED"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                },
+                "examples": {
+                  "ACCOUNT_SUSPENDED": {
+                    "value": {
+                      "statusCode": 403,
+                      "code": "ACCOUNT_SUSPENDED",
+                      "message": "The account is suspended.",
+                      "correlationId": "6f1d2c3b-4a5e-4f60-8a7b-9c0d1e2f3a4b",
+                      "timestamp": "2026-09-10T11:04:22.114Z"
+                    }
+                  },
+                  "EMAIL_NOT_VERIFIED": {
+                    "value": {
+                      "statusCode": 403,
+                      "code": "EMAIL_NOT_VERIFIED",
+                      "message": "Verify the email address first.",
+                      "correlationId": "6f1d2c3b-4a5e-4f60-8a7b-9c0d1e2f3a4b",
+                      "timestamp": "2026-09-10T11:04:22.114Z"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`TRANSACTION_PIN_NOT_SET`: You have no transaction PIN yet: create one (POST /users/me/transaction-pin) before withdrawing or converting.",
+            "headers": {
+              "X-Correlation-Id": {
+                "description": "The request's correlation id (yours, or a generated UUID). Also in every error body.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ErrorResponse"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "statusCode": {
+                          "type": "integer",
+                          "enum": [
+                            409
+                          ]
+                        },
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "TRANSACTION_PIN_NOT_SET"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                },
+                "examples": {
+                  "TRANSACTION_PIN_NOT_SET": {
+                    "value": {
+                      "statusCode": 409,
+                      "code": "TRANSACTION_PIN_NOT_SET",
+                      "message": "You have no transaction PIN yet: create one (POST /users/me/transaction-pin) before withdrawing or converting.",
+                      "correlationId": "6f1d2c3b-4a5e-4f60-8a7b-9c0d1e2f3a4b",
+                      "timestamp": "2026-09-10T11:04:22.114Z"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "`RATE_LIMITED`: Too many requests. Retry after `Retry-After` seconds.",
+            "headers": {
+              "X-Correlation-Id": {
+                "description": "The request's correlation id (yours, or a generated UUID). Also in every error body.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Retry-After": {
+                "description": "Seconds to wait before retrying.",
+                "schema": {
+                  "type": "integer",
+                  "minimum": 0
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ErrorResponse"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "statusCode": {
+                          "type": "integer",
+                          "enum": [
+                            429
+                          ]
+                        },
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "RATE_LIMITED"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                },
+                "examples": {
+                  "RATE_LIMITED": {
+                    "value": {
+                      "statusCode": 429,
+                      "code": "RATE_LIMITED",
+                      "message": "Too many requests. Retry after the time given in the Retry-After header.",
+                      "details": {
+                        "retryAfterSeconds": 42
+                      },
+                      "correlationId": "6f1d2c3b-4a5e-4f60-8a7b-9c0d1e2f3a4b",
+                      "timestamp": "2026-09-10T11:04:22.114Z"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`INVARIANT_VIOLATION`: Our bug, failed loudly. Quote the `correlationId`.\n\n`INTERNAL_ERROR`: Unexpected error. Quote the `correlationId`.",
+            "headers": {
+              "X-Correlation-Id": {
+                "description": "The request's correlation id (yours, or a generated UUID). Also in every error body.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ErrorResponse"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "statusCode": {
+                          "type": "integer",
+                          "enum": [
+                            500
+                          ]
+                        },
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "INVARIANT_VIOLATION",
+                            "INTERNAL_ERROR"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                },
+                "examples": {
+                  "INVARIANT_VIOLATION": {
+                    "value": {
+                      "statusCode": 500,
+                      "code": "INVARIANT_VIOLATION",
+                      "message": "An unexpected error occurred.",
+                      "correlationId": "6f1d2c3b-4a5e-4f60-8a7b-9c0d1e2f3a4b",
+                      "timestamp": "2026-09-10T11:04:22.114Z"
+                    }
+                  },
+                  "INTERNAL_ERROR": {
+                    "value": {
+                      "statusCode": 500,
+                      "code": "INTERNAL_ERROR",
+                      "message": "An unexpected error occurred.",
+                      "correlationId": "6f1d2c3b-4a5e-4f60-8a7b-9c0d1e2f3a4b",
+                      "timestamp": "2026-09-10T11:04:22.114Z"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "`RESOURCE_BUSY`: Transient lock or statement timeout. Retry with the SAME `Idempotency-Key`.\n\n`DEPENDENCY_UNAVAILABLE`: A dependency we cannot work without is down; we fail closed. Transient.",
+            "headers": {
+              "X-Correlation-Id": {
+                "description": "The request's correlation id (yours, or a generated UUID). Also in every error body.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Retry-After": {
+                "description": "Seconds to wait before retrying.",
+                "schema": {
+                  "type": "integer",
+                  "minimum": 0
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ErrorResponse"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "statusCode": {
+                          "type": "integer",
+                          "enum": [
+                            503
+                          ]
+                        },
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "RESOURCE_BUSY",
+                            "DEPENDENCY_UNAVAILABLE"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                },
+                "examples": {
+                  "RESOURCE_BUSY": {
+                    "value": {
+                      "statusCode": 503,
+                      "code": "RESOURCE_BUSY",
+                      "message": "The resource is busy. Retry the request with the same Idempotency-Key.",
+                      "details": {
+                        "reason": "lock_timeout"
+                      },
+                      "correlationId": "6f1d2c3b-4a5e-4f60-8a7b-9c0d1e2f3a4b",
+                      "timestamp": "2026-09-10T11:04:22.114Z"
+                    }
+                  },
+                  "DEPENDENCY_UNAVAILABLE": {
+                    "value": {
+                      "statusCode": 503,
+                      "code": "DEPENDENCY_UNAVAILABLE",
+                      "message": "A dependency we cannot work without is down; we fail closed. Transient.",
+                      "correlationId": "6f1d2c3b-4a5e-4f60-8a7b-9c0d1e2f3a4b",
+                      "timestamp": "2026-09-10T11:04:22.114Z"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "summary": "Email me a PIN reset code",
+        "tags": [
+          "users"
+        ],
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "x-authentication": "active-user",
+        "x-idempotent": false,
+        "x-rate-limits": [
+          {
+            "name": "global",
+            "subject": "ip",
+            "limit": 100,
+            "windowSeconds": 60
+          },
+          {
+            "name": "transaction-pin-reset-code-cooldown",
+            "subject": "user",
+            "limit": 1,
+            "windowSeconds": 60
+          },
+          {
+            "name": "transaction-pin-reset-code-hourly",
+            "subject": "user",
+            "limit": 5,
+            "windowSeconds": 3600
+          }
+        ]
+      }
+    },
+    "/api/v1/users/me/transaction-pin/reset": {
+      "post": {
+        "description": "Your account password, the emailed reset code and a new PIN. Unlocks a locked PIN. You get an email when it is reset.\n\n**Access:** an authenticated ACTIVE user (verified, not suspended).\n\n**Rate limit:** 100 per 60s per ip (`global`); 10 per 3600s per user (`transaction-pin-writes`). Refused with `503` if the limiter is unavailable.",
+        "operationId": "TransactionPinsController_reset",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ResetTransactionPinRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TransactionPinStatus"
+                }
+              }
+            },
+            "headers": {
+              "X-Correlation-Id": {
+                "description": "The request's correlation id (yours, or a generated UUID). Also in every error body.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`VALIDATION_FAILED`: The request is malformed. A body/query DTO failure lists `details.violations`; fix the request.\n\n`TRANSACTION_PIN_TOO_WEAK`: The PIN must be 6 digits, not all the same digit, not a straight sequence (123456, 654321) and not your current PIN.\n\n`TRANSACTION_PIN_RESET_CODE_INVALID`: The PIN reset code is wrong, expired, used up or replaced by a newer one. Request a new code.\n\n`PASSWORD_INCORRECT`: The account password is incorrect.",
+            "headers": {
+              "X-Correlation-Id": {
+                "description": "The request's correlation id (yours, or a generated UUID). Also in every error body.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ErrorResponse"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "statusCode": {
+                          "type": "integer",
+                          "enum": [
+                            400
+                          ]
+                        },
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "VALIDATION_FAILED",
+                            "TRANSACTION_PIN_TOO_WEAK",
+                            "TRANSACTION_PIN_RESET_CODE_INVALID",
+                            "PASSWORD_INCORRECT"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                },
+                "examples": {
+                  "VALIDATION_FAILED": {
+                    "value": {
+                      "statusCode": 400,
+                      "code": "VALIDATION_FAILED",
+                      "message": "Request validation failed.",
+                      "details": {
+                        "violations": [
+                          "amount must be a positive whole number of minor units, as a string"
+                        ]
+                      },
+                      "correlationId": "6f1d2c3b-4a5e-4f60-8a7b-9c0d1e2f3a4b",
+                      "timestamp": "2026-09-10T11:04:22.114Z"
+                    }
+                  },
+                  "TRANSACTION_PIN_TOO_WEAK": {
+                    "value": {
+                      "statusCode": 400,
+                      "code": "TRANSACTION_PIN_TOO_WEAK",
+                      "message": "The PIN must be 6 digits, not all the same digit, not a straight sequence (123456, 654321) and not your current PIN.",
+                      "correlationId": "6f1d2c3b-4a5e-4f60-8a7b-9c0d1e2f3a4b",
+                      "timestamp": "2026-09-10T11:04:22.114Z"
+                    }
+                  },
+                  "TRANSACTION_PIN_RESET_CODE_INVALID": {
+                    "value": {
+                      "statusCode": 400,
+                      "code": "TRANSACTION_PIN_RESET_CODE_INVALID",
+                      "message": "The PIN reset code is wrong, expired, used up or replaced by a newer one. Request a new code.",
+                      "correlationId": "6f1d2c3b-4a5e-4f60-8a7b-9c0d1e2f3a4b",
+                      "timestamp": "2026-09-10T11:04:22.114Z"
+                    }
+                  },
+                  "PASSWORD_INCORRECT": {
+                    "value": {
+                      "statusCode": 400,
+                      "code": "PASSWORD_INCORRECT",
+                      "message": "The account password is incorrect.",
+                      "correlationId": "6f1d2c3b-4a5e-4f60-8a7b-9c0d1e2f3a4b",
+                      "timestamp": "2026-09-10T11:04:22.114Z"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`UNAUTHENTICATED`: No valid credentials: missing/expired/revoked access token, a refused refresh token, or a bad webhook signature.",
+            "headers": {
+              "X-Correlation-Id": {
+                "description": "The request's correlation id (yours, or a generated UUID). Also in every error body.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ErrorResponse"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "statusCode": {
+                          "type": "integer",
+                          "enum": [
+                            401
+                          ]
+                        },
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "UNAUTHENTICATED"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                },
+                "examples": {
+                  "UNAUTHENTICATED": {
+                    "value": {
+                      "statusCode": 401,
+                      "code": "UNAUTHENTICATED",
+                      "message": "Authentication is required.",
+                      "correlationId": "6f1d2c3b-4a5e-4f60-8a7b-9c0d1e2f3a4b",
+                      "timestamp": "2026-09-10T11:04:22.114Z"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`ACCOUNT_SUSPENDED`: The account is suspended.\n\n`EMAIL_NOT_VERIFIED`: Verify the email address first.",
+            "headers": {
+              "X-Correlation-Id": {
+                "description": "The request's correlation id (yours, or a generated UUID). Also in every error body.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ErrorResponse"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "statusCode": {
+                          "type": "integer",
+                          "enum": [
+                            403
+                          ]
+                        },
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "ACCOUNT_SUSPENDED",
+                            "EMAIL_NOT_VERIFIED"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                },
+                "examples": {
+                  "ACCOUNT_SUSPENDED": {
+                    "value": {
+                      "statusCode": 403,
+                      "code": "ACCOUNT_SUSPENDED",
+                      "message": "The account is suspended.",
+                      "correlationId": "6f1d2c3b-4a5e-4f60-8a7b-9c0d1e2f3a4b",
+                      "timestamp": "2026-09-10T11:04:22.114Z"
+                    }
+                  },
+                  "EMAIL_NOT_VERIFIED": {
+                    "value": {
+                      "statusCode": 403,
+                      "code": "EMAIL_NOT_VERIFIED",
+                      "message": "Verify the email address first.",
+                      "correlationId": "6f1d2c3b-4a5e-4f60-8a7b-9c0d1e2f3a4b",
+                      "timestamp": "2026-09-10T11:04:22.114Z"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`TRANSACTION_PIN_NOT_SET`: You have no transaction PIN yet: create one (POST /users/me/transaction-pin) before withdrawing or converting.",
+            "headers": {
+              "X-Correlation-Id": {
+                "description": "The request's correlation id (yours, or a generated UUID). Also in every error body.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ErrorResponse"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "statusCode": {
+                          "type": "integer",
+                          "enum": [
+                            409
+                          ]
+                        },
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "TRANSACTION_PIN_NOT_SET"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                },
+                "examples": {
+                  "TRANSACTION_PIN_NOT_SET": {
+                    "value": {
+                      "statusCode": 409,
+                      "code": "TRANSACTION_PIN_NOT_SET",
+                      "message": "You have no transaction PIN yet: create one (POST /users/me/transaction-pin) before withdrawing or converting.",
+                      "correlationId": "6f1d2c3b-4a5e-4f60-8a7b-9c0d1e2f3a4b",
+                      "timestamp": "2026-09-10T11:04:22.114Z"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "`PAYLOAD_TOO_LARGE`: The body exceeds 100 KB.",
+            "headers": {
+              "X-Correlation-Id": {
+                "description": "The request's correlation id (yours, or a generated UUID). Also in every error body.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ErrorResponse"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "statusCode": {
+                          "type": "integer",
+                          "enum": [
+                            413
+                          ]
+                        },
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "PAYLOAD_TOO_LARGE"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                },
+                "examples": {
+                  "PAYLOAD_TOO_LARGE": {
+                    "value": {
+                      "statusCode": 413,
+                      "code": "PAYLOAD_TOO_LARGE",
+                      "message": "The body exceeds 100 KB.",
+                      "correlationId": "6f1d2c3b-4a5e-4f60-8a7b-9c0d1e2f3a4b",
+                      "timestamp": "2026-09-10T11:04:22.114Z"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "`RATE_LIMITED`: Too many requests. Retry after `Retry-After` seconds.",
+            "headers": {
+              "X-Correlation-Id": {
+                "description": "The request's correlation id (yours, or a generated UUID). Also in every error body.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Retry-After": {
+                "description": "Seconds to wait before retrying.",
+                "schema": {
+                  "type": "integer",
+                  "minimum": 0
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ErrorResponse"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "statusCode": {
+                          "type": "integer",
+                          "enum": [
+                            429
+                          ]
+                        },
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "RATE_LIMITED"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                },
+                "examples": {
+                  "RATE_LIMITED": {
+                    "value": {
+                      "statusCode": 429,
+                      "code": "RATE_LIMITED",
+                      "message": "Too many requests. Retry after the time given in the Retry-After header.",
+                      "details": {
+                        "retryAfterSeconds": 42
+                      },
+                      "correlationId": "6f1d2c3b-4a5e-4f60-8a7b-9c0d1e2f3a4b",
+                      "timestamp": "2026-09-10T11:04:22.114Z"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`INVARIANT_VIOLATION`: Our bug, failed loudly. Quote the `correlationId`.\n\n`INTERNAL_ERROR`: Unexpected error. Quote the `correlationId`.",
+            "headers": {
+              "X-Correlation-Id": {
+                "description": "The request's correlation id (yours, or a generated UUID). Also in every error body.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ErrorResponse"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "statusCode": {
+                          "type": "integer",
+                          "enum": [
+                            500
+                          ]
+                        },
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "INVARIANT_VIOLATION",
+                            "INTERNAL_ERROR"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                },
+                "examples": {
+                  "INVARIANT_VIOLATION": {
+                    "value": {
+                      "statusCode": 500,
+                      "code": "INVARIANT_VIOLATION",
+                      "message": "An unexpected error occurred.",
+                      "correlationId": "6f1d2c3b-4a5e-4f60-8a7b-9c0d1e2f3a4b",
+                      "timestamp": "2026-09-10T11:04:22.114Z"
+                    }
+                  },
+                  "INTERNAL_ERROR": {
+                    "value": {
+                      "statusCode": 500,
+                      "code": "INTERNAL_ERROR",
+                      "message": "An unexpected error occurred.",
+                      "correlationId": "6f1d2c3b-4a5e-4f60-8a7b-9c0d1e2f3a4b",
+                      "timestamp": "2026-09-10T11:04:22.114Z"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "`RESOURCE_BUSY`: Transient lock or statement timeout. Retry with the SAME `Idempotency-Key`.\n\n`DEPENDENCY_UNAVAILABLE`: A dependency we cannot work without is down; we fail closed. Transient.",
+            "headers": {
+              "X-Correlation-Id": {
+                "description": "The request's correlation id (yours, or a generated UUID). Also in every error body.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Retry-After": {
+                "description": "Seconds to wait before retrying.",
+                "schema": {
+                  "type": "integer",
+                  "minimum": 0
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ErrorResponse"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "statusCode": {
+                          "type": "integer",
+                          "enum": [
+                            503
+                          ]
+                        },
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "RESOURCE_BUSY",
+                            "DEPENDENCY_UNAVAILABLE"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                },
+                "examples": {
+                  "RESOURCE_BUSY": {
+                    "value": {
+                      "statusCode": 503,
+                      "code": "RESOURCE_BUSY",
+                      "message": "The resource is busy. Retry the request with the same Idempotency-Key.",
+                      "details": {
+                        "reason": "lock_timeout"
+                      },
+                      "correlationId": "6f1d2c3b-4a5e-4f60-8a7b-9c0d1e2f3a4b",
+                      "timestamp": "2026-09-10T11:04:22.114Z"
+                    }
+                  },
+                  "DEPENDENCY_UNAVAILABLE": {
+                    "value": {
+                      "statusCode": 503,
+                      "code": "DEPENDENCY_UNAVAILABLE",
+                      "message": "A dependency we cannot work without is down; we fail closed. Transient.",
+                      "correlationId": "6f1d2c3b-4a5e-4f60-8a7b-9c0d1e2f3a4b",
+                      "timestamp": "2026-09-10T11:04:22.114Z"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "summary": "Reset my transaction PIN",
+        "tags": [
+          "users"
+        ],
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "x-authentication": "active-user",
+        "x-idempotent": false,
+        "x-rate-limits": [
+          {
+            "name": "global",
+            "subject": "ip",
+            "limit": 100,
+            "windowSeconds": 60
+          },
+          {
+            "name": "transaction-pin-writes",
+            "subject": "user",
+            "limit": 10,
+            "windowSeconds": 3600
           }
         ]
       }
@@ -23392,11 +25708,18 @@
             "pattern": "^[1-9]\\d{0,18}$",
             "example": "7800000",
             "description": "Price protection with `targetAmount` only: refuse (`409 PRICE_LIMIT_EXCEEDED`) if the debit would be larger. A whole number of minor units, as a string (never a JSON number). The scale is the currency's `minorUnit`: NGN 2 (`\"150000\"` = ₦1,500.00), USD 2, JPY 0 (`\"1500\"` = ¥1,500), KWD 3 (`\"1500\"` = 1.500 KWD)."
+          },
+          "transactionPin": {
+            "type": "string",
+            "pattern": "^\\d{6}$",
+            "example": "402815",
+            "description": "Your 6-digit transaction PIN, the final confirmation. Wrong: `400 TRANSACTION_PIN_INVALID` (5 in a row lock it)."
           }
         },
         "required": [
           "from",
-          "to"
+          "to",
+          "transactionPin"
         ]
       },
       "ConversionLeg": {
@@ -23557,10 +25880,17 @@
             "format": "uuid",
             "example": "7d6c5b4a-3928-4170-8e5d-4c3b2a190807",
             "description": "An OPEN quote of yours (version-4 UUID), executed with its locked amounts."
+          },
+          "transactionPin": {
+            "type": "string",
+            "pattern": "^\\d{6}$",
+            "example": "402815",
+            "description": "Your 6-digit transaction PIN, the final confirmation. Wrong: `400 TRANSACTION_PIN_INVALID` (5 in a row lock it)."
           }
         },
         "required": [
-          "quoteId"
+          "quoteId",
+          "transactionPin"
         ]
       },
       "TransactionLink": {
@@ -26399,13 +28729,20 @@
             "pattern": "^\\d{6}$",
             "example": "123456",
             "description": "The 6-digit code emailed by `POST /wallet/withdraw/one-time-password`. Valid 10 minutes for ONE withdrawal."
+          },
+          "transactionPin": {
+            "type": "string",
+            "pattern": "^\\d{6}$",
+            "example": "402815",
+            "description": "Your 6-digit transaction PIN, the final confirmation. Wrong: `400 TRANSACTION_PIN_INVALID` (5 in a row lock it)."
           }
         },
         "required": [
           "beneficiaryId",
           "amount",
           "currency",
-          "oneTimePassword"
+          "oneTimePassword",
+          "transactionPin"
         ]
       },
       "PaystackWithdrawalAccepted": {
@@ -26879,6 +29216,125 @@
           "nextCursor"
         ]
       },
+      "CreateTransactionPinRequest": {
+        "type": "object",
+        "properties": {
+          "pin": {
+            "type": "string",
+            "pattern": "^\\d{6}$",
+            "example": "402815",
+            "description": "Your new transaction PIN. Six digits; not all the same digit, not a straight sequence."
+          },
+          "password": {
+            "type": "string",
+            "format": "password",
+            "example": "<your account password>",
+            "description": "Your account password, to confirm it is you."
+          }
+        },
+        "required": [
+          "pin",
+          "password"
+        ]
+      },
+      "TransactionPinStatus": {
+        "type": "object",
+        "properties": {
+          "set": {
+            "type": "boolean",
+            "example": true,
+            "description": "You have a transaction PIN (required to withdraw and to convert)."
+          },
+          "locked": {
+            "type": "boolean",
+            "example": false,
+            "description": "Locked after too many wrong PINs: reset it with your password and an emailed code."
+          }
+        },
+        "required": [
+          "set",
+          "locked"
+        ]
+      },
+      "ChangeTransactionPinRequest": {
+        "type": "object",
+        "properties": {
+          "currentPin": {
+            "type": "string",
+            "pattern": "^\\d{6}$",
+            "example": "402815",
+            "description": "Your current transaction PIN (a wrong one counts towards the lock)."
+          },
+          "newPin": {
+            "type": "string",
+            "pattern": "^\\d{6}$",
+            "example": "402815",
+            "description": "Your new transaction PIN (must differ from the current one). Six digits; not all the same digit, not a straight sequence."
+          }
+        },
+        "required": [
+          "currentPin",
+          "newPin"
+        ]
+      },
+      "TransactionPinResetCodeRequested": {
+        "type": "object",
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": [
+              "REQUESTED"
+            ],
+            "example": "REQUESTED",
+            "description": "The code is generated and emailed by the worker, within seconds."
+          },
+          "channel": {
+            "type": "string",
+            "enum": [
+              "EMAIL"
+            ],
+            "example": "EMAIL"
+          },
+          "expiresInSeconds": {
+            "type": "integer",
+            "example": 600,
+            "description": "How long the code stays valid once sent."
+          }
+        },
+        "required": [
+          "status",
+          "channel",
+          "expiresInSeconds"
+        ]
+      },
+      "ResetTransactionPinRequest": {
+        "type": "object",
+        "properties": {
+          "password": {
+            "type": "string",
+            "format": "password",
+            "example": "<your account password>",
+            "description": "Your account password."
+          },
+          "oneTimePassword": {
+            "type": "string",
+            "pattern": "^\\d{6}$",
+            "example": "518204",
+            "description": "The 6-digit code emailed by `POST /users/me/transaction-pin/reset-code`."
+          },
+          "newPin": {
+            "type": "string",
+            "pattern": "^\\d{6}$",
+            "example": "402815",
+            "description": "Your new transaction PIN. Six digits; not all the same digit, not a straight sequence."
+          }
+        },
+        "required": [
+          "password",
+          "oneTimePassword",
+          "newPin"
+        ]
+      },
       "Version": {
         "type": "object",
         "properties": {
@@ -27047,6 +29503,16 @@
             "format": "date-time",
             "example": "2026-09-29T09:58:12.000Z",
             "description": "When the account was created."
+          },
+          "transactionPinSet": {
+            "type": "boolean",
+            "example": true,
+            "description": "You have a transaction PIN (required to withdraw and to convert)."
+          },
+          "transactionPinLocked": {
+            "type": "boolean",
+            "example": false,
+            "description": "Your PIN is locked after too many wrong attempts: reset it to withdraw or convert again."
           }
         },
         "required": [
@@ -27055,7 +29521,9 @@
           "status",
           "role",
           "verifiedAt",
-          "createdAt"
+          "createdAt",
+          "transactionPinSet",
+          "transactionPinLocked"
         ]
       },
       "ErrorCode": {
@@ -27073,6 +29541,13 @@
           "INVALID_CREDENTIALS",
           "VERIFICATION_FAILED",
           "WITHDRAWAL_CODE_INVALID",
+          "TRANSACTION_PIN_NOT_SET",
+          "TRANSACTION_PIN_ALREADY_SET",
+          "TRANSACTION_PIN_INVALID",
+          "TRANSACTION_PIN_LOCKED",
+          "TRANSACTION_PIN_TOO_WEAK",
+          "TRANSACTION_PIN_RESET_CODE_INVALID",
+          "PASSWORD_INCORRECT",
           "FORBIDDEN",
           "ACCOUNT_SUSPENDED",
           "EMAIL_NOT_VERIFIED",
@@ -27127,7 +29602,7 @@
           "INTERNAL_ERROR",
           "HTTP_ERROR"
         ],
-        "description": "Stable error codes: clients branch on these. A code is never renamed or reused.\n\n- `VALIDATION_FAILED` (400): The request is malformed. A body/query DTO failure lists `details.violations`; fix the request.\n- `INVALID_AMOUNT` (400): The amount is not a positive whole number of minor units in range.\n- `UNSUPPORTED_CURRENCY` (400): The currency is not supported for this operation.\n- `SAME_CURRENCY` (400): `from` and `to` are the same currency.\n- `UNSUPPORTED_CURRENCY_PAIR` (400): The directional pair is not offered (or not active).\n- `IDEMPOTENCY_KEY_REQUIRED` (400): This route needs an `Idempotency-Key` header.\n- `IDEMPOTENCY_KEY_INVALID` (400): `Idempotency-Key` must be 16–128 characters of `[A-Za-z0-9_-]`.\n- `INVALID_CURSOR` (400): The cursor is malformed, from another version, or from a different sort/filter set. Restart from the first page.\n- `UNAUTHENTICATED` (401): No valid credentials: missing/expired/revoked access token, a refused refresh token, or a bad webhook signature.\n- `INVALID_CREDENTIALS` (401): Login refused. Deliberately the same for an unknown email, a wrong password, an unverified or a suspended account.\n- `VERIFICATION_FAILED` (400): The email, password and one-time password do not verify an account awaiting verification.\n- `WITHDRAWAL_CODE_INVALID` (400): The withdrawal code is wrong, expired, already used or replaced by a newer one. Request a new code; retry with a NEW Idempotency-Key (this refusal is stored for the key).\n- `FORBIDDEN` (403): Authenticated, but your role may not do this.\n- `ACCOUNT_SUSPENDED` (403): The account is suspended.\n- `EMAIL_NOT_VERIFIED` (403): Verify the email address first.\n- `NOT_FOUND` (404): No such route or resource.\n- `ACCOUNT_NOT_FOUND` (404): No such ledger account.\n- `RESERVATION_NOT_FOUND` (404): No such reservation.\n- `FUNDING_NOT_FOUND` (404): No such funding for this user (unknown and another user's are the same answer).\n- `WITHDRAWAL_NOT_FOUND` (404): No such withdrawal for this user (unknown and another user's are the same answer).\n- `WITHDRAWAL_BENEFICIARY_NOT_FOUND` (404): No such beneficiary for this user (unknown and another user's are the same answer).\n- `QUOTE_NOT_FOUND` (404): No such quote for this user (unknown and another user's are the same answer).\n- `TRANSACTION_NOT_FOUND` (404): No such transaction for this user (unknown and another user's are the same answer).\n- `RECONCILIATION_BREAK_NOT_FOUND` (404): No such reconciliation break.\n- `APPROVAL_NOT_FOUND` (404): No such approval.\n- `USER_NOT_FOUND` (404): No such user.\n- `RECONCILIATION_RUN_NOT_FOUND` (404): No such reconciliation run.\n- `SELF_APPROVAL_FORBIDDEN` (403): Four-eyes: you may not decide (or review) your own request.\n- `BREAK_GLASS_NOT_ALLOWED` (403): Break-glass is only for SUSPEND_USER and RATE_OVERRIDE (MANUAL_RATE).\n- `INSUFFICIENT_FUNDS` (409): The available balance does not cover it, even counting held funds: top up.\n- `FUNDS_RESERVED` (409): The total balance would cover it but part is held by a pending operation: wait for it.\n- `QUOTE_EXPIRED` (409): The quote's 30 seconds are over. Request a new quote.\n- `QUOTE_ALREADY_USED` (409): Quotes are single-use and this one was executed.\n- `IDEMPOTENCY_KEY_REUSE` (409): This key was used with a different request body on this route. Use a new key.\n- `REQUEST_IN_PROGRESS` (409): The same key is being processed right now. Retry after `Retry-After` with the same key.\n- `PERIOD_LOCKED` (409): The value time falls in a closed reporting period.\n- `ALREADY_CORRECTED` (409): The original transaction was already corrected.\n- `RESERVATION_NOT_ACTIVE` (409): The reservation is no longer active.\n- `RESERVATION_CONFLICT` (409): The reservation exists with different terms.\n- `PRICE_LIMIT_EXCEEDED` (409): The priced amounts breach `minimumTargetAmount` / `maximumSourceAmount`; `details` has the priced amounts.\n- `RECONCILIATION_RUN_LEASE_LOST` (409): Internal: a reconciliation run lost its lease.\n- `APPROVAL_ALREADY_DECIDED` (409): The approval is no longer PENDING (or is a break-glass use, which is never decided).\n- `APPROVAL_EXPIRED` (409): The approval passed its time to live without a decision.\n- `APPROVAL_REQUESTER_INELIGIBLE` (409): The requester no longer holds the role (or is no longer active).\n- `BREAK_GLASS_ALREADY_REVIEWED` (409): This break-glass use was already reviewed (or is not a break-glass use).\n- `ACTION_PRECONDITION_FAILED` (409): The world does not allow this action now (see `details`).\n- `BENEFICIARY_NOT_READY` (409): The beneficiary is still being verified with Paystack, or failed: only a READY one can receive a withdrawal.\n- `PAYLOAD_TOO_LARGE` (413): The body exceeds 100 KB.\n- `AMOUNT_TOO_SMALL` (422): Below the minimum for this currency or pair.\n- `AMOUNT_TOO_LARGE` (422): Above the per-operation maximum.\n- `DAILY_LIMIT_EXCEEDED` (422): The rolling 24-hour limit for this source currency would be exceeded.\n- `RATE_LIMITED` (429): Too many requests. Retry after `Retry-After` seconds.\n- `RESOURCE_BUSY` (503): Transient lock or statement timeout. Retry with the SAME `Idempotency-Key`.\n- `FX_RATE_STALE` (503): No executable rate right now (rates may still be displayed). Transient: retry later with the same key.\n- `FX_RATE_UNAVAILABLE` (503): No rate can be served at all. Transient.\n- `DEPENDENCY_UNAVAILABLE` (503): A dependency we cannot work without is down; we fail closed. Transient.\n- `WITHDRAWALS_DISABLED` (503): New withdrawals are switched off (or no worker can process them). Earlier requests keep their answers. Transient.\n- `INVARIANT_VIOLATION` (500): Our bug, failed loudly. Quote the `correlationId`.\n- `LEDGER_UNBALANCED` (500): Our bug: a posting did not balance. Quote the `correlationId`.\n- `INVALID_POSTING` (500): Our bug: an invalid posting was refused. Quote the `correlationId`.\n- `ACCOUNT_CURRENCY_MISMATCH` (500): Our bug: an entry's currency differs from its account's. Quote the `correlationId`.\n- `REVERSAL_MISMATCH` (500): Our bug: a reversal did not mirror its original. Quote the `correlationId`.\n- `INVALID_RESERVATION` (500): Our bug: an invalid reservation settlement. Quote the `correlationId`.\n- `INTERNAL_ERROR` (500): Unexpected error. Quote the `correlationId`.\n- `HTTP_ERROR` (400): An HTTP-level refusal without a dedicated code."
+        "description": "Stable error codes: clients branch on these. A code is never renamed or reused.\n\n- `VALIDATION_FAILED` (400): The request is malformed. A body/query DTO failure lists `details.violations`; fix the request.\n- `INVALID_AMOUNT` (400): The amount is not a positive whole number of minor units in range.\n- `UNSUPPORTED_CURRENCY` (400): The currency is not supported for this operation.\n- `SAME_CURRENCY` (400): `from` and `to` are the same currency.\n- `UNSUPPORTED_CURRENCY_PAIR` (400): The directional pair is not offered (or not active).\n- `IDEMPOTENCY_KEY_REQUIRED` (400): This route needs an `Idempotency-Key` header.\n- `IDEMPOTENCY_KEY_INVALID` (400): `Idempotency-Key` must be 16–128 characters of `[A-Za-z0-9_-]`.\n- `INVALID_CURSOR` (400): The cursor is malformed, from another version, or from a different sort/filter set. Restart from the first page.\n- `UNAUTHENTICATED` (401): No valid credentials: missing/expired/revoked access token, a refused refresh token, or a bad webhook signature.\n- `INVALID_CREDENTIALS` (401): Login refused. Deliberately the same for an unknown email, a wrong password, an unverified or a suspended account.\n- `VERIFICATION_FAILED` (400): The email, password and one-time password do not verify an account awaiting verification.\n- `WITHDRAWAL_CODE_INVALID` (400): The withdrawal code is wrong, expired, already used or replaced by a newer one. Request a new code; retry with a NEW Idempotency-Key (this refusal is stored for the key).\n- `TRANSACTION_PIN_NOT_SET` (409): You have no transaction PIN yet: create one (POST /users/me/transaction-pin) before withdrawing or converting.\n- `TRANSACTION_PIN_ALREADY_SET` (409): A transaction PIN already exists: change it (PUT) or reset it if forgotten.\n- `TRANSACTION_PIN_INVALID` (400): The transaction PIN is wrong. `details.attemptsRemaining` says how many tries are left before it locks. Nothing moved; any emailed code is still usable.\n- `TRANSACTION_PIN_LOCKED` (423): Too many wrong PINs: the PIN is locked until it is reset with your password and an emailed code. Nothing moved.\n- `TRANSACTION_PIN_TOO_WEAK` (400): The PIN must be 6 digits, not all the same digit, not a straight sequence (123456, 654321) and not your current PIN.\n- `TRANSACTION_PIN_RESET_CODE_INVALID` (400): The PIN reset code is wrong, expired, used up or replaced by a newer one. Request a new code.\n- `PASSWORD_INCORRECT` (400): The account password is incorrect.\n- `FORBIDDEN` (403): Authenticated, but your role may not do this.\n- `ACCOUNT_SUSPENDED` (403): The account is suspended.\n- `EMAIL_NOT_VERIFIED` (403): Verify the email address first.\n- `NOT_FOUND` (404): No such route or resource.\n- `ACCOUNT_NOT_FOUND` (404): No such ledger account.\n- `RESERVATION_NOT_FOUND` (404): No such reservation.\n- `FUNDING_NOT_FOUND` (404): No such funding for this user (unknown and another user's are the same answer).\n- `WITHDRAWAL_NOT_FOUND` (404): No such withdrawal for this user (unknown and another user's are the same answer).\n- `WITHDRAWAL_BENEFICIARY_NOT_FOUND` (404): No such beneficiary for this user (unknown and another user's are the same answer).\n- `QUOTE_NOT_FOUND` (404): No such quote for this user (unknown and another user's are the same answer).\n- `TRANSACTION_NOT_FOUND` (404): No such transaction for this user (unknown and another user's are the same answer).\n- `RECONCILIATION_BREAK_NOT_FOUND` (404): No such reconciliation break.\n- `APPROVAL_NOT_FOUND` (404): No such approval.\n- `USER_NOT_FOUND` (404): No such user.\n- `RECONCILIATION_RUN_NOT_FOUND` (404): No such reconciliation run.\n- `SELF_APPROVAL_FORBIDDEN` (403): Four-eyes: you may not decide (or review) your own request.\n- `BREAK_GLASS_NOT_ALLOWED` (403): Break-glass is only for SUSPEND_USER and RATE_OVERRIDE (MANUAL_RATE).\n- `INSUFFICIENT_FUNDS` (409): The available balance does not cover it, even counting held funds: top up.\n- `FUNDS_RESERVED` (409): The total balance would cover it but part is held by a pending operation: wait for it.\n- `QUOTE_EXPIRED` (409): The quote's 30 seconds are over. Request a new quote.\n- `QUOTE_ALREADY_USED` (409): Quotes are single-use and this one was executed.\n- `IDEMPOTENCY_KEY_REUSE` (409): This key was used with a different request body on this route. Use a new key.\n- `REQUEST_IN_PROGRESS` (409): The same key is being processed right now. Retry after `Retry-After` with the same key.\n- `PERIOD_LOCKED` (409): The value time falls in a closed reporting period.\n- `ALREADY_CORRECTED` (409): The original transaction was already corrected.\n- `RESERVATION_NOT_ACTIVE` (409): The reservation is no longer active.\n- `RESERVATION_CONFLICT` (409): The reservation exists with different terms.\n- `PRICE_LIMIT_EXCEEDED` (409): The priced amounts breach `minimumTargetAmount` / `maximumSourceAmount`; `details` has the priced amounts.\n- `RECONCILIATION_RUN_LEASE_LOST` (409): Internal: a reconciliation run lost its lease.\n- `APPROVAL_ALREADY_DECIDED` (409): The approval is no longer PENDING (or is a break-glass use, which is never decided).\n- `APPROVAL_EXPIRED` (409): The approval passed its time to live without a decision.\n- `APPROVAL_REQUESTER_INELIGIBLE` (409): The requester no longer holds the role (or is no longer active).\n- `BREAK_GLASS_ALREADY_REVIEWED` (409): This break-glass use was already reviewed (or is not a break-glass use).\n- `ACTION_PRECONDITION_FAILED` (409): The world does not allow this action now (see `details`).\n- `BENEFICIARY_NOT_READY` (409): The beneficiary is still being verified with Paystack, or failed: only a READY one can receive a withdrawal.\n- `PAYLOAD_TOO_LARGE` (413): The body exceeds 100 KB.\n- `AMOUNT_TOO_SMALL` (422): Below the minimum for this currency or pair.\n- `AMOUNT_TOO_LARGE` (422): Above the per-operation maximum.\n- `DAILY_LIMIT_EXCEEDED` (422): The rolling 24-hour limit for this source currency would be exceeded.\n- `RATE_LIMITED` (429): Too many requests. Retry after `Retry-After` seconds.\n- `RESOURCE_BUSY` (503): Transient lock or statement timeout. Retry with the SAME `Idempotency-Key`.\n- `FX_RATE_STALE` (503): No executable rate right now (rates may still be displayed). Transient: retry later with the same key.\n- `FX_RATE_UNAVAILABLE` (503): No rate can be served at all. Transient.\n- `DEPENDENCY_UNAVAILABLE` (503): A dependency we cannot work without is down; we fail closed. Transient.\n- `WITHDRAWALS_DISABLED` (503): New withdrawals are switched off (or no worker can process them). Earlier requests keep their answers. Transient.\n- `INVARIANT_VIOLATION` (500): Our bug, failed loudly. Quote the `correlationId`.\n- `LEDGER_UNBALANCED` (500): Our bug: a posting did not balance. Quote the `correlationId`.\n- `INVALID_POSTING` (500): Our bug: an invalid posting was refused. Quote the `correlationId`.\n- `ACCOUNT_CURRENCY_MISMATCH` (500): Our bug: an entry's currency differs from its account's. Quote the `correlationId`.\n- `REVERSAL_MISMATCH` (500): Our bug: a reversal did not mirror its original. Quote the `correlationId`.\n- `INVALID_RESERVATION` (500): Our bug: an invalid reservation settlement. Quote the `correlationId`.\n- `INTERNAL_ERROR` (500): Unexpected error. Quote the `correlationId`.\n- `HTTP_ERROR` (400): An HTTP-level refusal without a dedicated code."
       },
       "ErrorResponse": {
         "type": "object",

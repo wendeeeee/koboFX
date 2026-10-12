@@ -15,6 +15,9 @@ import { ConversionView } from './conversion.view';
 import { ConvertDto } from './dto/convert.dto';
 import { PriceLimitExceededError } from './trading.errors';
 
+/** The conversion itself; the transaction PIN is the controller's to check, never the service's. */
+export type ConversionRequest = Omit<ConvertDto, 'transactionPin'>;
+
 
 @Injectable()
 export class ConvertService {
@@ -27,7 +30,7 @@ export class ConvertService {
     @Inject(APP_CONFIG) private readonly config: AppConfig,
   ) {}
 
-  async convert(userId: string, request: ConvertDto, prepared: ServedSnapshot | undefined, idempotencyKey: string | undefined): Promise<ConversionView> {
+  async convert(userId: string, request: ConversionRequest, prepared: ServedSnapshot | undefined, idempotencyKey: string | undefined): Promise<ConversionView> {
     const pair = { from: request.from, to: request.to };
     return this.conversions.execute(userId, idempotencyKey, pair, async () => {
       const { mode, amountMinor, bound } = this.validate(request);
@@ -96,7 +99,7 @@ export class ConvertService {
     });
   }
 
-  private validate(request: ConvertDto): { mode: QuoteAmountMode; amountMinor: bigint; bound: bigint | undefined } {
+  private validate(request: ConversionRequest): { mode: QuoteAmountMode; amountMinor: bigint; bound: bigint | undefined } {
     if ((request.sourceAmount === undefined) === (request.targetAmount === undefined)) {
       throw new ValidationError('Give exactly one of sourceAmount or targetAmount.', { fields: ['sourceAmount', 'targetAmount'] });
     }

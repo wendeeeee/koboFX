@@ -24,6 +24,7 @@ import { PaymentsModule } from './modules/payments/payments.module';
 import { WebhooksModule } from './modules/payments/webhooks/webhooks.module';
 import { TradingModule } from './modules/trading/trading.module';
 import { StashesModule } from './modules/stashes/stashes.module';
+import { TransactionPinsModule } from './modules/transaction-pins/transaction-pins.module';
 import { TransactionsModule } from './modules/transactions/transactions.module';
 import { WalletsModule } from './modules/wallets/wallets.module';
 import { ReconciliationModule } from './modules/reconciliation/reconciliation.module';
@@ -104,6 +105,7 @@ export class AppModule {
         ...(isPaystackEnabled(env) ? [PaystackFundingModule] : []),
         WithdrawalsModule.forRoot(env),
         StashesModule,
+        TransactionPinsModule,
         HealthModule,
       ],
       providers: [

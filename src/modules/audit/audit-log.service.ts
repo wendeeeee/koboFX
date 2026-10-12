@@ -45,6 +45,10 @@ export enum AuditAction {
   WITHDRAWAL_STATE_CHANGED = 'WITHDRAWAL_STATE_CHANGED',
   /** W4 §G.2: a protected payout hold needs attention (overdue, orphan, terminal flow, no schedule). Never a release. */
   PROTECTED_HOLD_FLAGGED = 'PROTECTED_HOLD_FLAGGED',
+  TRANSACTION_PIN_CREATED = 'TRANSACTION_PIN_CREATED',
+  TRANSACTION_PIN_CHANGED = 'TRANSACTION_PIN_CHANGED',
+  TRANSACTION_PIN_RESET = 'TRANSACTION_PIN_RESET',
+  TRANSACTION_PIN_LOCKED = 'TRANSACTION_PIN_LOCKED',
   /** Written by `bootstrap_first_administrators` itself (SQL), listed here so the vocabulary is complete. */
   ADMINISTRATORS_BOOTSTRAPPED = 'ADMINISTRATORS_BOOTSTRAPPED',
 }
@@ -97,6 +101,8 @@ export interface AuditState {
   readonly keyEncryptionKeyId?: string;
   readonly reservationId?: string;
   readonly holdCondition?: string;
+  readonly transactionPinSet?: boolean;
+  readonly transactionPinLocked?: boolean;
 }
 
 export interface AuditEntry {

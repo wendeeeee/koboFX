@@ -78,6 +78,21 @@ export class UserRepository {
     return toProfile(row);
   }
 
+  async findCredentials(userId: string): Promise<UserCredentials | null> {
+    const [row] = (await this.unitOfWork.manager.query(`SELECT ${PROFILE_COLUMNS}, password_hash FROM users WHERE id = $1`, [
+      userId,
+    ])) as UserRow[];
+    return row ? { ...toProfile(row), passwordHash: row.password_hash } : null;
+  }
+
+  /** Whether the user has a transaction PIN, and whether it is locked (for `GET /users/me`). */
+  async findTransactionPinState(userId: string): Promise<{ set: boolean; locked: boolean }> {
+    const [row] = (await this.unitOfWork.manager.query(`SELECT locked_at IS NOT NULL AS locked FROM transaction_pins WHERE user_id = $1`, [
+      userId,
+    ])) as { locked: boolean }[];
+    return { set: row !== undefined, locked: row?.locked ?? false };
+  }
+
   async findProfile(userId: string): Promise<UserProfile | null> {
     const [row] = (await this.unitOfWork.manager.query(`SELECT ${PROFILE_COLUMNS} FROM users WHERE id = $1`, [
       userId,

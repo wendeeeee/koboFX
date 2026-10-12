@@ -21,6 +21,7 @@ import { paymentProviderTestSecrets } from '../support/authentication-secrets';
 import { TestDatabase, startTestDatabase } from '../support/test-database';
 
 const PASSWORD = 'an end-to-end trading password';
+const TRANSACTION_PIN = '730416';
 const TOKEN = 'tok_success_visa_e2e_trading';
 const API_KEY = `e2etradekey${randomUUID().replace(/-/g, '').slice(0, 20)}`;
 
@@ -112,6 +113,9 @@ describe('Trading (e2e: real pipeline, worker loops running)', () => {
     const verified = await http().post(`/${API_PREFIX}/auth/verify`).send({ email, password: PASSWORD, oneTimePassword: code }).expect(200);
     const access = verified.body.tokens.access.token as string;
     secrets.add(access).add(verified.body.tokens.refresh.token as string);
+    // Withdrawals and conversions need a transaction PIN: created through the real route (and never logged).
+    await http().post(`/${API_PREFIX}/users/me/transaction-pin`).set('Authorization', `Bearer ${access}`).send({ pin: TRANSACTION_PIN, password: PASSWORD }).expect(201);
+    secrets.add(TRANSACTION_PIN);
     return access;
   }
 
@@ -156,7 +160,7 @@ describe('Trading (e2e: real pipeline, worker loops running)', () => {
       .expect(201);
     expect(quote.body).toMatchObject({ sourceAmount: '10000000', targetAmount: '7409' });
     const tradeKey = randomUUID();
-    const traded = await http().post(`/${API_PREFIX}/wallet/trade`).set(auth).set('Idempotency-Key', tradeKey).send({ quoteId: quote.body.quoteId }).expect(201);
+    const traded = await http().post(`/${API_PREFIX}/wallet/trade`).set(auth).set('Idempotency-Key', tradeKey).send({ quoteId: quote.body.quoteId, transactionPin: TRANSACTION_PIN }).expect(201);
     expect(traded.body).toMatchObject({
       type: 'CONVERSION',
       status: 'POSTED',
@@ -180,19 +184,19 @@ describe('Trading (e2e: real pipeline, worker loops running)', () => {
       .post(`/${API_PREFIX}/wallet/convert`)
       .set(auth)
       .set('Idempotency-Key', convertKey)
-      .send({ from: 'USD', to: 'NGN', sourceAmount: '7409' })
+      .send({ from: 'USD', to: 'NGN', sourceAmount: '7409', transactionPin: TRANSACTION_PIN })
       .expect(201);
     expect(back.body).toMatchObject({ quoteId: null, debited: { currency: 'USD', amount: '7409' }, credited: { currency: 'NGN' } });
     // The round trip costs two spreads: never more back than was sold.
     expect(BigInt(back.body.credited.amount)).toBeLessThan(10_000_000n);
 
-    const replayTrade = await http().post(`/${API_PREFIX}/wallet/trade`).set(auth).set('Idempotency-Key', tradeKey).send({ quoteId: quote.body.quoteId }).expect(201);
+    const replayTrade = await http().post(`/${API_PREFIX}/wallet/trade`).set(auth).set('Idempotency-Key', tradeKey).send({ quoteId: quote.body.quoteId, transactionPin: TRANSACTION_PIN }).expect(201);
     expect([replayTrade.text, replayTrade.headers['idempotent-replayed']]).toEqual([traded.text, 'true']);
     const replayConvert = await http()
       .post(`/${API_PREFIX}/wallet/convert`)
       .set(auth)
       .set('Idempotency-Key', convertKey)
-      .send({ from: 'USD', to: 'NGN', sourceAmount: '7409' })
+      .send({ from: 'USD', to: 'NGN', sourceAmount: '7409', transactionPin: TRANSACTION_PIN })
       .expect(201);
     expect([replayConvert.text, replayConvert.headers['idempotent-replayed']]).toEqual([back.text, 'true']);
 
@@ -223,7 +227,7 @@ describe('Trading (e2e: real pipeline, worker loops running)', () => {
     await http().post(`/${API_PREFIX}/wallet/convert`).set('Idempotency-Key', randomUUID()).send({ from: 'NGN', to: 'USD', sourceAmount: '100000' }).expect(401);
     await http().post(`/${API_PREFIX}/wallet/trade`).set('Idempotency-Key', randomUUID()).send({ quoteId: randomUUID() }).expect(401);
     const access = await registerAndVerify();
-    const missingKey = await http().post(`/${API_PREFIX}/wallet/convert`).set('Authorization', `Bearer ${access}`).send({ from: 'NGN', to: 'USD', sourceAmount: '100000' });
+    const missingKey = await http().post(`/${API_PREFIX}/wallet/convert`).set('Authorization', `Bearer ${access}`).send({ from: 'NGN', to: 'USD', sourceAmount: '100000', transactionPin: TRANSACTION_PIN });
     expect([missingKey.status, missingKey.body.code]).toEqual([400, 'IDEMPOTENCY_KEY_REQUIRED']);
   });
 

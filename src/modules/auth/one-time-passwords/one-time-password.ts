@@ -4,6 +4,8 @@ export enum OneTimePasswordPurpose {
   VERIFY_EMAIL = 'VERIFY_EMAIL',
   /** One withdrawal by an ACTIVE user (any amount; the code is consumed when the withdrawal is admitted). */
   AUTHORIZE_WITHDRAWAL = 'AUTHORIZE_WITHDRAWAL',
+  /** Resetting a forgotten transaction PIN (with the account password). */
+  RESET_TRANSACTION_PIN = 'RESET_TRANSACTION_PIN',
 }
 
 export const ONE_TIME_PASSWORD_DIGITS = 6;

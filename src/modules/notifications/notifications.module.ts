@@ -9,6 +9,8 @@ import {
   EmailVerificationRequestedHandler,
   ExistingAccountRegistrationAttemptedHandler,
   FundingPostedHandler,
+  TransactionPinChangedHandler,
+  TransactionPinResetCodeRequestedHandler,
   WithdrawalCodeRequestedHandler,
 } from './outbox-handlers';
 
@@ -20,6 +22,8 @@ import {
     ConversionPostedHandler,
     FundingPostedHandler,
     WithdrawalCodeRequestedHandler,
+    TransactionPinResetCodeRequestedHandler,
+    TransactionPinChangedHandler,
   ],
 })
 export class NotificationsModule implements OnModuleInit {
@@ -30,6 +34,8 @@ export class NotificationsModule implements OnModuleInit {
     private readonly conversionPosted: ConversionPostedHandler,
     private readonly fundingPosted: FundingPostedHandler,
     private readonly withdrawalCode: WithdrawalCodeRequestedHandler,
+    private readonly pinResetCode: TransactionPinResetCodeRequestedHandler,
+    private readonly pinChanged: TransactionPinChangedHandler,
   ) {}
 
   onModuleInit(): void {
@@ -38,5 +44,7 @@ export class NotificationsModule implements OnModuleInit {
     this.dispatcher.register(this.conversionPosted);
     this.dispatcher.register(this.fundingPosted);
     this.dispatcher.register(this.withdrawalCode);
+    this.dispatcher.register(this.pinResetCode);
+    this.dispatcher.register(this.pinChanged);
   }
 }

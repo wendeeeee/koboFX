@@ -45,6 +45,7 @@ let preview = sessionStorage.getItem('kobofx.preview') === 'true' ? createPrevie
 let balances = [], rates = null, items = [], cursor = null, loading = false, loadError = '', rateError = '', historyError = '';
 let view = location.pathname, filter = '', search = '', hiddenBalance = false, pendingRegistration = null;
 let modal = null, pollGeneration = 0, quote = null, tradeAttempt = null, toastTimer, lastFocus;
+let pinState = null, pinRequest = null, pinFallback = null, pinNext = null, quoteClockTimer, pinCodeTimer;
 let beneficiaries = null, beneficiaryError = '', stash = null, stashItems = [], stashError = '', bankCache = null, withdrawAttempt = null, codeCooldownUntil = 0, codeTimer;
 const user = () => preview?.user || getSession()?.user;
 const request = (path, options) => preview ? preview.request(path, options) : api(path, options);
@@ -70,13 +71,14 @@ function navigate(path) {
 
 async function loadData() {
   loading = true; loadError = ''; rateError = ''; historyError = ''; render();
-  const results = await Promise.allSettled([request('/wallet'), request('/fx/rates'), request('/transactions?limit=10')]);
+  const results = await Promise.allSettled([request('/wallet'), request('/fx/rates'), request('/transactions?limit=10'), request('/users/me')]);
   if (results[0].status === 'fulfilled') balances = results[0].value.balances;
   else loadError = results[0].reason.message;
   if (results[1].status === 'fulfilled') rates = results[1].value;
   else { rates = null; rateError = results[1].reason.message; }
   if (results[2].status === 'fulfilled') { items = results[2].value.items; cursor = results[2].value.nextCursor; }
   else historyError = results[2].reason.message;
+  if (results[3].status === 'fulfilled') pinState = { set: results[3].value.transactionPinSet, locked: results[3].value.transactionPinLocked };
   loading = false; render();
 }
 
@@ -163,7 +165,7 @@ function overview() {
   const pending = !preview && getStored('funding');
   const pendingWithdrawal = !preview && getStored('withdrawal');
   return `${pageHeading(`A good day for possibilities, ${escape(firstName())}.`, 'A little overview of your money, wherever it’s headed.', `<div class="heading-actions">${button(`${icon('bank')} Withdraw`, 'withdraw', 'secondary')}${button(`${icon('plus')} Fund my wallet`, 'fund')}</div>`)}
-    ${pending ? `<div class="notice">${icon('clock')}<span>You have a payment to check on.</span><button class="text-link" data-action="fund">Check payment ${icon('arrow')}</button></div>` : ''}
+    ${pinPrompt()}${pending ? `<div class="notice">${icon('clock')}<span>You have a payment to check on.</span><button class="text-link" data-action="fund">Check payment ${icon('arrow')}</button></div>` : ''}
     ${pendingWithdrawal ? `<div class="notice">${icon('bank')}<span>You have a withdrawal on its way.</span><button class="text-link" data-action="withdrawal-check">Check withdrawal ${icon('arrow')}</button></div>` : ''}
     <section class="section"><div class="section-heading"><h2>Your little corner of the world <button class="icon-button" data-action="balance-visibility" aria-label="${hiddenBalance ? 'Show' : 'Hide'} balances" aria-pressed="${hiddenBalance}">${icon('eye')}</button></h2><a href="/wallets" data-route="/wallets">All wallets ${icon('arrow')}</a></div>${walletCards()}</section>
     <div class="overview-bottom"><section class="activity-card"><div class="section-heading"><h2>Your latest moves</h2><a href="/activity" data-route="/activity">View all ${icon('arrow')}</a></div>${transactionList(items.slice(0, 4))}</section><aside class="rates-card"><div class="section-heading"><h2>A world of rates</h2><span class="rate-dot">${preview ? 'Sample' : rates?.stale ? 'Updating' : rates ? 'Latest' : '—'}</span></div><p>A little look at what your money can do.</p>${rateRows()}<a class="text-link" href="/exchange" data-route="/exchange">Find your exchange ${icon('arrow')}</a>${attribution()}</aside></div>
@@ -213,11 +215,11 @@ function activityPage() {
 }
 
 function accountPage() {
-  return `${pageHeading('Your own little space.', 'The essentials, all in one place.')}<section class="profile-card"><div class="profile-top"><span class="avatar large">${escape(firstName()[0])}</span><div><h2>${escape(firstName())}</h2><p>${escape(user()?.email)}</p></div><span class="subtle-badge green">${icon('check')} ${preview ? 'Sample account' : 'Email verified'}</span></div><dl class="detail-list"><div><dt>Email address</dt><dd>${escape(user()?.email)}</dd></div><div><dt>Account status</dt><dd>${preview ? 'Preview' : 'Active'}</dd></div><div><dt>Session</dt><dd>This browser tab</dd></div></dl><p class="muted">${preview ? 'This is a sample profile. Create your own account to start your journey.' : 'For your privacy, logging out clears your session from this browser tab.'}</p>${button(preview ? 'Create my account' : 'Log out securely', preview ? 'signup' : 'logout', 'secondary')}</section>`;
+  return `${pageHeading('Your own little space.', 'The essentials, all in one place.')}<section class="profile-card"><div class="profile-top"><span class="avatar large">${escape(firstName()[0])}</span><div><h2>${escape(firstName())}</h2><p>${escape(user()?.email)}</p></div><span class="subtle-badge green">${icon('check')} ${preview ? 'Sample account' : 'Email verified'}</span></div><dl class="detail-list"><div><dt>Email address</dt><dd>${escape(user()?.email)}</dd></div><div><dt>Account status</dt><dd>${preview ? 'Preview' : 'Active'}</dd></div><div><dt>Session</dt><dd>This browser tab</dd></div></dl><p class="muted">${preview ? 'This is a sample profile. Create your own account to start your journey.' : 'For your privacy, logging out clears your session from this browser tab.'}</p>${button(preview ? 'Create my account' : 'Log out securely', preview ? 'signup' : 'logout', 'secondary')}</section>${pinSettingsCard()}`;
 }
 
 function helpPage() {
-  return `${pageHeading('A little guidance, whenever you need it.', 'You don’t need to be a money expert to feel at home here.')}<div class="help-grid">${[['01', 'Start with your email', 'Create your account, then enter the six-digit code from your email. That’s your wallet ready to go.', 'Create an account', 'signup'], ['02', 'Add a little money', 'Choose an amount in naira. Paystack opens a secure payment page, then we check that your money has arrived.', 'Fund my wallet', 'fund'], ['03', 'Explore another currency', 'Choose what to exchange and review your quote. Confirm within 30 seconds, or get a fresh quote when you’re ready.', 'Try an exchange', 'exchange']].map(([number, title, text, label, action]) => `<article class="help-card"><span class="step-number">${number}</span><h2>${title}</h2><p>${text}</p>${button(`${label} ${icon('arrow')}`, action, 'text')}</article>`).join('')}</div><section class="faq-section"><h2>A few things you might be wondering.</h2>${[['My payment says “in progress”. What now?', 'Sometimes a payment takes a moment to confirm. Check its progress from your overview or Activity. Don’t make another payment for the same request. If it stays pending, keep your payment reference and contact the person helping you try KoboFX.'], ['What happens if I close the payment page?', 'Your wallet only changes after payment is confirmed. Reopen KoboFX in this same browser tab and choose Check payment to see the latest status.'], ['Why did my exchange quote expire?', 'Rates can change. Each quote is held for 30 seconds so you can review it. If it expires, request a new quote and check the amounts again.'], ['Is the preview real money?', 'No. Preview mode is a separate sample wallet with illustrative rates. Adding or exchanging sample money never sends a payment request.'], ['How do withdrawals work?', 'Add a Nigerian bank account first: we check its name with your bank. Then choose Withdraw, enter the amount, tap Send code and enter the 6-digit code we email you. Each code works once, for 10 minutes. In this test version no real bank receives money: confirmed withdrawals land in your simulated bank, which you can see on the Withdraw page.']].map(([question, answer]) => `<details><summary>${question}${icon('plus')}</summary><p>${answer}</p></details>`).join('')}</section>`;
+  return `${pageHeading('A little guidance, whenever you need it.', 'You don’t need to be a money expert to feel at home here.')}<div class="help-grid">${[['01', 'Start with your email', 'Create your account, then enter the six-digit code from your email. That’s your wallet ready to go.', 'Create an account', 'signup'], ['02', 'Add a little money', 'Choose an amount in naira. Paystack opens a secure payment page, then we check that your money has arrived.', 'Fund my wallet', 'fund'], ['03', 'Explore another currency', 'Choose what to exchange and review your quote. Confirm within 30 seconds, or get a fresh quote when you’re ready.', 'Try an exchange', 'exchange']].map(([number, title, text, label, action]) => `<article class="help-card"><span class="step-number">${number}</span><h2>${title}</h2><p>${text}</p>${button(`${label} ${icon('arrow')}`, action, 'text')}</article>`).join('')}</div><section class="faq-section"><h2>A few things you might be wondering.</h2>${[['My payment says “in progress”. What now?', 'Sometimes a payment takes a moment to confirm. Check its progress from your overview or Activity. Don’t make another payment for the same request. If it stays pending, keep your payment reference and contact the person helping you try KoboFX.'], ['What happens if I close the payment page?', 'Your wallet only changes after payment is confirmed. Reopen KoboFX in this same browser tab and choose Check payment to see the latest status.'], ['Why did my exchange quote expire?', 'Rates can change. Each quote is held for 30 seconds so you can review it. If it expires, request a new quote and check the amounts again.'], ['Is the preview real money?', 'No. Preview mode is a separate sample wallet with illustrative rates. Adding or exchanging sample money never sends a payment request.'], ['How do withdrawals work?', 'Add a Nigerian bank account first: we check its name with your bank. Then choose Withdraw, enter the amount, tap Send code and enter the 6-digit code we email you. Each code works once, for 10 minutes. Last, confirm with your transaction PIN.'], ['What is my transaction PIN?', 'A 6-digit PIN you choose. You enter it to confirm every withdrawal and exchange. After 5 wrong tries it locks; reset it from My account with your password and a code we email you. In this test version no real bank receives money: confirmed withdrawals land in your simulated bank, which you can see on the Withdraw page.']].map(([question, answer]) => `<details><summary>${question}${icon('plus')}</summary><p>${answer}</p></details>`).join('')}</section>`;
 }
 
 function withdrawPage() {
@@ -237,7 +239,7 @@ function withdrawPage() {
         <small id="code-help" class="muted code-help">Tap “Send code” and we’ll email a 6-digit code to ${escape(maskEmail(user()?.email))}. It works once, for 10 minutes.</small>
         <button class="button primary wide" type="submit">Withdraw ${icon('arrow')}</button>
         <p class="secure-note">${icon('lock')} Test mode: no real bank receives money. Confirmed withdrawals land in your simulated bank.</p></form>`;
-  return `${pageHeading('Send money to your bank.', 'Choose an account, enter the amount, and confirm with the code we email you.')}<div class="exchange-layout"><section class="exchange-card"><div class="section-heading"><h2>Withdraw naira</h2><span class="subtle-badge">${preview ? 'Sample withdrawal' : 'Protected by an emailed code'}</span></div>${form}</section><aside class="withdraw-aside">${bankAccountsCard()}${stashCard()}</aside></div>`;
+  return `${pageHeading('Send money to your bank.', 'Choose an account, enter the amount and the code we email you, then confirm with your transaction PIN.')}<div class="exchange-layout"><section class="exchange-card"><div class="section-heading"><h2>Withdraw naira</h2><span class="subtle-badge">${preview ? 'Sample withdrawal' : 'Protected by a code and your PIN'}</span></div>${form}</section><aside class="withdraw-aside">${bankAccountsCard()}${stashCard()}</aside></div>`;
 }
 
 function beneficiaryStatus(beneficiary) {
@@ -346,6 +348,85 @@ async function pollWithdrawal(operation) {
   await poll();
 }
 
+const PIN_HELP = 'Not the same digit six times, and not a straight run like 123456.';
+function pinBoxes(name, label, help = '') {
+  const describedBy = help ? `aria-describedby="pin-${name}-help"` : '';
+  return `<div class="pin-field"><label class="pin-label" for="pin-${name}">${label}</label><div class="pin-boxes" data-pin-boxes><input id="pin-${name}" class="pin-input" name="${name}" type="password" inputmode="numeric" pattern="[0-9]{6}" maxlength="6" autocomplete="off" required ${describedBy}>${Array.from({ length: 6 }, (_, index) => `<span class="pin-box${index === 0 ? ' current' : ''}" aria-hidden="true"></span>`).join('')}</div>${help ? `<small id="pin-${name}-help" class="muted pin-help">${help}</small>` : ''}</div>`;
+}
+function paintPin(input) {
+  const digits = input.value.replace(/\D/g, '').slice(0, 6);
+  if (digits !== input.value) input.value = digits;
+  input.closest('[data-pin-boxes]').querySelectorAll('.pin-box').forEach((box, index) => {
+    box.classList.toggle('filled', index < digits.length);
+    box.classList.toggle('current', index === Math.min(digits.length, 5));
+  });
+}
+function clearPin(form, shake = false, name) {
+  const inputs = [...form.querySelectorAll('.pin-input')].filter((input) => !name || input.name === name);
+  inputs.forEach((input) => { input.value = ''; paintPin(input); });
+  const first = inputs[0]; if (!first) return;
+  if (shake) { const boxes = first.closest('[data-pin-boxes]'); boxes.classList.remove('shake'); void boxes.offsetWidth; boxes.classList.add('shake'); }
+  first.focus();
+}
+function focusPin() { document.querySelector('dialog .pin-input')?.focus(); }
+function checkNewPin(pin = '', confirmation = '', form) {
+  if (!/^\d{6}$/.test(pin)) throw new Error('Your PIN needs exactly 6 digits.');
+  if (/^(\d)\1{5}$/.test(pin) || '0123456789'.includes(pin) || '9876543210'.includes(pin)) { clearPin(form, true); throw new Error(`That PIN is too easy to guess. ${PIN_HELP}`); }
+  if (pin !== confirmation) { clearPin(form, true, 'confirmPin'); throw new Error('The two PINs don’t match. Enter it again.'); }
+  return pin;
+}
+let lastPinAsk = null;
+/** The last step of a withdrawal or an exchange: six boxes, Submit, then the money moves. */
+function askTransactionPin(ask) {
+  lastPinAsk = ask;
+  if (!preview && pinState && !pinState.set) { openCreatePin(() => askTransactionPin(ask)); return; }
+  if (!preview && pinState?.locked) { showPinLocked(); return; }
+  pinRequest = ask.onPin; pinFallback = ask.onOtherError || null; modal = 'pin';
+  showModal(ask.title, `<p class="dialog-intro">${ask.intro}</p>${ask.summary || ''}<form data-form="pin-confirm" ${ask.quoteForm ? 'data-quote-form' : ''} novalidate><div class="form-error" role="alert" hidden></div>${pinBoxes('transactionPin', 'Transaction PIN')}<button class="button primary wide" type="submit">Submit ${icon('arrow')}</button></form><button class="button text wide" data-action="forgot-pin">Forgot your PIN?</button>`);
+  focusPin();
+  if (ask.quoteForm) updateQuoteClock();
+}
+function openCreatePin(next = null) {
+  pinNext = next; modal = 'pin-create';
+  showModal('Create your transaction PIN.', `<p class="dialog-intro">${next ? 'One more thing first. ' : ''}Choose a 6-digit PIN. You’ll enter it to confirm every withdrawal and exchange, so keep it to yourself.</p><form data-form="pin-create" novalidate><div class="form-error" role="alert" hidden></div>${pinBoxes('pin', 'Choose a PIN', PIN_HELP)}${pinBoxes('confirmPin', 'Enter it again')}<label>Your account password<div class="password-field"><input name="password" type="password" autocomplete="current-password" maxlength="128" required><button type="button" data-action="password" aria-label="Show password">${icon('eye')}</button></div></label><button class="button primary wide" type="submit">Create my PIN ${icon('arrow')}</button></form>`);
+  focusPin();
+}
+function openChangePin() {
+  modal = 'pin-change';
+  showModal('Change your transaction PIN.', `<p class="dialog-intro">Enter your current PIN, then choose a new one.</p><form data-form="pin-change" novalidate><div class="form-error" role="alert" hidden></div>${pinBoxes('currentPin', 'Current PIN')}${pinBoxes('newPin', 'New PIN', PIN_HELP)}${pinBoxes('confirmPin', 'Enter the new PIN again')}<button class="button primary wide" type="submit">Change my PIN ${icon('arrow')}</button></form><button class="button text wide" data-action="forgot-pin">Forgot your current PIN?</button>`);
+  focusPin();
+}
+function openResetPin() {
+  modal = 'pin-reset';
+  showModal('Reset your transaction PIN.', `<p class="dialog-intro">We’ll email a 6-digit code to ${escape(maskEmail(user()?.email))}. Enter it with your account password, then choose a new PIN. This also unlocks a locked PIN.</p><form data-form="pin-reset" novalidate><div class="form-error" role="alert" hidden></div><label for="pin-reset-code" class="code-label">Code from your email</label><div class="code-row"><input id="pin-reset-code" class="code-input" name="oneTimePassword" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]{6}" maxlength="6" placeholder="000000" required><button type="button" class="button secondary" id="pin-code-button" data-action="pin-reset-code">Send code</button></div><label>Your account password<div class="password-field"><input name="password" type="password" autocomplete="current-password" maxlength="128" required><button type="button" data-action="password" aria-label="Show password">${icon('eye')}</button></div></label>${pinBoxes('newPin', 'New PIN', PIN_HELP)}${pinBoxes('confirmPin', 'Enter the new PIN again')}<button class="button primary wide" type="submit">Reset my PIN ${icon('arrow')}</button></form>`);
+}
+function showPinLocked() {
+  modal = 'pin-locked';
+  showModal('Your PIN is locked.', `<div class="success-body"><span class="success-orb pin-locked-orb">${icon('lock')}</span><span class="success-label">Locked after 5 wrong tries</span><p>To keep your money safe, withdrawals and exchanges are paused until you reset your PIN with your password and a code we email you. Nothing moved.</p></div>${button(`Reset my PIN ${icon('arrow')}`, 'reset-pin', 'primary wide')}`);
+}
+async function sendPinResetCode(target) {
+  target.disabled = true;
+  try { await request('/users/me/transaction-pin/reset-code', { method: 'POST' }); }
+  catch (error) { target.disabled = false; const notice = document.querySelector('dialog .form-error'); if (notice) { notice.textContent = error.message; notice.hidden = false; } return; }
+  toast(`We sent a code to ${maskEmail(user()?.email)}.`);
+  document.querySelector('[name="oneTimePassword"]')?.focus();
+  let wait = 60; clearInterval(pinCodeTimer);
+  const tick = () => { const button = document.querySelector('#pin-code-button'); if (!button) { clearInterval(pinCodeTimer); return; } if (wait <= 0) { clearInterval(pinCodeTimer); button.disabled = false; button.textContent = 'Send code'; return; } button.textContent = `Resend in ${wait}s`; wait -= 1; };
+  tick(); pinCodeTimer = setInterval(tick, 1000);
+}
+function pinPrompt() {
+  if (preview || !pinState) return '';
+  if (!pinState.set) return `<div class="notice pin-notice">${icon('lock')}<span><strong>Create your transaction PIN.</strong> You’ll need it to withdraw and exchange.</span><button class="text-link" data-action="create-pin">Create my PIN ${icon('arrow')}</button></div>`;
+  if (pinState.locked) return `<div class="notice error">${icon('lock')}<span>Your transaction PIN is locked. Withdrawals and exchanges are paused until you reset it.</span><button class="text-link" data-action="reset-pin">Reset my PIN ${icon('arrow')}</button></div>`;
+  return '';
+}
+function pinSettingsCard() {
+  const state = preview ? { set: true, locked: false } : pinState;
+  const badge = !state ? '<span class="subtle-badge">Checking…</span>' : !state.set ? '<span class="subtle-badge">Not set</span>' : state.locked ? '<span class="subtle-badge pin-badge-locked">Locked</span>' : `<span class="subtle-badge green">${icon('check')} Set</span>`;
+  const actions = !state ? '' : !state.set ? button(`Create my PIN ${icon('arrow')}`, 'create-pin') : state.locked ? button(`Reset my PIN ${icon('arrow')}`, 'reset-pin') : `${button('Change my PIN', 'change-pin', 'secondary')}${button('Forgot my PIN', 'reset-pin', 'text')}`;
+  return `<section class="profile-card pin-card"><div class="section-heading"><h2>Transaction PIN</h2>${badge}</div><p class="muted">Your 6-digit PIN confirms every withdrawal and exchange. We never show it, and our team will never ask for it.</p><div class="heading-actions">${actions}</div></section>`;
+}
+
 function render() {
   document.title = 'KoboFX — Your money. More possibilities.';
   if (['/signup', '/login', '/verify'].includes(view)) root.innerHTML = authPage();
@@ -432,7 +513,7 @@ function successModal(title, description, label = 'Completed', symbol = 'check')
 
 function reviewQuote(result) {
   quote = result; modal = 'quote';
-  showModal('Let’s take one last look.', `<p class="dialog-intro">A clear picture of your next move.</p><div class="quote-summary"><div><span>You exchange</span><strong>${money(quote.sourceAmount, quote.from)}</strong>${flag(quote.from)}</div><span class="quote-arrow">${icon('down')}</span><div><span>You receive</span><strong>${money(quote.targetAmount, quote.to)}</strong>${flag(quote.to)}</div></div><dl class="detail-list"><div><dt>Exchange rate</dt><dd>1 ${quote.from} = ${escape(quote.clientRate)} ${quote.to}</dd></div><div><dt>Exchange margin</dt><dd>Included in your rate</dd></div><div><dt>Time to decide</dt><dd id="quote-countdown"></dd></div></dl><form data-form="trade"><div class="form-error" role="alert" hidden></div><button id="confirm-trade" class="button primary wide" type="submit">Confirm exchange ${icon('arrow')}</button></form><button class="button text wide" data-action="close">A little more time</button>`);
+  showModal('Let’s take one last look.', `<p class="dialog-intro">A clear picture of your next move.</p><div class="quote-summary"><div><span>You exchange</span><strong>${money(quote.sourceAmount, quote.from)}</strong>${flag(quote.from)}</div><span class="quote-arrow">${icon('down')}</span><div><span>You receive</span><strong>${money(quote.targetAmount, quote.to)}</strong>${flag(quote.to)}</div></div><dl class="detail-list"><div><dt>Exchange rate</dt><dd>1 ${quote.from} = ${escape(quote.clientRate)} ${quote.to}</dd></div><div><dt>Exchange margin</dt><dd>Included in your rate</dd></div><div><dt>Time to decide</dt><dd id="quote-countdown"></dd></div></dl><form data-form="trade" data-quote-form><div class="form-error" role="alert" hidden></div><button id="confirm-trade" class="button primary wide" type="submit">Confirm exchange ${icon('arrow')}</button></form><button class="button text wide" data-action="close">A little more time</button>`);
   updateQuoteClock();
 }
 function updateQuoteClock() {
@@ -440,9 +521,9 @@ function updateQuoteClock() {
   const seconds = Math.max(0, Math.ceil((Date.parse(quote.expiresAt) - Date.now()) / 1000));
   countdown.textContent = seconds ? `${seconds} seconds` : 'Quote expired';
   if (!seconds && !tradeAttempt) {
-    const form = document.querySelector('[data-form="trade"]');
-    form.innerHTML = '<p class="muted">No money moved. Get a fresh quote when you’re ready.</p>' + button('Get a fresh quote', 'new-quote', 'primary wide');
-  } else if (seconds) setTimeout(updateQuoteClock, 250);
+    const form = document.querySelector('[data-quote-form]');
+    if (form) form.outerHTML = '<p class="muted">No money moved. Get a fresh quote when you’re ready.</p>' + button('Get a fresh quote', 'new-quote', 'primary wide');
+  } else if (seconds) { clearTimeout(quoteClockTimer); quoteClockTimer = setTimeout(updateQuoteClock, 250); }
 }
 
 async function showTransaction(reference) {
@@ -495,20 +576,19 @@ document.addEventListener('submit', (event) => {
       if (!preview && BigInt(amount) > BigInt(balances.find((balance) => balance.currency === 'NGN')?.available || '0')) throw new Error('That’s more than your available naira. Enter a smaller amount.');
       if (!/^\d{6}$/.test(values.oneTimePassword || '')) throw new Error('Enter the 6-digit code from your email. Tap “Send code” if you don’t have one yet.');
       const body = { beneficiaryId: values.beneficiaryId, amount, currency: 'NGN', oneTimePassword: values.oneTimePassword };
-      // Retrying the very same request (e.g. after a network error) reuses its key; anything else is a new withdrawal.
-      if (!withdrawAttempt || JSON.stringify(withdrawAttempt.body) !== JSON.stringify(body)) withdrawAttempt = { key: crypto.randomUUID(), body };
-      let result;
-      try { result = await request('/wallet/withdraw/paystack', { method: 'POST', body, key: withdrawAttempt.key }); }
-      catch (error) {
-        if (error.status && error.status < 500 && ![408, 429].includes(error.status) && error.code !== 'REQUEST_IN_PROGRESS') withdrawAttempt = null;
-        if (error.code === 'WITHDRAWAL_CODE_INVALID') { const field = form.querySelector('[name="oneTimePassword"]'); field.value = ''; field.focus(); }
-        throw error;
-      }
-      withdrawAttempt = null;
-      const operation = { withdrawalId: result.withdrawalId, amount: result.amount, currency: result.currency };
-      form.reset();
-      if (preview) { successModal('Sent to your bank.', `${money(result.amount, result.currency)} in sample money went to your sample bank.`, 'Sample withdrawal complete', 'bank'); loadData(); loadWithdrawals(); }
-      else { sessionStorage.setItem('kobofx.withdrawal', JSON.stringify(operation)); showWithdrawalProgress(operation); loadData(); }
+      const beneficiary = beneficiaries.find((entry) => entry.beneficiaryId === values.beneficiaryId);
+      askTransactionPin({
+        title: 'Confirm your withdrawal.',
+        intro: 'Enter your 6-digit transaction PIN to send this money.',
+        summary: `<dl class="detail-list"><div><dt>Amount</dt><dd>${money(amount, 'NGN')}</dd></div><div><dt>To</dt><dd>${escape(beneficiary?.accountName || '')} · ${escape(beneficiary?.bankName || '')} ${escape(beneficiary?.accountNumberMasked || '')}</dd></div></dl>`,
+        onPin: (transactionPin) => sendWithdrawal({ ...body, transactionPin }),
+        // Not a PIN problem (the code, the balance, a limit): back to the withdrawal form, where it can be fixed.
+        onOtherError: (error) => {
+          const withdrawForm = document.querySelector('#withdraw-form'); if (!withdrawForm) { toast(error.message); return; }
+          if (error.code === 'WITHDRAWAL_CODE_INVALID') { const field = withdrawForm.querySelector('[name="oneTimePassword"]'); field.value = ''; field.focus(); }
+          formError(withdrawForm, error);
+        },
+      });
     } else if (form.dataset.form === 'exchange') {
       const stored = !preview && getStored('trade');
       if (stored) { tradeAttempt = stored; quote = stored.quote; reviewQuote(quote); toast('Please check your previous exchange before starting another.'); return; }
@@ -520,19 +600,87 @@ document.addEventListener('submit', (event) => {
       reviewQuote(result);
     } else if (form.dataset.form === 'trade') {
       if (!tradeAttempt && Date.parse(quote.expiresAt) <= Date.now()) throw new Error('This quote has expired. Get a fresh quote.');
+      askTransactionPin({
+        title: 'Confirm your exchange.',
+        intro: 'Enter your 6-digit transaction PIN to make this exchange.',
+        summary: `<div class="quote-summary"><div><span>You exchange</span><strong>${money(quote.sourceAmount, quote.from)}</strong>${flag(quote.from)}</div><span class="quote-arrow">${icon('down')}</span><div><span>You receive</span><strong>${money(quote.targetAmount, quote.to)}</strong>${flag(quote.to)}</div></div><dl class="detail-list"><div><dt>Time to decide</dt><dd id="quote-countdown"></dd></div></dl>`,
+        quoteForm: true,
+        onPin: sendTrade,
+      });
+    } else if (form.dataset.form === 'pin-confirm') {
+      if (!/^\d{6}$/.test(values.transactionPin || '')) throw new Error('Enter your 6-digit transaction PIN.');
+      const onPin = pinRequest, onOtherError = pinFallback;
+      try { await onPin(values.transactionPin); }
+      catch (error) {
+        if (error.code === 'TRANSACTION_PIN_INVALID') {
+          const left = error.details?.attemptsRemaining;
+          clearPin(form, true);
+          throw new Error(Number.isInteger(left) ? `That PIN isn’t right. ${left} ${left === 1 ? 'try' : 'tries'} left before it locks.` : error.message);
+        }
+        if (error.code === 'TRANSACTION_PIN_LOCKED') { pinState = { set: true, locked: true }; render(); showPinLocked(); return; }
+        if (error.code === 'TRANSACTION_PIN_NOT_SET') { pinState = { set: false, locked: false }; render(); openCreatePin(() => askTransactionPin({ ...lastPinAsk })); return; }
+        if (onOtherError) { closeModal(); onOtherError(error); return; }
+        throw error;
+      }
+    } else if (form.dataset.form === 'pin-create') {
+      const pin = checkNewPin(values.pin, values.confirmPin, form);
+      if (!values.password) throw new Error('Enter your account password.');
+      try { await request('/users/me/transaction-pin', { method: 'POST', body: { pin, password: values.password } }); }
+      catch (error) { if (error.code !== 'TRANSACTION_PIN_ALREADY_SET') throw error; }
+      pinState = { set: true, locked: false }; render();
+      const next = pinNext; pinNext = null;
+      if (next) { toast('Your transaction PIN is ready.'); next(); }
+      else successModal('Your PIN is ready.', 'You’ll enter it to confirm every withdrawal and exchange.', 'PIN created', 'lock');
+    } else if (form.dataset.form === 'pin-change') {
+      if (!/^\d{6}$/.test(values.currentPin || '')) throw new Error('Enter your current 6-digit PIN.');
+      const pin = checkNewPin(values.newPin, values.confirmPin, form);
+      try { await request('/users/me/transaction-pin', { method: 'PUT', body: { currentPin: values.currentPin, newPin: pin } }); }
+      catch (error) {
+        if (error.code === 'TRANSACTION_PIN_INVALID') { const left = error.details?.attemptsRemaining; clearPin(form, true, 'currentPin'); throw new Error(Number.isInteger(left) ? `Your current PIN isn’t right. ${left} ${left === 1 ? 'try' : 'tries'} left before it locks.` : error.message); }
+        if (error.code === 'TRANSACTION_PIN_LOCKED') { pinState = { set: true, locked: true }; render(); showPinLocked(); return; }
+        throw error;
+      }
+      successModal('Your PIN is changed.', 'Use your new PIN from now on.', 'PIN changed', 'lock');
+    } else if (form.dataset.form === 'pin-reset') {
+      if (!/^\d{6}$/.test(values.oneTimePassword || '')) throw new Error('Enter the 6-digit code from your email. Tap “Send code” if you don’t have one yet.');
+      if (!values.password) throw new Error('Enter your account password.');
+      const pin = checkNewPin(values.newPin, values.confirmPin, form);
+      try { await request('/users/me/transaction-pin/reset', { method: 'POST', body: { password: values.password, oneTimePassword: values.oneTimePassword, newPin: pin } }); }
+      catch (error) { if (error.code === 'TRANSACTION_PIN_RESET_CODE_INVALID') { const field = form.querySelector('[name="oneTimePassword"]'); field.value = ''; field.focus(); } throw error; }
+      pinState = { set: true, locked: false }; render();
+      successModal('Your PIN is reset.', 'It’s unlocked. Use your new PIN from now on.', 'PIN reset', 'lock');
+    }
+  });
+});
+
+async function sendTrade(transactionPin) {
       tradeAttempt ||= { key: crypto.randomUUID(), quote };
       if (!preview) sessionStorage.setItem('kobofx.trade', JSON.stringify(tradeAttempt));
       try {
-        await request('/wallet/trade', { method: 'POST', body: { quoteId: tradeAttempt.quote.quoteId }, key: tradeAttempt.key });
+        await request('/wallet/trade', { method: 'POST', body: { quoteId: tradeAttempt.quote.quoteId, transactionPin }, key: tradeAttempt.key });
       } catch (error) {
         if (error.status && error.status < 500 && ![408, 429].includes(error.status) && error.code !== 'REQUEST_IN_PROGRESS') { sessionStorage.removeItem('kobofx.trade'); tradeAttempt = null; setTimeout(updateQuoteClock, 0); }
         throw error;
       }
       sessionStorage.removeItem('kobofx.trade'); tradeAttempt = null;
       successModal('A new currency. All yours.', `${money(quote.targetAmount, quote.to)} ${preview ? 'in sample money ' : ''}has arrived in your ${names[quote.to] || quote.to} wallet.`, preview ? 'Sample exchange complete' : 'Exchange complete'); loadData();
-    }
-  });
-});
+}
+
+async function sendWithdrawal(body) {
+  // Retrying the very same request (e.g. after a network error) reuses its key; anything else is a new withdrawal.
+  if (!withdrawAttempt || JSON.stringify(withdrawAttempt.body) !== JSON.stringify(body)) withdrawAttempt = { key: crypto.randomUUID(), body };
+  let result;
+  try { result = await request('/wallet/withdraw/paystack', { method: 'POST', body, key: withdrawAttempt.key }); }
+  catch (error) {
+    if (error.status && error.status < 500 && ![408, 429].includes(error.status) && error.code !== 'REQUEST_IN_PROGRESS') withdrawAttempt = null;
+    throw error;
+  }
+  withdrawAttempt = null;
+  const operation = { withdrawalId: result.withdrawalId, amount: result.amount, currency: result.currency };
+  document.querySelector('#withdraw-form')?.reset();
+  if (preview) { successModal('Sent to your bank.', `${money(result.amount, result.currency)} in sample money went to your sample bank.`, 'Sample withdrawal complete', 'bank'); loadData(); loadWithdrawals(); }
+  else { sessionStorage.setItem('kobofx.withdrawal', JSON.stringify(operation)); showWithdrawalProgress(operation); loadData(); }
+}
 
 document.addEventListener('click', async (event) => {
   const anchor = event.target.closest('a');
@@ -566,6 +714,10 @@ document.addEventListener('click', async (event) => {
       const withdrawal = await request(`/wallet/withdraw/${encodeURIComponent(withdrawalId)}`);
       showWithdrawalProgress({ withdrawalId, amount: withdrawal.amount, currency: withdrawal.currency });
     }
+    else if (action === 'create-pin') openCreatePin();
+    else if (action === 'change-pin') openChangePin();
+    else if (action === 'reset-pin' || action === 'forgot-pin') openResetPin();
+    else if (action === 'pin-reset-code') await sendPinResetCode(target);
     else if (action === 'close') closeModal();
     else if (action === 'done') { closeModal(); navigate('/home'); }
     else if (action === 'refresh') loadData();
@@ -604,6 +756,7 @@ document.addEventListener('click', async (event) => {
   } catch (error) { toast(error.message); }
 });
 document.addEventListener('input', (event) => {
+  if (event.target.classList?.contains('pin-input')) { paintPin(event.target); return; }
   if (event.target.closest('#exchange-form')) updateEstimate();
   if (event.target.name === 'search') {
     search = event.target.value; const position = event.target.selectionStart; render();

@@ -28,6 +28,9 @@ export function createPreview() {
       if (key && replay.has(key)) return replay.get(key);
       let result;
       if (path === '/wallet') return { balances: structuredClone(balances) };
+      if (path === '/users/me') return { id: 'preview', email: 'ada@example.com', status: 'ACTIVE', role: 'USER', verifiedAt: now(), transactionPinSet: true, transactionPinLocked: false };
+      if (path === '/users/me/transaction-pin/reset-code') return { status: 'REQUESTED', channel: 'EMAIL', expiresInSeconds: 600 };
+      if (path.startsWith('/users/me/transaction-pin')) return { set: true, locked: false };
       if (path === '/fx/rates') return { pairs, stale: false, asOf: now(), attribution: null };
       if (path.startsWith('/transactions/')) return { ...items.find((item) => item.reference === decodeURIComponent(path.split('/').pop())), initiatedBy: 'USER' };
       if (path.startsWith('/transactions')) {

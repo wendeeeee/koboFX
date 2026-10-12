@@ -23,6 +23,7 @@ process.stdout.write(
     `JWT_PRIVATE_KEY=${base64(privatePem)}`,
     `JWT_PUBLIC_KEYS=${base64(JSON.stringify({ [keyId]: publicPem }))}`,
     `ONE_TIME_PASSWORD_PEPPER=${randomBytes(32).toString('base64')}`,
+    `TRANSACTION_PIN_PEPPER=${randomBytes(32).toString('base64')}`,
     `PSP_SECRET_KEY=sk_dev_${randomBytes(24).toString('hex')}`,
     `PSP_WEBHOOK_SECRETS=${randomBytes(32).toString('base64')}`,
     `WITHDRAWAL_KEY_ENCRYPTION_KEYS=${JSON.stringify({ 'dev-kek-1': randomBytes(32).toString('base64') })}`,

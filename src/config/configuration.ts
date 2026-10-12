@@ -53,6 +53,8 @@ export interface AuthenticationConfig {
   readonly refreshTokenTimeToLiveSeconds: number;
   /** Server-side secret mixed into every one-time password HMAC (design §7.1). */
   readonly oneTimePasswordPepper: Buffer;
+  /** Server-side secret mixed into every transaction PIN hash: a leaked table alone cannot be brute-forced. */
+  readonly transactionPinPepper: Buffer;
   /**
    * Non-production demo credit posted from `EXPENSE:PROMOTIONAL:NGN` at verification
    * (design §15 item 6). `0n` disables it; production refuses anything else.
@@ -362,6 +364,7 @@ const envSchema = Joi.object({
     .max(30 * 24 * 3600)
     .default(7 * 24 * 3600),
   ONE_TIME_PASSWORD_PEPPER: Joi.string().base64().required(),
+  TRANSACTION_PIN_PEPPER: Joi.string().base64().required(),
   // A string of minor units, never a number (no floats in the money path).
   DEMO_CREDIT_NGN_MINOR: Joi.string()
     .pattern(/^(0|[1-9]\d{0,17})$/)
@@ -525,6 +528,8 @@ export function loadConfig(raw: NodeJS.ProcessEnv | Record<string, string | unde
   const keys = parseAccessTokenKeys(raw, problems);
   const pepper = typeof raw.ONE_TIME_PASSWORD_PEPPER === 'string' ? Buffer.from(raw.ONE_TIME_PASSWORD_PEPPER, 'base64') : undefined;
   if (pepper && pepper.length < 32) problems.push('ONE_TIME_PASSWORD_PEPPER must decode to at least 32 bytes');
+  const pinPepper = typeof raw.TRANSACTION_PIN_PEPPER === 'string' ? Buffer.from(raw.TRANSACTION_PIN_PEPPER, 'base64') : undefined;
+  if (pinPepper && pinPepper.length < 32) problems.push('TRANSACTION_PIN_PEPPER must decode to at least 32 bytes');
   if (env.NODE_ENV === 'production' && env.DEMO_CREDIT_NGN_MINOR !== undefined && env.DEMO_CREDIT_NGN_MINOR !== '0') {
     problems.push('DEMO_CREDIT_NGN_MINOR must be 0 in production (design §15 item 6: non-production only)');
   }
@@ -537,7 +542,7 @@ export function loadConfig(raw: NodeJS.ProcessEnv | Record<string, string | unde
   const protection = parseProtection(raw, problems);
   const withdrawals = error || !protection ? undefined : parseWithdrawals(raw, env, protection, problems);
   const buildGitSha = resolveBuildGitSha(env.BUILD_GIT_SHA, env.NODE_ENV === 'production', problems);
-  if (problems.length > 0 || !keys || !pepper || !webhookSecrets || !funding || !conversion || !fx || !reconciliation || !paystack || !protection || !withdrawals) {
+  if (problems.length > 0 || !keys || !pepper || !pinPepper || !webhookSecrets || !funding || !conversion || !fx || !reconciliation || !paystack || !protection || !withdrawals) {
     throw new ConfigValidationError(problems);
   }
   return {
@@ -575,6 +580,7 @@ export function loadConfig(raw: NodeJS.ProcessEnv | Record<string, string | unde
       },
       refreshTokenTimeToLiveSeconds: env.REFRESH_TOKEN_TTL_SECONDS,
       oneTimePasswordPepper: pepper,
+      transactionPinPepper: pinPepper,
       demoCreditNgnMinor: BigInt(env.DEMO_CREDIT_NGN_MINOR),
     },
     mail: {

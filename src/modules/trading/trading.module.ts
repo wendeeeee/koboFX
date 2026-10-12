@@ -1,3 +1,4 @@
+import { TransactionPinsModule } from '../transaction-pins/transaction-pins.module';
 import { Inject, Injectable, Module, OnApplicationBootstrap } from '@nestjs/common';
 import { InvariantViolationError } from '../../common/errors';
 import { APP_CONFIG } from '../../config/config.module';
@@ -34,7 +35,7 @@ export class TradingConfigurationCheck implements OnApplicationBootstrap {
 
 
 @Module({
-  imports: [LedgerModule, ReservationsModule, FlowsModule, OutboxModule, AuditModule, FxModule],
+  imports: [LedgerModule, ReservationsModule, FlowsModule, OutboxModule, AuditModule, FxModule, TransactionPinsModule],
   controllers: [TradingController],
   providers: [ConversionService, ConvertService, TradeService, TradingMetrics, TradingConfigurationCheck],
   exports: [ConversionService, TradingMetrics],

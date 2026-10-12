@@ -1,4 +1,4 @@
-import { Body, Controller, Get, HttpCode, HttpStatus, Param, ParseUUIDPipe, Post, Query } from '@nestjs/common';
+import { Body, Controller, Get, HttpCode, HttpStatus, Param, ParseUUIDPipe, Post, Query, UseGuards } from '@nestjs/common';
 import { ApiAcceptedResponse, ApiOkResponse, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { CurrentUser, Idempotent, RateLimit } from '../../common/decorators';
 import { RateLimitRule } from '../../common/decorators/rate-limit.decorator';
@@ -8,6 +8,7 @@ import { ApiErrors } from '../../openapi/api-errors.decorator';
 import { BankDirectoryPage, BankDirectoryService } from './bank-directory.service';
 import { BeneficiaryAccepted, BeneficiaryPage, BeneficiaryService, BeneficiaryView } from './beneficiary.service';
 import { AddBeneficiaryDto, BankListQuery, PageQuery, WithdrawDto } from './dto/withdrawals.dto';
+import { TransactionPinGuard } from '../transaction-pins/transaction-pin.guard';
 import { WithdrawalCodeRequested, WithdrawalCodeService } from './withdrawal-code.service';
 import { WithdrawalAccepted, WithdrawalService, WithdrawalView } from './withdrawal.service';
 import {
@@ -105,6 +106,8 @@ export class WithdrawalsController {
 
   @Post('withdraw/paystack')
   @HttpCode(HttpStatus.ACCEPTED)
+  // The PIN before the barrier: a wrong PIN never reaches the emailed code (checked inside `request`), so never burns it.
+  @UseGuards(TransactionPinGuard)
 
   @Idempotent({ flowIdField: 'withdrawalId', keyedRequestHash: true })
   @RateLimit({ rules: [WITHDRAW_WRITES], whenUnavailable: 'fail-open' })
@@ -129,6 +132,9 @@ export class WithdrawalsController {
     ErrorCode.DAILY_LIMIT_EXCEEDED,
     ErrorCode.WITHDRAWALS_DISABLED,
     ErrorCode.WITHDRAWAL_CODE_INVALID,
+    ErrorCode.TRANSACTION_PIN_NOT_SET,
+    ErrorCode.TRANSACTION_PIN_INVALID,
+    ErrorCode.TRANSACTION_PIN_LOCKED,
     ErrorCode.DEPENDENCY_UNAVAILABLE,
   )
   withdraw(@CurrentUser() user: AuthenticatedUser, @Body() body: WithdrawDto): Promise<WithdrawalAccepted> {

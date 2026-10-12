@@ -6,7 +6,7 @@ import { Money } from '../../src/common/money';
 import { RateTier } from '../../src/modules/fx/freshness';
 import { EntryDirection, PostingAuthorization, TransactionType } from '../../src/modules/ledger/ledger.types';
 import { ReconciliationRunKind } from '../../src/modules/reconciliation/reconciliation-schedule';
-import { Administrators, AdminHarness, FxHarness, LedgerHarness, PaymentsHarness, SignedUpUser, startLedgerHarness } from '../support/ledger-harness';
+import { Administrators, AdminHarness, FxHarness, LedgerHarness, PaymentsHarness, SignedUpUser, startLedgerHarness, HARNESS_TRANSACTION_PIN } from '../support/ledger-harness';
 
 /**
  * Every non-correction action end to end — request → a different admin's approval → execution → its effect
@@ -150,7 +150,7 @@ describe('Admin actions (integration)', () => {
         .post(`/${API_PREFIX}/wallet/convert`)
         .set('Authorization', `Bearer ${trader.accessToken}`)
         .set('Idempotency-Key', randomUUID())
-        .send({ from: 'NGN', to: 'USD', sourceAmount: '1000000' });
+        .send({ from: 'NGN', to: 'USD', sourceAmount: '1000000', transactionPin: HARNESS_TRANSACTION_PIN });
       expect(converted.status).toBe(201);
       const [provenance] = (await harness.dataSource.query(`SELECT rate_provider, rate_snapshot_id::text AS snapshot FROM transactions WHERE id = $1`, [
         converted.body.transactionId,

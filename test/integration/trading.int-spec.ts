@@ -6,7 +6,7 @@ import { Money } from '../../src/common/money';
 import { RECORDED_RATES } from '../../src/mock-exchange-rate-api/mock-exchange-rate-api';
 import { TradingMetrics } from '../../src/modules/trading/trading-metrics';
 import { TestClock } from '../support/auth-test-doubles';
-import { FxHarness, LedgerHarness, LedgerSnapshot, PaymentsHarness, SignedUpUser, startLedgerHarness } from '../support/ledger-harness';
+import { FxHarness, LedgerHarness, LedgerSnapshot, PaymentsHarness, SignedUpUser, startLedgerHarness, HARNESS_TRANSACTION_PIN } from '../support/ledger-harness';
 
 /**
  * Conversion and trading (design §7.7; PHASE7_PLAN §C–§E) through the real HTTP pipeline:
@@ -64,9 +64,9 @@ describe('Trading: convert and trade (integration)', () => {
 
   const http = () => request(harness.auth!.app.getHttpServer());
   const convert = (user: SignedUpUser, body: Record<string, unknown>, key: string = randomUUID()) =>
-    http().post(`/${API_PREFIX}/wallet/convert`).set('Authorization', `Bearer ${user.accessToken}`).set('Idempotency-Key', key).send(body);
+    http().post(`/${API_PREFIX}/wallet/convert`).set('Authorization', `Bearer ${user.accessToken}`).set('Idempotency-Key', key).send({ transactionPin: HARNESS_TRANSACTION_PIN, ...body });
   const trade = (user: SignedUpUser, body: Record<string, unknown>, key: string = randomUUID()) =>
-    http().post(`/${API_PREFIX}/wallet/trade`).set('Authorization', `Bearer ${user.accessToken}`).set('Idempotency-Key', key).send(body);
+    http().post(`/${API_PREFIX}/wallet/trade`).set('Authorization', `Bearer ${user.accessToken}`).set('Idempotency-Key', key).send({ transactionPin: HARNESS_TRANSACTION_PIN, ...body });
   const wallet = async (user: SignedUpUser) =>
     (await http().get(`/${API_PREFIX}/wallet`).set('Authorization', `Bearer ${user.accessToken}`).expect(200)).body.balances as {
       currency: string;
