@@ -288,6 +288,7 @@ describe('loadConfig: Paystack (PAYSTACK_PLAN.md C5)', () => {
       name: 'paystack',
       secretKey: '',
       baseUrl: 'https://api.paystack.co',
+      transfersBaseUrl: 'https://api.paystack.co',
       callbackUrl: '',
       currencies: ['NGN'],
       checkoutWindowMinutes: 30,
