@@ -267,12 +267,17 @@ describe('Withdrawal journey (W3, integration)', () => {
   it('races: N simultaneous withdrawals against one balance admit exactly one hold', async () => {
     const { user, account } = await fundedUser(100_000n);
     const beneficiaryId = await readyBeneficiary(user);
+    // Issue once before racing: requesting a new code per racer supersedes codes still in flight.
+    const oneTimePassword = await withdrawals.freshCode(user);
+    expect(oneTimePassword).toMatch(/^\d{6}$/);
     await Promise.all(Array.from({ length: 8 }, () => harness.dataSource.query('SELECT 1')));
-    const responses = await Promise.all(Array.from({ length: 20 }, () => withdraw(user, beneficiaryId, '80000')));
+    const responses = await Promise.all(
+      Array.from({ length: 20 }, () => withdrawals.withdraw(user, { beneficiaryId, amount: '80000', currency: 'NGN', oneTimePassword })),
+    );
     const statuses = responses.map((response) => response.status);
     expect(statuses.filter((status) => status === 202)).toHaveLength(1);
     for (const response of responses.filter((each) => each.status !== 202)) {
-      // Each request fetched its own emailed code; a newer one supersedes it, so WITHDRAWAL_CODE_INVALID is a legitimate refusal too.
+      // The shared code can be consumed or exhausted by another racer.
       expect(['FUNDS_RESERVED', 'INSUFFICIENT_FUNDS', 'RESOURCE_BUSY', 'WITHDRAWAL_CODE_INVALID']).toContain((response.body as { code: string }).code);
     }
     expect(await harness.reservedOf(account.accountId)).toBe(80_000n);
