@@ -270,12 +270,6 @@ label small { display:block; font-size:12px; color:var(--muted); margin-top:7px;
 .rates-card>.text-link .icon { width:13px; height:13px }
 .attribution { font-size:12px; color:var(--muted); display:block; margin-top:12px }
 .attribution[href] { text-decoration:underline; text-underline-offset:2px }
-.gentle-banner { display: flex; align-items: center; gap: 15px; padding: 19px 21px; background: var(--peach); border: 1px solid var(--line); border-radius: 12px; margin-top: 25px; border-color: var(--line); flex-wrap: wrap; }
-.gentle-banner .square-icon { width:37px; height:37px }
-.gentle-banner .square-icon .icon { width:19px; height:19px }
-.gentle-banner strong { font-size: 14px; font-weight: 600; }
-.gentle-banner p { font-size: 13px; color: var(--muted); margin-top: 4px; }
-.gentle-banner .text-link { margin-left: auto; white-space: nowrap; font-size: 13px; }
 .app-footer { margin-top: auto; padding: 16px 40px 28px; color: var(--muted); font-size: 12px; display: flex; justify-content: space-between; gap: 15px; flex-wrap: wrap; }
 .app-footer>span:last-child { display:flex; gap:6px; align-items:center }
 .app-footer .icon { width:12px; height:12px }
@@ -565,9 +559,6 @@ dialog>h2 { font-size:27px; line-height:1.25; letter-spacing:-1px; max-width:330
   .transaction-row > .icon { display: none; }
   .transaction-amount small { display: inline-block; margin-top: 3px; }
   .transaction-label small { margin-top: 2px; }
-  .gentle-banner { align-items: flex-start; gap: 12px; }
-  .gentle-banner > div { flex: 1; }
-  .gentle-banner .text-link { margin: 0 0 0 49px; }
   .app-footer { padding-inline: 18px; }
   .exchange-layout { margin-top: 24px; }
   .tabs { width: 100%; }
