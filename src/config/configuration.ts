@@ -107,6 +107,11 @@ export interface PaystackConfig {
   /** `sk_test_…` / `sk_live_…`. Sent only as a bearer token; never stored, logged or put in an error. Empty when off. */
   readonly secretKey: string;
   readonly baseUrl: string;
+  /**
+   * Where the withdrawals (transfers) client sends its calls: `PAYSTACK_TRANSFERS_BASE_URL`, else `baseUrl`. Lets a test
+   * account whose tier has no transfers pay in through real Paystack and pay out through the mock.
+   */
+  readonly transfersBaseUrl: string;
   /** Where the customer's BROWSER returns after paying (a client page, not this API). Carries no authority. */
   readonly callbackUrl: string;
   readonly currencies: readonly string[];
@@ -404,6 +409,7 @@ const envSchema = Joi.object({
   PAYSTACK_BASE_URL: Joi.string()
     .uri({ scheme: ['http', 'https'] })
     .default('https://api.paystack.co'),
+  PAYSTACK_TRANSFERS_BASE_URL: Joi.string().uri({ scheme: ['http', 'https'] }),
   PAYSTACK_CALLBACK_URL: Joi.string().uri({ scheme: ['http', 'https'] }),
   PAYSTACK_FUNDING_CURRENCIES: Joi.string()
     .pattern(/^[A-Z]{3}(,[A-Z]{3})*$/)
@@ -808,6 +814,8 @@ function parsePaystack(raw: Record<string, string | undefined>, env: Record<stri
     if (production && callbackUrl && !callbackUrl.startsWith('https://')) problems.push('PAYSTACK_CALLBACK_URL must be https in production');
     if (production && !String(env.PAYSTACK_BASE_URL).startsWith('https://')) problems.push('PAYSTACK_BASE_URL must be https in production');
   }
+  const transfersBaseUrl = (env.PAYSTACK_TRANSFERS_BASE_URL as string | undefined) ?? String(env.PAYSTACK_BASE_URL);
+  if (production && !transfersBaseUrl.startsWith('https://')) problems.push('PAYSTACK_TRANSFERS_BASE_URL must be https in production');
   if (problems.length > before) return undefined;
   const allowlist = env.PAYSTACK_WEBHOOK_IP_ALLOWLIST as string | undefined;
   return {
@@ -815,6 +823,7 @@ function parsePaystack(raw: Record<string, string | undefined>, env: Record<stri
     name: PAYSTACK_PROVIDER_NAME,
     secretKey,
     baseUrl: String(env.PAYSTACK_BASE_URL).replace(/\/+$/, ''),
+    transfersBaseUrl: transfersBaseUrl.replace(/\/+$/, ''),
     callbackUrl,
     currencies: [...new Set(String(env.PAYSTACK_FUNDING_CURRENCIES).split(','))],
     checkoutWindowMinutes: env.PAYSTACK_CHECKOUT_WINDOW_MINUTES,
