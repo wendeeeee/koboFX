@@ -8,6 +8,9 @@ const directory = dirname(fileURLToPath(import.meta.url));
 const upstream = new URL(process.env.UI_API_ORIGIN || 'http://127.0.0.1:3000');
 if (!['http:', 'https:'].includes(upstream.protocol) || upstream.username || upstream.password) throw new Error('UI_API_ORIGIN must be an HTTP(S) origin without credentials.');
 const port = Number(process.env.UI_PORT || '5173');
+// Set only behind a reverse proxy that overwrites X-Forwarded-For with the client's address (the demo's Caddy).
+// Otherwise the header is the client's own claim and is discarded.
+const trustForwardedFor = process.env.UI_TRUST_FORWARDED_FOR === 'true';
 const mime = { '.html': 'text/html', '.css': 'text/css', '.js': 'text/javascript', '.mjs': 'text/javascript', '.svg': 'image/svg+xml', '.ttf': 'font/ttf', '.txt': 'text/plain' };
 const publicFiles = new Set(['index.html', 'styles.css', 'app.js', 'client.js', 'money.mjs', 'preview.mjs', 'assets/mark.svg', 'assets/fonts/manrope-variable.ttf', 'assets/fonts/figtree-variable.ttf', 'assets/fonts/Manrope-OFL.txt', 'assets/fonts/Figtree-OFL.txt']);
 
@@ -22,9 +25,10 @@ export const server = http.createServer(async (request, response) => {
       response.writeHead(404).end(); return;
     }
     const headers = { ...request.headers, host: upstream.host };
-    // This local proxy is the single upstream hop. Discard client-supplied forwarding headers.
+    // The API trusts exactly one hop (this proxy). Pass on one client address, never a client-supplied chain.
+    const forwardedFor = trustForwardedFor ? String(request.headers['x-forwarded-for'] || '').split(',').map((part) => part.trim()).filter(Boolean).at(-1) : undefined;
     delete headers['x-forwarded-for']; delete headers['x-forwarded-host']; delete headers['x-forwarded-proto'];
-    headers['x-forwarded-for'] = request.socket.remoteAddress || '127.0.0.1';
+    headers['x-forwarded-for'] = forwardedFor || request.socket.remoteAddress || '127.0.0.1';
     const transport = upstream.protocol === 'https:' ? https : http;
     const proxy = transport.request(new URL(url.pathname + url.search, upstream), { method: request.method, headers }, (result) => {
       response.writeHead(result.statusCode || 502, { ...result.headers, 'cache-control': 'no-store' });
