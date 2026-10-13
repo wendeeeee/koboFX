@@ -19,6 +19,15 @@ const VALID = {
   ...authenticationTestEnvironment(),
 };
 
+// A real provider's settings: production boots only with MAIL_TRANSPORT=smtp (its default) and all of these.
+const PRODUCTION_MAIL = {
+  SMTP_HOST: 'smtp-relay.example.com',
+  SMTP_PORT: '2525',
+  SMTP_USER: 'demo-login@example.com',
+  SMTP_PASSWORD: 'smtp-key',
+  MAIL_FROM: 'KoboFX <no-reply@example.com>',
+};
+
 function problemsOf(env: Record<string, string | undefined>): string[] {
   try {
     loadConfig(env);
@@ -101,10 +110,8 @@ describe('loadConfig', () => {
         JWT_PRIVATE_KEY: undefined,
         JWT_PUBLIC_KEYS: undefined,
         ONE_TIME_PASSWORD_PEPPER: undefined,
-        SMTP_HOST: undefined,
-        MAIL_FROM: undefined,
       }).join('\n');
-      for (const name of ['JWT_SIGNING_KEY_ID', 'JWT_PRIVATE_KEY', 'JWT_PUBLIC_KEYS', 'ONE_TIME_PASSWORD_PEPPER', 'SMTP_HOST', 'MAIL_FROM']) {
+      for (const name of ['JWT_SIGNING_KEY_ID', 'JWT_PRIVATE_KEY', 'JWT_PUBLIC_KEYS', 'ONE_TIME_PASSWORD_PEPPER']) {
         expect(problems).toContain(name);
       }
     });
@@ -118,7 +125,7 @@ describe('loadConfig', () => {
       );
       // A production config also needs a production-grade FX plan (Phase 6 §5.2: daily rates are refused).
       const productionFx = { FX_RATE_BASE_URL: 'https://v6.exchangerate-api.com/v6/{apiKey}/latest', FX_PROVIDER_PLAN: 'BUSINESS', EXCHANGE_RATE_API_KEY: 'abcdef0123456789abcdef01' };
-      expect(() => loadConfig({ ...VALID, ...productionFx, NODE_ENV: 'production', DEMO_CREDIT_NGN_MINOR: '0', BUILD_GIT_SHA: 'abc1234' })).not.toThrow();
+      expect(() => loadConfig({ ...VALID, ...productionFx, ...PRODUCTION_MAIL, NODE_ENV: 'production', DEMO_CREDIT_NGN_MINOR: '0', BUILD_GIT_SHA: 'abc1234' })).not.toThrow();
       expect(problemsOf({ ...VALID, DEMO_CREDIT_NGN_MINOR: '100.5' }).join()).toContain('DEMO_CREDIT_NGN_MINOR');
     });
 
@@ -145,9 +152,39 @@ describe('loadConfig', () => {
       }
     });
 
-    it('requires SMTP credentials in pairs', () => {
-      expect(problemsOf({ ...VALID, SMTP_USER: 'u' }).join()).toContain('SMTP_PASSWORD');
-      expect(loadConfig({ ...VALID, SMTP_USER: 'u', SMTP_PASSWORD: 'p' }).mail.smtp).toMatchObject({ user: 'u', password: 'p' });
+    it('mail goes to MailHog outside production unless MAIL_TRANSPORT=smtp; SMTP_* never leaks into MailHog', () => {
+      expect(loadConfig(VALID).mail).toEqual({
+        transport: 'mailhog',
+        smtp: { host: 'localhost', port: 1025, secure: false },
+        from: 'KoboFX <no-reply@kobofx.local>',
+      });
+      // One file may hold both: the provider's settings are ignored until MAIL_TRANSPORT=smtp picks them.
+      const both = { ...VALID, ...PRODUCTION_MAIL, MAILHOG_HOST: 'mailhog', MAILHOG_SMTP_PORT: '2025', MAIL_FROM: '' };
+      expect(loadConfig(both).mail).toEqual({
+        transport: 'mailhog',
+        smtp: { host: 'mailhog', port: 2025, secure: false },
+        from: 'KoboFX <no-reply@kobofx.local>',
+      });
+      // Blank provider lines (a template's `SMTP_USER=`) are "not set", never a boot failure for MailHog.
+      expect(() => loadConfig({ ...VALID, SMTP_HOST: '', SMTP_PORT: '', SMTP_USER: '', SMTP_PASSWORD: '' })).not.toThrow();
+    });
+
+    it('MAIL_TRANSPORT=smtp needs every provider setting, credentials included; it is the production default', () => {
+      expect(loadConfig({ ...VALID, ...PRODUCTION_MAIL, MAIL_TRANSPORT: 'smtp', SMTP_SECURE: 'true' }).mail).toEqual({
+        transport: 'smtp',
+        smtp: { host: 'smtp-relay.example.com', port: 2525, secure: true, user: 'demo-login@example.com', password: 'smtp-key' },
+        from: 'KoboFX <no-reply@example.com>',
+      });
+      expect(problemsOf({ ...VALID, MAIL_TRANSPORT: 'smtp' }).join()).toContain(
+        'MAIL_TRANSPORT=smtp requires SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASSWORD, MAIL_FROM',
+      );
+      expect(problemsOf({ ...VALID, ...PRODUCTION_MAIL, MAIL_TRANSPORT: 'smtp', SMTP_PASSWORD: '' }).join()).toContain('requires SMTP_PASSWORD');
+      expect(problemsOf({ ...VALID, MAIL_TRANSPORT: 'carrier-pigeon' }).join()).toContain('MAIL_TRANSPORT');
+      const production = { ...VALID, NODE_ENV: 'production', BUILD_GIT_SHA: 'abc1234' };
+      expect(problemsOf(production).join()).toContain('MAIL_TRANSPORT=smtp requires SMTP_HOST');
+      expect(problemsOf({ ...production, ...PRODUCTION_MAIL, MAIL_TRANSPORT: 'mailhog' }).join()).toContain(
+        'MAIL_TRANSPORT=mailhog is refused in production',
+      );
     });
   });
 });
@@ -243,7 +280,7 @@ describe('loadConfig: FX rates (Phase 6)', () => {
   });
 
   it('production refuses daily-cadence plans (Phase 6 §5.2) and plain HTTP', () => {
-    const production = { ...VALID, NODE_ENV: 'production', BUILD_GIT_SHA: 'abc1234' };
+    const production = { ...VALID, ...PRODUCTION_MAIL, NODE_ENV: 'production', BUILD_GIT_SHA: 'abc1234' };
     expect(problemsOf(production).join()).toMatch(/FX_PROVIDER_PLAN=OPEN publishes once a day/);
     expect(problemsOf({ ...production, FX_RATE_BASE_URL: KEYED, FX_PROVIDER_PLAN: 'FREE', EXCHANGE_RATE_API_KEY: KEY }).join()).toMatch(/FREE publishes once a day/);
     expect(

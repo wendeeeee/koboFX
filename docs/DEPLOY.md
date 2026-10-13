@@ -107,7 +107,11 @@ Reviewers need the sign-up, withdrawal and PIN-reset codes in their own inbox, a
 2. **Senders, Domains & Dedicated IPs → Senders**: add and verify the address you use in `MAIL_FROM`. Authenticating your
    domain (the DKIM/SPF records it shows) keeps the codes out of spam.
 3. **SMTP & API → SMTP**: generate an SMTP key. `SMTP_USER` = the login shown there, `SMTP_PASSWORD` = the key. Host
-   `smtp-relay.brevo.com`, port 587, `SMTP_SECURE=false` (it upgrades with STARTTLS) are already in the template.
+   `smtp-relay.brevo.com`, port 2525, `SMTP_SECURE=false` (it upgrades with STARTTLS) are already in the template.
+
+`MAIL_TRANSPORT=smtp` (in the template) is what sends through the provider: the demo runs `NODE_ENV=development`, whose
+default is MailHog. A missing `SMTP_*` setting stops the API at boot with the name of what is missing; it never falls
+back to MailHog silently. On your laptop, `MAIL_TRANSPORT=mailhog` (`.env.example`) keeps everything in MailHog.
 
 ## 7. Build and start
 

@@ -62,7 +62,16 @@ export interface AuthenticationConfig {
   readonly demoCreditNgnMinor: bigint;
 }
 
+/**
+ * Where email goes. `mailhog`: the local catcher (http://localhost:8025), no credentials. `smtp`: a real provider
+ * (Brevo, Mailgun, …), every setting required. Default: `smtp` in production, `mailhog` everywhere else; production
+ * refuses `mailhog`. A hosted sandbox (NODE_ENV=development) sets `MAIL_TRANSPORT=smtp` explicitly.
+ */
+export type MailTransport = 'mailhog' | 'smtp';
+
 export interface MailConfig {
+  readonly transport: MailTransport;
+  /** The connection for the chosen transport (MailHog's or the provider's). */
   readonly smtp: {
     readonly host: string;
     readonly port: number;
@@ -375,12 +384,16 @@ const envSchema = Joi.object({
     .pattern(/^(0|[1-9]\d{0,17})$/)
     .default('0'),
 
-  SMTP_HOST: Joi.string().hostname().required(),
-  SMTP_PORT: Joi.number().port().required(),
+  MAIL_TRANSPORT: Joi.string().valid('mailhog', 'smtp'),
+  MAILHOG_HOST: Joi.string().hostname().default('localhost'),
+  MAILHOG_SMTP_PORT: Joi.number().port().default(1025),
+  // Required when MAIL_TRANSPORT is smtp (parseMail); ignored for mailhog. Blank means not set.
+  SMTP_HOST: Joi.string().hostname().allow(''),
+  SMTP_PORT: Joi.number().port().empty(''),
   SMTP_SECURE: Joi.boolean().default(false),
-  SMTP_USER: Joi.string(),
-  SMTP_PASSWORD: Joi.string(),
-  MAIL_FROM: Joi.string().required(),
+  SMTP_USER: Joi.string().allow(''),
+  SMTP_PASSWORD: Joi.string().allow(''),
+  MAIL_FROM: Joi.string().allow(''),
 
   OUTBOX_MAX_ATTEMPTS: Joi.number().integer().min(1).max(100).default(10),
   OUTBOX_POLL_INTERVAL_MS: Joi.number().integer().min(50).default(1000),
@@ -507,7 +520,6 @@ const envSchema = Joi.object({
   FX_POLL_INTERVAL_MILLISECONDS: Joi.number().integer().min(50).default(15_000),
   FX_LOCAL_CACHE_MILLISECONDS: Joi.number().integer().min(0).max(10_000).default(1000),
 })
-  .and('SMTP_USER', 'SMTP_PASSWORD')
   // The runtime and migration roles must differ, or the ledger's revoked grants are void.
   .custom((env: Record<string, unknown>, helpers) =>
     env.DB_APP_USER === env.DB_MIGRATION_USER
@@ -539,6 +551,7 @@ export function loadConfig(raw: NodeJS.ProcessEnv | Record<string, string | unde
   if (env.NODE_ENV === 'production' && env.DEMO_CREDIT_NGN_MINOR !== undefined && env.DEMO_CREDIT_NGN_MINOR !== '0') {
     problems.push('DEMO_CREDIT_NGN_MINOR must be 0 in production (design §15 item 6: non-production only)');
   }
+  const mail = parseMail(env, problems);
   const webhookSecrets = parseWebhookSecrets(raw.PSP_WEBHOOK_SECRETS, problems);
   const paystack = error ? undefined : parsePaystack(raw, env, problems);
   const funding = parseFunding(env.PSP_FUNDING_CURRENCIES, env.FUNDING_LIMITS, paystack?.enabled ? paystack.currencies : [], problems);
@@ -548,7 +561,7 @@ export function loadConfig(raw: NodeJS.ProcessEnv | Record<string, string | unde
   const protection = parseProtection(raw, problems);
   const withdrawals = error || !protection ? undefined : parseWithdrawals(raw, env, protection, problems);
   const buildGitSha = resolveBuildGitSha(env.BUILD_GIT_SHA, env.NODE_ENV === 'production', problems);
-  if (problems.length > 0 || !keys || !pepper || !pinPepper || !webhookSecrets || !funding || !conversion || !fx || !reconciliation || !paystack || !protection || !withdrawals) {
+  if (problems.length > 0 || !keys || !pepper || !pinPepper || !mail || !webhookSecrets || !funding || !conversion || !fx || !reconciliation || !paystack || !protection || !withdrawals) {
     throw new ConfigValidationError(problems);
   }
   return {
@@ -589,15 +602,7 @@ export function loadConfig(raw: NodeJS.ProcessEnv | Record<string, string | unde
       transactionPinPepper: pinPepper,
       demoCreditNgnMinor: BigInt(env.DEMO_CREDIT_NGN_MINOR),
     },
-    mail: {
-      smtp: {
-        host: env.SMTP_HOST,
-        port: env.SMTP_PORT,
-        secure: env.SMTP_SECURE,
-        ...(env.SMTP_USER ? { user: env.SMTP_USER, password: env.SMTP_PASSWORD } : {}),
-      },
-      from: env.MAIL_FROM,
-    },
+    mail,
     outbox: {
       maxAttempts: env.OUTBOX_MAX_ATTEMPTS,
       pollIntervalMilliseconds: env.OUTBOX_POLL_INTERVAL_MS,
@@ -648,6 +653,41 @@ export const BUILD_INFO_PATH = join(__dirname, '..', 'build-info.json');
  * The running version (design §9.4: "the build stamps a git SHA into /health"): `BUILD_GIT_SHA` (CI) wins, else
  * the file the build wrote. No runtime git. Production refuses to boot without one; elsewhere it is `unknown`.
  */
+const MAILHOG_FROM = 'KoboFX <no-reply@kobofx.local>';
+
+/**
+ * The mail transport (`MailTransport`). MailHog's settings (`MAILHOG_*`) and the provider's (`SMTP_*`) are separate, so
+ * one environment file can hold both and `MAIL_TRANSPORT` picks. A provider needs host, port, credentials and a sender:
+ * a missing one is a boot failure, never a silent fallback to MailHog.
+ */
+function parseMail(env: Record<string, never>, problems: string[]): MailConfig | undefined {
+  const production = env.NODE_ENV === 'production';
+  const transport = (env.MAIL_TRANSPORT as MailTransport | undefined) ?? (production ? 'smtp' : 'mailhog');
+  if (transport === 'mailhog') {
+    if (production) {
+      problems.push('MAIL_TRANSPORT=mailhog is refused in production: set MAIL_TRANSPORT=smtp and the SMTP_* settings');
+      return undefined;
+    }
+    return {
+      transport,
+      smtp: { host: env.MAILHOG_HOST ?? 'localhost', port: env.MAILHOG_SMTP_PORT ?? 1025, secure: false },
+      from: env.MAIL_FROM || MAILHOG_FROM,
+    };
+  }
+  const missing = (['SMTP_HOST', 'SMTP_PORT', 'SMTP_USER', 'SMTP_PASSWORD', 'MAIL_FROM'] as const).filter(
+    (name) => env[name] === undefined || env[name] === '',
+  );
+  if (missing.length > 0) {
+    problems.push(`MAIL_TRANSPORT=smtp requires ${missing.join(', ')}`);
+    return undefined;
+  }
+  return {
+    transport,
+    smtp: { host: env.SMTP_HOST, port: env.SMTP_PORT, secure: env.SMTP_SECURE, user: env.SMTP_USER, password: env.SMTP_PASSWORD },
+    from: env.MAIL_FROM,
+  };
+}
+
 export function resolveBuildGitSha(fromEnvironment: string | undefined, production: boolean, problems: string[]): string {
   if (fromEnvironment) return fromEnvironment;
   if (existsSync(BUILD_INFO_PATH)) {
