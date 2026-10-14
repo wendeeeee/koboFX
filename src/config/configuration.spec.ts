@@ -1,7 +1,7 @@
 import { RoundingPurpose, RoundingStrategy } from '../common/money/rounding-policy';
 import { KeyObject, generateKeyPairSync } from 'node:crypto';
 import { authenticationTestEnvironment, testKeyPair } from '../../test/support/authentication-secrets';
-import { ConfigValidationError, loadConfig } from './configuration';
+import { ConfigValidationError, loadConfig, parseMailSender } from './configuration';
 
 const VALID = {
   NODE_ENV: 'test',
@@ -17,6 +17,14 @@ const VALID = {
   ROUNDING_REVENUE: 'ROUND_HALF_EVEN',
   ROUNDING_FEE: 'ROUND_HALF_EVEN',
   ...authenticationTestEnvironment(),
+};
+
+const PRODUCTION_MAIL = {
+  SMTP_HOST: 'smtp-relay.example.com',
+  SMTP_PORT: '2525',
+  SMTP_USER: 'demo-login@example.com',
+  SMTP_PASSWORD: 'smtp-key',
+  MAIL_FROM: 'KoboFX <no-reply@example.com>',
 };
 
 function problemsOf(env: Record<string, string | undefined>): string[] {
@@ -101,10 +109,8 @@ describe('loadConfig', () => {
         JWT_PRIVATE_KEY: undefined,
         JWT_PUBLIC_KEYS: undefined,
         ONE_TIME_PASSWORD_PEPPER: undefined,
-        SMTP_HOST: undefined,
-        MAIL_FROM: undefined,
       }).join('\n');
-      for (const name of ['JWT_SIGNING_KEY_ID', 'JWT_PRIVATE_KEY', 'JWT_PUBLIC_KEYS', 'ONE_TIME_PASSWORD_PEPPER', 'SMTP_HOST', 'MAIL_FROM']) {
+      for (const name of ['JWT_SIGNING_KEY_ID', 'JWT_PRIVATE_KEY', 'JWT_PUBLIC_KEYS', 'ONE_TIME_PASSWORD_PEPPER']) {
         expect(problems).toContain(name);
       }
     });
@@ -118,7 +124,7 @@ describe('loadConfig', () => {
       );
       // A production config also needs a production-grade FX plan (Phase 6 §5.2: daily rates are refused).
       const productionFx = { FX_RATE_BASE_URL: 'https://v6.exchangerate-api.com/v6/{apiKey}/latest', FX_PROVIDER_PLAN: 'BUSINESS', EXCHANGE_RATE_API_KEY: 'abcdef0123456789abcdef01' };
-      expect(() => loadConfig({ ...VALID, ...productionFx, NODE_ENV: 'production', DEMO_CREDIT_NGN_MINOR: '0', BUILD_GIT_SHA: 'abc1234' })).not.toThrow();
+      expect(() => loadConfig({ ...VALID, ...productionFx, ...PRODUCTION_MAIL, NODE_ENV: 'production', DEMO_CREDIT_NGN_MINOR: '0', BUILD_GIT_SHA: 'abc1234' })).not.toThrow();
       expect(problemsOf({ ...VALID, DEMO_CREDIT_NGN_MINOR: '100.5' }).join()).toContain('DEMO_CREDIT_NGN_MINOR');
     });
 
@@ -145,9 +151,63 @@ describe('loadConfig', () => {
       }
     });
 
-    it('requires SMTP credentials in pairs', () => {
-      expect(problemsOf({ ...VALID, SMTP_USER: 'u' }).join()).toContain('SMTP_PASSWORD');
-      expect(loadConfig({ ...VALID, SMTP_USER: 'u', SMTP_PASSWORD: 'p' }).mail.smtp).toMatchObject({ user: 'u', password: 'p' });
+    it('mail goes to MailHog outside production unless MAIL_TRANSPORT=smtp; SMTP_* never leaks into MailHog', () => {
+      expect(loadConfig(VALID).mail).toEqual({
+        transport: 'mailhog',
+        smtp: { host: 'localhost', port: 1025, secure: false },
+        from: 'KoboFX <no-reply@kobofx.local>',
+      });
+      const both = { ...VALID, ...PRODUCTION_MAIL, MAILHOG_HOST: 'mailhog', MAILHOG_SMTP_PORT: '2025', MAIL_FROM: '' };
+      expect(loadConfig(both).mail).toEqual({
+        transport: 'mailhog',
+        smtp: { host: 'mailhog', port: 2025, secure: false },
+        from: 'KoboFX <no-reply@kobofx.local>',
+      });
+      expect(() => loadConfig({ ...VALID, SMTP_HOST: '', SMTP_PORT: '', SMTP_USER: '', SMTP_PASSWORD: '' })).not.toThrow();
+    });
+
+    it('MAIL_TRANSPORT=brevo sends through the HTTP API: it needs the API key and a sender address', () => {
+      expect(loadConfig({ ...VALID, MAIL_TRANSPORT: 'brevo', BREVO_API_KEY: 'xkeysib-k', MAIL_FROM: 'KoboFX Demo <demo@example.com>' }).mail).toEqual({
+        transport: 'brevo',
+        brevo: { apiKey: 'xkeysib-k', baseUrl: 'https://api.brevo.com' },
+        from: 'KoboFX Demo <demo@example.com>',
+        sender: { name: 'KoboFX Demo', email: 'demo@example.com' },
+      });
+      expect(loadConfig({ ...VALID, MAIL_TRANSPORT: 'brevo', BREVO_API_KEY: 'k', MAIL_FROM: 'demo@example.com', BREVO_API_BASE_URL: 'http://127.0.0.1:4040/' }).mail).toMatchObject({
+        brevo: { baseUrl: 'http://127.0.0.1:4040' },
+        sender: { email: 'demo@example.com' },
+      });
+      expect(problemsOf({ ...VALID, MAIL_TRANSPORT: 'brevo' }).join()).toContain('MAIL_TRANSPORT=brevo requires BREVO_API_KEY, MAIL_FROM');
+      expect(problemsOf({ ...VALID, MAIL_TRANSPORT: 'brevo', BREVO_API_KEY: 'k', MAIL_FROM: 'KoboFX <not-an-address>' }).join()).toContain('MAIL_FROM must be an address');
+      const production = { ...VALID, NODE_ENV: 'production', BUILD_GIT_SHA: 'abc1234', MAIL_TRANSPORT: 'brevo', BREVO_API_KEY: 'k', MAIL_FROM: 'demo@example.com' };
+      expect(problemsOf(production).join()).not.toContain('MAIL');
+      expect(problemsOf({ ...production, BREVO_API_BASE_URL: 'http://api.brevo.com' }).join()).toContain('BREVO_API_BASE_URL must be https');
+    });
+
+    it('parses senders the way Brevo takes them', () => {
+      expect(parseMailSender('KoboFX <a@example.com>')).toEqual({ name: 'KoboFX', email: 'a@example.com' });
+      expect(parseMailSender('"KoboFX Demo" <a@example.com>')).toEqual({ name: 'KoboFX Demo', email: 'a@example.com' });
+      expect(parseMailSender(' a@example.com ')).toEqual({ email: 'a@example.com' });
+      expect(parseMailSender('<a@example.com>')).toEqual({ email: 'a@example.com' });
+      for (const bad of ['KoboFX', 'KoboFX <a@b>', 'a@@example.com', 'KoboFX <a@example.com']) expect(parseMailSender(bad)).toBeUndefined();
+    });
+
+    it('MAIL_TRANSPORT=smtp needs every provider setting, credentials included; it is the production default', () => {
+      expect(loadConfig({ ...VALID, ...PRODUCTION_MAIL, MAIL_TRANSPORT: 'smtp', SMTP_SECURE: 'true' }).mail).toEqual({
+        transport: 'smtp',
+        smtp: { host: 'smtp-relay.example.com', port: 2525, secure: true, user: 'demo-login@example.com', password: 'smtp-key' },
+        from: 'KoboFX <no-reply@example.com>',
+      });
+      expect(problemsOf({ ...VALID, MAIL_TRANSPORT: 'smtp' }).join()).toContain(
+        'MAIL_TRANSPORT=smtp requires SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASSWORD, MAIL_FROM',
+      );
+      expect(problemsOf({ ...VALID, ...PRODUCTION_MAIL, MAIL_TRANSPORT: 'smtp', SMTP_PASSWORD: '' }).join()).toContain('requires SMTP_PASSWORD');
+      expect(problemsOf({ ...VALID, MAIL_TRANSPORT: 'carrier-pigeon' }).join()).toContain('MAIL_TRANSPORT');
+      const production = { ...VALID, NODE_ENV: 'production', BUILD_GIT_SHA: 'abc1234' };
+      expect(problemsOf(production).join()).toContain('MAIL_TRANSPORT=smtp requires SMTP_HOST');
+      expect(problemsOf({ ...production, ...PRODUCTION_MAIL, MAIL_TRANSPORT: 'mailhog' }).join()).toContain(
+        'MAIL_TRANSPORT=mailhog is refused in production',
+      );
     });
   });
 });
@@ -243,7 +303,7 @@ describe('loadConfig: FX rates (Phase 6)', () => {
   });
 
   it('production refuses daily-cadence plans (Phase 6 §5.2) and plain HTTP', () => {
-    const production = { ...VALID, NODE_ENV: 'production', BUILD_GIT_SHA: 'abc1234' };
+    const production = { ...VALID, ...PRODUCTION_MAIL, NODE_ENV: 'production', BUILD_GIT_SHA: 'abc1234' };
     expect(problemsOf(production).join()).toMatch(/FX_PROVIDER_PLAN=OPEN publishes once a day/);
     expect(problemsOf({ ...production, FX_RATE_BASE_URL: KEYED, FX_PROVIDER_PLAN: 'FREE', EXCHANGE_RATE_API_KEY: KEY }).join()).toMatch(/FREE publishes once a day/);
     expect(
@@ -288,6 +348,7 @@ describe('loadConfig: Paystack (PAYSTACK_PLAN.md C5)', () => {
       name: 'paystack',
       secretKey: '',
       baseUrl: 'https://api.paystack.co',
+      transfersBaseUrl: 'https://api.paystack.co',
       callbackUrl: '',
       currencies: ['NGN'],
       checkoutWindowMinutes: 30,

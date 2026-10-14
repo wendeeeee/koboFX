@@ -27,7 +27,7 @@ import { PaystackTransfersGateway } from './paystack-transfers.port';
           new PaystackTransfersHttpClient(
             {
               provider: paystack.name,
-              baseUrl: paystack.baseUrl,
+              baseUrl: paystack.transfersBaseUrl,
               secretKey: paystack.secretKey,
               timeoutMilliseconds: paystack.requestTimeoutMilliseconds,
               writeTimeoutMilliseconds: paystack.initializeTimeoutMilliseconds,

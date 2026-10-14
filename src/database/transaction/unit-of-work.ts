@@ -71,6 +71,19 @@ export class UnitOfWork implements OnModuleInit, OnModuleDestroy {
     }
   }
 
+  /**
+   * A NEW transaction, even inside another one, ambient for `work` (so audit/outbox writes join it). For facts that must
+   * survive the caller's rollback — e.g. a wrong transaction PIN is counted even when the request it guards is refused.
+   * It holds a second connection while the caller's is open: keep it short and never lock what the caller holds.
+   */
+  async runIndependent<T>(work: (manager: EntityManager) => Promise<T>): Promise<T> {
+    try {
+      return await this.dataSource.transaction('READ COMMITTED', (manager) => this.storage.run(manager, () => work(manager)));
+    } catch (error) {
+      throw translateDatabaseError(error);
+    }
+  }
+
   async run<T>(work: (manager: EntityManager) => Promise<T>): Promise<T> {
     const ambient = this.storage.getStore();
     if (ambient) return work(ambient);

@@ -19,7 +19,7 @@ export class TradeService {
     private readonly rounding: RoundingPolicy,
   ) {}
 
-  async trade(userId: string, request: TradeDto, idempotencyKey: string | undefined): Promise<ConversionView> {
+  async trade(userId: string, request: Omit<TradeDto, 'transactionPin'>, idempotencyKey: string | undefined): Promise<ConversionView> {
     const pair = { from: 'UNKNOWN', to: 'UNKNOWN' };
     return this.conversions.execute(userId, idempotencyKey, pair, async () => {
       const quote = await this.quotes.consume(request.quoteId, userId);

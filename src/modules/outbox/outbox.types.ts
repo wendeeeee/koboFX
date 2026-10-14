@@ -13,6 +13,10 @@ export enum OutboxEventType {
   PROTECTED_HOLD_FLAGGED = 'ProtectedHoldFlagged.v1',
   /** A user asked for a withdrawal code: `{userId}` (the worker generates and emails it). */
   WITHDRAWAL_CODE_REQUESTED = 'WithdrawalCodeRequested.v1',
+  /** A user asked to reset a forgotten transaction PIN: `{userId}` (the worker generates and emails the code). */
+  TRANSACTION_PIN_RESET_CODE_REQUESTED = 'TransactionPinResetCodeRequested.v1',
+  /** A transaction PIN was created, changed, reset or locked: `{userId, change}` (a security notice email). */
+  TRANSACTION_PIN_CHANGED = 'TransactionPinChanged.v1',
 }
 
 /** W4 §G.2: ids and the condition only. */

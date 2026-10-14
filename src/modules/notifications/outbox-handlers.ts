@@ -12,7 +12,7 @@ import {
 } from '../outbox/outbox.types';
 import { UserRepository } from '../users/user.repository';
 import { EmailSender } from './email/email-sender';
-import { existingAccountEmail } from './email/email-templates';
+import { TransactionPinChange, existingAccountEmail, transactionPinChangedEmail } from './email/email-templates';
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -44,6 +44,44 @@ export class WithdrawalCodeRequestedHandler implements OutboxEventHandler {
 
   async handle(event: ClaimedOutboxEvent): Promise<void> {
     await this.oneTimePasswords.dispatchWithdrawalCode(userIdOf(event), event.id);
+  }
+}
+
+/** `TransactionPinResetCodeRequested.v1` → generate and email a PIN reset code (plaintext only in this process). */
+@Injectable()
+export class TransactionPinResetCodeRequestedHandler implements OutboxEventHandler {
+  readonly eventType = OutboxEventType.TRANSACTION_PIN_RESET_CODE_REQUESTED;
+
+  constructor(private readonly oneTimePasswords: GenerateAndDispatchOneTimePasswordService) {}
+
+  async handle(event: ClaimedOutboxEvent): Promise<void> {
+    await this.oneTimePasswords.dispatchTransactionPinResetCode(userIdOf(event), event.id);
+  }
+}
+
+const PIN_CHANGES: readonly TransactionPinChange[] = ['CREATED', 'CHANGED', 'RESET', 'LOCKED'];
+
+/** `TransactionPinChanged.v1 {userId, change}` → the security notice email. A malformed payload fails loudly. */
+@Injectable()
+export class TransactionPinChangedHandler implements OutboxEventHandler {
+  readonly eventType = OutboxEventType.TRANSACTION_PIN_CHANGED;
+  private readonly logger = new Logger(TransactionPinChangedHandler.name);
+
+  constructor(
+    private readonly users: UserRepository,
+    private readonly emailSender: EmailSender,
+  ) {}
+
+  async handle(event: ClaimedOutboxEvent): Promise<void> {
+    const userId = userIdOf(event);
+    const change = (event.payload as { change?: unknown }).change;
+    if (typeof change !== 'string' || !(PIN_CHANGES as readonly string[]).includes(change)) {
+      throw new InvariantViolationError(`Outbox event ${event.id} has a malformed payload.`);
+    }
+    const user = await this.users.findProfile(userId);
+    if (!user) throw new InvariantViolationError(`Outbox event ${event.id} names a user that does not exist.`);
+    await this.emailSender.send(transactionPinChangedEmail(user.email, change as TransactionPinChange));
+    this.logger.log({ userId, change }, 'Transaction PIN notice sent');
   }
 }
 

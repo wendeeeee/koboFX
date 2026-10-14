@@ -23,6 +23,7 @@ import { paymentProviderTestSecrets } from '../support/authentication-secrets';
 import { TestDatabase, startTestDatabase } from '../support/test-database';
 
 const PASSWORD = 'an end-to-end history password';
+const TRANSACTION_PIN = '730416';
 const TOKEN = 'tok_success_visa_e2e_history';
 const API_KEY = `e2ehistorykey${randomUUID().replace(/-/g, '').slice(0, 20)}`;
 
@@ -114,6 +115,9 @@ describe('Transaction history (e2e: real pipeline, worker loops running)', () =>
     const verified = await http().post(`/${API_PREFIX}/auth/verify`).send({ email, password: PASSWORD, oneTimePassword: code }).expect(200);
     const access = verified.body.tokens.access.token as string;
     secrets.add(access).add(verified.body.tokens.refresh.token as string);
+    // Withdrawals and conversions need a transaction PIN: created through the real route (and never logged).
+    await http().post(`/${API_PREFIX}/users/me/transaction-pin`).set('Authorization', `Bearer ${access}`).send({ pin: TRANSACTION_PIN, password: PASSWORD }).expect(201);
+    secrets.add(TRANSACTION_PIN);
     return { access, userId: verified.body.user.id as string };
   }
 
@@ -153,12 +157,12 @@ describe('Transaction history (e2e: real pipeline, worker loops running)', () =>
       .set('Idempotency-Key', randomUUID())
       .send({ from: 'NGN', to: 'USD', sourceAmount: '5000000' })
       .expect(201);
-    const traded = await http().post(`/${API_PREFIX}/wallet/trade`).set(auth).set('Idempotency-Key', randomUUID()).send({ quoteId: quote.body.quoteId }).expect(201);
+    const traded = await http().post(`/${API_PREFIX}/wallet/trade`).set(auth).set('Idempotency-Key', randomUUID()).send({ quoteId: quote.body.quoteId, transactionPin: TRANSACTION_PIN }).expect(201);
     const converted = await http()
       .post(`/${API_PREFIX}/wallet/convert`)
       .set(auth)
       .set('Idempotency-Key', randomUUID())
-      .send({ from: 'NGN', to: 'EUR', sourceAmount: '2000000' })
+      .send({ from: 'NGN', to: 'EUR', sourceAmount: '2000000', transactionPin: TRANSACTION_PIN })
       .expect(201);
 
     // History: exactly three items, newest value time first.

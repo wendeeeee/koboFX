@@ -5,7 +5,7 @@ import { API_PREFIX } from '../../src/app.setup';
 import { dec, majorToExactMinor, minorToMajorDecimal } from '../../src/common/money';
 import { RECORDED_RATES } from '../../src/mock-exchange-rate-api/mock-exchange-rate-api';
 import { TestClock } from '../support/auth-test-doubles';
-import { FxHarness, LedgerHarness, PaymentsHarness, SignedUpUser, startLedgerHarness } from '../support/ledger-harness';
+import { FxHarness, LedgerHarness, PaymentsHarness, SignedUpUser, startLedgerHarness, HARNESS_TRANSACTION_PIN } from '../support/ledger-harness';
 
 const CURRENCIES = ['NGN', 'USD', 'EUR'] as const;
 type Currency = (typeof CURRENCIES)[number];
@@ -125,7 +125,7 @@ describe('Trading properties (integration)', () => {
   /** POST with a key, then replay it: identical status and bytes, and nothing else changed. */
   async function sendTwice(trader: Trader, path: string, body: Record<string, unknown>) {
     const key = randomUUID();
-    const send = () => http().post(`/${API_PREFIX}${path}`).set('Authorization', `Bearer ${trader.token}`).set('Idempotency-Key', key).send(body);
+    const send = () => http().post(`/${API_PREFIX}${path}`).set('Authorization', `Bearer ${trader.token}`).set('Idempotency-Key', key).send(/^\/wallet\/(convert|trade)$/.test(path) ? { transactionPin: HARNESS_TRANSACTION_PIN, ...body } : body);
     const first = await send();
     const before = await harness.snapshot();
     const replay = await send();

@@ -11,6 +11,7 @@ import { ConvertService } from './convert.service';
 import { ConvertDto } from './dto/convert.dto';
 import { TradeDto } from './dto/trade.dto';
 import { TradeService } from './trade.service';
+import { TransactionPinGuard } from '../transaction-pins/transaction-pin.guard';
 import { ConversionDocument } from './trading.responses';
 
 
@@ -25,6 +26,9 @@ const POSTING_ERRORS = [
   ErrorCode.INVALID_POSTING,
   ErrorCode.ACCOUNT_CURRENCY_MISMATCH,
   ErrorCode.INVALID_RESERVATION,
+  ErrorCode.TRANSACTION_PIN_NOT_SET,
+  ErrorCode.TRANSACTION_PIN_INVALID,
+  ErrorCode.TRANSACTION_PIN_LOCKED,
 ] as const;
 
 
@@ -38,7 +42,7 @@ export class TradingController {
 
 
   @Post('convert')
-  @UseGuards(RateSnapshotGuard)
+  @UseGuards(TransactionPinGuard, RateSnapshotGuard)
   @Idempotent({ transactionIdField: 'transactionId' })
   @ApiOperation({
     summary: 'Convert at the market rate',
@@ -54,11 +58,11 @@ export class TradingController {
     examples: {
       sellNairaProtected: {
         summary: 'SOURCE mode: sell ₦1,530,000.00, refuse below $980.00',
-        value: { from: 'NGN', to: 'USD', sourceAmount: '153000000', minimumTargetAmount: '98000' },
+        value: { from: 'NGN', to: 'USD', sourceAmount: '153000000', minimumTargetAmount: '98000', transactionPin: '402815' },
       },
       buyDollarsProtected: {
         summary: 'TARGET mode: buy $50.00, refuse above ₦78,000.00',
-        value: { from: 'NGN', to: 'USD', targetAmount: '5000', maximumSourceAmount: '7800000' },
+        value: { from: 'NGN', to: 'USD', targetAmount: '5000', maximumSourceAmount: '7800000', transactionPin: '402815' },
       },
     },
   })
@@ -84,6 +88,7 @@ export class TradingController {
   }
 
   @Post('trade')
+  @UseGuards(TransactionPinGuard)
   @Idempotent({ transactionIdField: 'transactionId' })
   @ApiOperation({
     summary: 'Execute a quote',

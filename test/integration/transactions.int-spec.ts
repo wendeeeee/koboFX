@@ -5,7 +5,7 @@ import { dec } from '../../src/common/money';
 import { displayRate } from '../../src/modules/fx/pricing';
 import { PUBLIC_REASON_CODES } from '../../src/modules/transactions/history-status';
 import { TestClock } from '../support/auth-test-doubles';
-import { FxHarness, LedgerHarness, PaymentsHarness, SignedUpUser, startLedgerHarness } from '../support/ledger-harness';
+import { FxHarness, LedgerHarness, PaymentsHarness, SignedUpUser, startLedgerHarness, HARNESS_TRANSACTION_PIN } from '../support/ledger-harness';
 
 const DEMO_CREDIT_MINOR = '10000000'; // ₦100,000.00
 
@@ -47,7 +47,7 @@ describe('Transaction history (integration)', () => {
   const detail = (user: SignedUpUser, reference: string) =>
     http().get(`/${API_PREFIX}/transactions/${reference}`).set('Authorization', `Bearer ${user.accessToken}`);
   const post = (user: SignedUpUser, path: string, body: Record<string, unknown>) =>
-    http().post(`/${API_PREFIX}${path}`).set('Authorization', `Bearer ${user.accessToken}`).set('Idempotency-Key', randomUUID()).send(body);
+    http().post(`/${API_PREFIX}${path}`).set('Authorization', `Bearer ${user.accessToken}`).set('Idempotency-Key', randomUUID()).send(/^\/wallet\/(convert|trade)$/.test(path) ? { transactionPin: HARNESS_TRANSACTION_PIN, ...body } : body);
 
   const fund = async (user: SignedUpUser, amount = '5000000', token = 'tok_success_visa') => {
     const response = await payments.fund(user, { amount, currency: 'NGN', paymentMethodToken: token });

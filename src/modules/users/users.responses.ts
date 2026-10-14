@@ -22,4 +22,10 @@ export class UserProfileDocument implements UserProfileResponse {
 
   @ApiInstant('When the account was created.', '2026-09-29T09:58:12.000Z')
   createdAt!: string;
+
+  @ApiProperty({ example: true, description: 'You have a transaction PIN (required to withdraw and to convert).' })
+  transactionPinSet!: boolean;
+
+  @ApiProperty({ example: false, description: 'Your PIN is locked after too many wrong attempts: reset it to withdraw or convert again.' })
+  transactionPinLocked!: boolean;
 }

@@ -34,6 +34,8 @@ describe('Withdrawal code (integration)', () => {
   });
 
   const emails = () => harness.auth!.emails;
+  // PIN creation also queues a security notice; count only the emails this suite exercises.
+  const withdrawalEmails = (user: SignedUpUser) => emails().sentTo(user.email).filter((email) => email.subject === 'Your KoboFX withdrawal code');
   const redis = () => harness.moduleRef.get(RedisService);
   const codeKey = (userId: string) => OneTimePasswordChallengeStore.key(OneTimePasswordPurpose.AUTHORIZE_WITHDRAWAL, userId);
   const holdsOf = async (accountId: string) =>
@@ -64,12 +66,11 @@ describe('Withdrawal code (integration)', () => {
     const asked = await withdrawals.requestCode(user);
     expect(asked.status).toBe(202);
     expect(asked.body).toEqual({ status: 'REQUESTED', channel: 'EMAIL', expiresInSeconds: 600 });
-    const before = emails().sentTo(user.email).length;
+    const before = withdrawalEmails(user).length;
     await harness.auth!.deliverOutbox();
     const code = emails().latestWithdrawalCodeFor(user.email);
     expect(code).toMatch(/^\d{6}$/);
-    expect(emails().sentTo(user.email).length).toBe(before + 1);
-    expect(emails().sentTo(user.email).at(-1)!.subject).toBe('Your KoboFX withdrawal code');
+    expect(withdrawalEmails(user)).toHaveLength(before + 1);
 
     const [outbox] = (await harness.dataSource.query(
       `SELECT payload FROM outbox_events WHERE event_type = 'WithdrawalCodeRequested.v1' AND aggregate_id = $1 ORDER BY created_at DESC LIMIT 1`,
@@ -180,9 +181,9 @@ describe('Withdrawal code (integration)', () => {
     } finally {
       await owner.end();
     }
-    const before = emails().sentTo(user.email).length;
+    const before = withdrawalEmails(user).length;
     await harness.auth!.deliverOutbox();
-    expect(emails().sentTo(user.email).length).toBe(before);
+    expect(withdrawalEmails(user)).toHaveLength(before);
 
     const { user: other } = await ready();
     await harness.dataSource.query(`UPDATE worker_capabilities SET heartbeat_at = now() - interval '1 hour'`);

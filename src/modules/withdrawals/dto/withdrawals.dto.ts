@@ -1,3 +1,4 @@
+import { TransactionPinField } from '../../transaction-pins/dto/transaction-pin-field';
 import { ApiProperty, ApiPropertyOptional, ApiSchema } from '@nestjs/swagger';
 import { IsOptional, IsString, IsUUID, Matches, MaxLength } from 'class-validator';
 import { ApiCurrency, ApiMinorUnits, MINOR_UNITS_PATTERN_18 } from '../../../openapi/properties';
@@ -48,6 +49,9 @@ export class WithdrawDto {
   @IsString()
   @Matches(/^\d{6}$/, { message: 'oneTimePassword must be the 6-digit code from your email' })
   oneTimePassword!: string;
+
+  @TransactionPinField()
+  transactionPin!: string;
 }
 
 export class PageQuery {

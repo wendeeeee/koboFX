@@ -1,3 +1,4 @@
+import { TransactionPinsModule } from '../transaction-pins/transaction-pins.module';
 import { DynamicModule, Inject, Injectable, Logger, Module, OnApplicationBootstrap, OnModuleInit, Provider } from '@nestjs/common';
 import { DependencyUnavailableError, InvariantViolationError } from '../../common/errors';
 import { APP_CONFIG } from '../../config/config.module';
@@ -161,6 +162,7 @@ export class WithdrawalsModule implements OnModuleInit {
         OutboxModule,
         UsersModule,
         OneTimePasswordsModule,
+        TransactionPinsModule,
       
         ...(keyed ? [PaystackTransfersModule, PaystackModule, ReconciliationModule, WebhooksModule] : []),
       ],

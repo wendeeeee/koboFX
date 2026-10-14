@@ -14,6 +14,10 @@ export interface UserProfileResponse {
   readonly role: string;
   readonly verifiedAt: string | null;
   readonly createdAt: string;
+  /** A transaction PIN exists (required to withdraw and convert): the dashboard offers to create one until it does. */
+  readonly transactionPinSet: boolean;
+  /** Locked after too many wrong PINs: only a reset unlocks it. */
+  readonly transactionPinLocked: boolean;
 }
 
 @ApiTags('users')
@@ -28,6 +32,7 @@ export class UsersController {
   async me(@CurrentUser() user: AuthenticatedUser): Promise<UserProfileResponse> {
     const profile = await this.users.findProfile(user.id);
     if (!profile) throw new NotFoundError('User not found.');
+    const pin = await this.users.findTransactionPinState(user.id);
     return {
       id: profile.id,
       email: profile.email,
@@ -35,6 +40,8 @@ export class UsersController {
       role: profile.role,
       verifiedAt: profile.verifiedAt?.toISOString() ?? null,
       createdAt: profile.createdAt.toISOString(),
+      transactionPinSet: pin.set,
+      transactionPinLocked: pin.locked,
     };
   }
 }

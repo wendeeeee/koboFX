@@ -31,6 +31,7 @@ export function encodePublicKeys(pairs: readonly TestKeyPair[]): string {
 }
 
 const pepper = randomBytes(32).toString('base64');
+const transactionPinPepper = randomBytes(32).toString('base64');
 const pspSecretKey = `sk_test_${randomBytes(24).toString('hex')}`;
 const pspWebhookSecret = randomBytes(32).toString('base64');
 
@@ -62,9 +63,7 @@ export function authenticationTestEnvironment(): Record<string, string> {
     JWT_PRIVATE_KEY: base64(pair.privateKeyPem),
     JWT_PUBLIC_KEYS: encodePublicKeys([pair]),
     ONE_TIME_PASSWORD_PEPPER: pepper,
-    SMTP_HOST: 'localhost',
-    SMTP_PORT: '1025',
-    MAIL_FROM: 'KoboFX <no-reply@kobofx.test>',
+    TRANSACTION_PIN_PEPPER: transactionPinPepper,
     PSP_BASE_URL: 'http://127.0.0.1:9',
     PSP_SECRET_KEY: pspSecretKey,
     PSP_WEBHOOK_SECRETS: pspWebhookSecret,

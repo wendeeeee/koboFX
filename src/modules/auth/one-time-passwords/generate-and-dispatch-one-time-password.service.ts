@@ -5,7 +5,7 @@ import { AppConfig } from '../../../config/configuration';
 import { UnitOfWork } from '../../../database/transaction/unit-of-work';
 import { EmailSender } from '../../notifications/email/email-sender';
 import { EmailMessage } from '../../notifications/email/email-sender';
-import { verificationCodeEmail, withdrawalCodeEmail } from '../../notifications/email/email-templates';
+import { transactionPinResetCodeEmail, verificationCodeEmail, withdrawalCodeEmail } from '../../notifications/email/email-templates';
 import { UserStatus } from '../../users/user.types';
 import {
   ONE_TIME_PASSWORD_TIME_TO_LIVE_SECONDS,
@@ -50,6 +50,13 @@ export class GenerateAndDispatchOneTimePasswordService {
   async dispatchWithdrawalCode(userId: string, outboxEventId: string): Promise<DispatchOutcome> {
     const sent = await this.issue(OneTimePasswordPurpose.AUTHORIZE_WITHDRAWAL, userId, outboxEventId, UserStatus.ACTIVE, withdrawalCodeEmail);
     if (!sent) this.logger.log({ userId }, 'Withdrawal code not sent: the user is not active');
+    return sent ? 'SENT' : 'NOT_ACTIVE';
+  }
+
+  /** A transaction-PIN reset code (`TransactionPinResetCodeRequested.v1`): ACTIVE users only, like withdrawal codes. */
+  async dispatchTransactionPinResetCode(userId: string, outboxEventId: string): Promise<DispatchOutcome> {
+    const sent = await this.issue(OneTimePasswordPurpose.RESET_TRANSACTION_PIN, userId, outboxEventId, UserStatus.ACTIVE, transactionPinResetCodeEmail);
+    if (!sent) this.logger.log({ userId }, 'Transaction PIN reset code not sent: the user is not active');
     return sent ? 'SENT' : 'NOT_ACTIVE';
   }
 

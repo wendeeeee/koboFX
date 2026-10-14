@@ -51,6 +51,8 @@ import { AddWithdrawalReconciliationEnumValues1791676800000 } from './1791676800
 import { WithdrawalReconciliationAndRecovery1791676800001 } from './1791676800001-WithdrawalReconciliationAndRecovery';
 import { SafeWithdrawalRecoverySetting1791676800002 } from './1791676800002-SafeWithdrawalRecoverySetting';
 import { AddWithdrawalOneTimePasswordPurpose1791763200000 } from './1791763200000-AddWithdrawalOneTimePasswordPurpose';
+import { AddTransactionPinResetPurpose1791849600000 } from './1791849600000-AddTransactionPinResetPurpose';
+import { CreateTransactionPins1791849600001 } from './1791849600001-CreateTransactionPins';
 
 /** Explicit, ordered list — no globbing, so the CLI and the test harness run the same set. */
 export const MIGRATIONS = [
@@ -107,4 +109,6 @@ export const MIGRATIONS = [
   WithdrawalReconciliationAndRecovery1791676800001,
   SafeWithdrawalRecoverySetting1791676800002,
   AddWithdrawalOneTimePasswordPurpose1791763200000,
+  AddTransactionPinResetPurpose1791849600000,
+  CreateTransactionPins1791849600001,
 ];

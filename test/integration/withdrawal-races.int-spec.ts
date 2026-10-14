@@ -16,6 +16,7 @@ import {
   UserAccount,
   WithdrawalsHarness,
   startLedgerHarness,
+  HARNESS_TRANSACTION_PIN,
 } from '../support/ledger-harness';
 
 const ACCOUNT_NUMBER = '0123456789';
@@ -172,7 +173,7 @@ describe('Withdrawal races (W4, integration)', () => {
           .post(`/${API_PREFIX}/wallet/convert`)
           .set('Authorization', `Bearer ${user.accessToken}`)
           .set('Idempotency-Key', randomUUID())
-          .send({ from: 'NGN', to: 'USD', sourceAmount: '800000' });
+          .send({ from: 'NGN', to: 'USD', sourceAmount: '800000', transactionPin: HARNESS_TRANSACTION_PIN });
       // Back to back, alternating who is sent first.
       const [first, second] = round % 2 === 0 ? await Promise.all([withdraw(), convert()]) : await Promise.all([convert(), withdraw()]);
       const responses = [first, second];

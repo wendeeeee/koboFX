@@ -8,8 +8,8 @@ const directory = dirname(fileURLToPath(import.meta.url));
 const upstream = new URL(process.env.UI_API_ORIGIN || 'http://127.0.0.1:3000');
 if (!['http:', 'https:'].includes(upstream.protocol) || upstream.username || upstream.password) throw new Error('UI_API_ORIGIN must be an HTTP(S) origin without credentials.');
 const port = Number(process.env.UI_PORT || '5173');
-const mime = { '.html': 'text/html', '.css': 'text/css', '.js': 'text/javascript', '.mjs': 'text/javascript', '.svg': 'image/svg+xml' };
-const publicFiles = new Set(['index.html', 'styles.css', 'app.js', 'client.js', 'money.mjs', 'preview.mjs', 'assets/mark.svg']);
+const mime = { '.html': 'text/html', '.css': 'text/css', '.js': 'text/javascript', '.mjs': 'text/javascript', '.svg': 'image/svg+xml', '.ttf': 'font/ttf', '.txt': 'text/plain' };
+const publicFiles = new Set(['index.html', 'styles.css', 'app.js', 'client.js', 'money.mjs', 'preview.mjs', 'assets/mark.svg', 'assets/fonts/manrope-variable.ttf', 'assets/fonts/figtree-variable.ttf', 'assets/fonts/Manrope-OFL.txt', 'assets/fonts/Figtree-OFL.txt']);
 
 export const server = http.createServer(async (request, response) => {
   response.setHeader('X-Content-Type-Options', 'nosniff');
@@ -18,7 +18,7 @@ export const server = http.createServer(async (request, response) => {
   const url = new URL(request.url, 'http://localhost');
   if (url.pathname.startsWith('/api/v1/')) {
     // Customer API only. Never expose the admin routes through the UI proxy.
-    if (!/^\/api\/v1\/(auth(?:\/|$)|users\/me$|wallet(?:\/|$)|stash(?:\/|$)|fx(?:\/|$)|transactions(?:\/|$)|health\/ready$)/.test(url.pathname)) {
+    if (!/^\/api\/v1\/(auth(?:\/|$)|users\/me(?:\/transaction-pin(?:\/reset|\/reset-code)?)?$|wallet(?:\/|$)|stash(?:\/|$)|fx(?:\/|$)|transactions(?:\/|$)|health\/ready$)/.test(url.pathname)) {
       response.writeHead(404).end(); return;
     }
     const headers = { ...request.headers, host: upstream.host };
@@ -43,7 +43,7 @@ export const server = http.createServer(async (request, response) => {
   if (!target.startsWith(directory + sep) || !publicFiles.has(filename)) { response.writeHead(404).end(); return; }
   try {
     const contents = await readFile(target);
-    response.writeHead(200, { 'content-type': `${mime[extname(filename)] || 'application/octet-stream'}; charset=utf-8`, 'cache-control': 'no-cache' });
+    response.writeHead(200, { 'content-type': `${mime[extname(filename)] || 'application/octet-stream'}${extname(filename) === '.ttf' ? '' : '; charset=utf-8'}`, 'cache-control': 'no-cache' });
     response.end(request.method === 'HEAD' ? undefined : contents);
   } catch { response.writeHead(404).end(); }
 });

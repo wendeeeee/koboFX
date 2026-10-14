@@ -37,7 +37,7 @@ services:
   mailhog:
     image: mailhog/mailhog:v1.0.1
     ports:
-      - '${SMTP_PORT:-1025}:1025' # SMTP
+      - '${MAILHOG_SMTP_PORT:-1025}:1025' # SMTP (MAIL_TRANSPORT=mailhog)
       - '${MAILHOG_UI_PORT:-8025}:8025' # Web UI
 
 volumes:

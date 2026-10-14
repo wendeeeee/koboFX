@@ -1,3 +1,4 @@
+import { TransactionPinField } from '../../transaction-pins/dto/transaction-pin-field';
 import { ApiSchema } from '@nestjs/swagger';
 import { IsOptional, IsString, Matches, MaxLength } from 'class-validator';
 import { ApiCurrency, ApiMinorUnits, MINOR_UNITS_PATTERN_19 } from '../../../openapi/properties';
@@ -54,4 +55,7 @@ export class ConvertDto {
   @MaxLength(19)
   @Matches(MINOR_UNITS, { message: `maximumSourceAmount ${MINOR_UNITS_MESSAGE}` })
   maximumSourceAmount?: string;
+
+  @TransactionPinField()
+  transactionPin!: string;
 }

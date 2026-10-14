@@ -11,7 +11,7 @@ import { AppModule } from '../../src/app.module';
 import { API_PREFIX, configureApp } from '../../src/app.setup';
 import { buildOpenApiDocument } from '../../src/openapi/openapi-document';
 import { signPaystackWebhook } from '../../src/modules/payments/paystack/webhooks/paystack-webhook-signature';
-import { Administrators, FxHarness, HARNESS_USER_PASSWORD, LedgerHarness, PaymentsHarness, SignedUpUser, startLedgerHarness } from '../support/ledger-harness';
+import { Administrators, FxHarness, HARNESS_TRANSACTION_PIN, HARNESS_USER_PASSWORD, LedgerHarness, PaymentsHarness, SignedUpUser, startLedgerHarness } from '../support/ledger-harness';
 import { OpenApiValidator, documentedCodes, matchOperation } from '../support/openapi-validation';
 
 /**
@@ -102,7 +102,8 @@ describe('OpenAPI contract (integration)', () => {
       // +6 withdrawal routes (W3): banks, beneficiaries POST/GET/list, withdraw POST/GET — always served, refused while off.
       // +2 stash reads (W4): GET /stash, GET /stash/transactions — always served.
       // +1 (2026-10-07): POST /wallet/withdraw/one-time-password (the withdrawal code).
-      expect(documented).toHaveLength(47);
+      // +4 (2026-10-12): the transaction PIN — POST/PUT /users/me/transaction-pin, POST …/reset-code, POST …/reset.
+      expect(documented).toHaveLength(51);
     });
 
     it('is a valid OpenAPI 3 document', async () => {
@@ -327,34 +328,34 @@ describe('OpenAPI contract (integration)', () => {
       const traded = await check(
         'post',
         `${PREFIX}/wallet/trade`,
-        auth(http().post(`${PREFIX}/wallet/trade`)).set('Idempotency-Key', randomUUID()).send({ quoteId: quote.body.quoteId }),
+        auth(http().post(`${PREFIX}/wallet/trade`)).set('Idempotency-Key', randomUUID()).send({ quoteId: quote.body.quoteId, transactionPin: HARNESS_TRANSACTION_PIN }),
         201,
       );
       expect(traded.body.quoteId).toBe(quote.body.quoteId);
       await check(
         'post',
         `${PREFIX}/wallet/trade`,
-        auth(http().post(`${PREFIX}/wallet/trade`)).set('Idempotency-Key', randomUUID()).send({ quoteId: quote.body.quoteId }),
+        auth(http().post(`${PREFIX}/wallet/trade`)).set('Idempotency-Key', randomUUID()).send({ quoteId: quote.body.quoteId, transactionPin: HARNESS_TRANSACTION_PIN }),
         409,
       );
       const convertKey = randomUUID();
       const converted = await check(
         'post',
         `${PREFIX}/wallet/convert`,
-        auth(http().post(`${PREFIX}/wallet/convert`)).set('Idempotency-Key', convertKey).send({ from: 'NGN', to: 'USD', sourceAmount: '100000' }),
+        auth(http().post(`${PREFIX}/wallet/convert`)).set('Idempotency-Key', convertKey).send({ from: 'NGN', to: 'USD', sourceAmount: '100000', transactionPin: HARNESS_TRANSACTION_PIN }),
         201,
       );
       const replay = await check(
         'post',
         `${PREFIX}/wallet/convert`,
-        auth(http().post(`${PREFIX}/wallet/convert`)).set('Idempotency-Key', convertKey).send({ from: 'NGN', to: 'USD', sourceAmount: '100000' }),
+        auth(http().post(`${PREFIX}/wallet/convert`)).set('Idempotency-Key', convertKey).send({ from: 'NGN', to: 'USD', sourceAmount: '100000', transactionPin: HARNESS_TRANSACTION_PIN }),
         201,
       );
       expect(replay.header['idempotent-replayed']).toBe('true');
       expect(replay.body).toEqual(converted.body);
       // §12.1's example code: more than the balance. A permanent refusal inside the barrier is stored and replayed.
       const refusedKey = randomUUID();
-      const tooMuch = { from: 'NGN', to: 'USD', sourceAmount: '100000000' };
+      const tooMuch = { from: 'NGN', to: 'USD', sourceAmount: '100000000', transactionPin: HARNESS_TRANSACTION_PIN };
       const refused = await check('post', `${PREFIX}/wallet/convert`, auth(http().post(`${PREFIX}/wallet/convert`)).set('Idempotency-Key', refusedKey).send(tooMuch), 409);
       expect(refused.body.code).toBe('INSUFFICIENT_FUNDS');
       expect(refused.header['x-correlation-id']).toBe(refused.body.correlationId);
@@ -476,8 +477,8 @@ describe('OpenAPI contract (integration)', () => {
         }
       }
       // auth ×5, fund, quote ×2, convert ×2, trade, approvals ×10 (W4: + PAYSTACK_WITHDRAWAL_RECOVERY), reject, review,
-      // withdrawal beneficiary, withdraw.
-      expect(checked.length).toBe(26);
+      // withdrawal beneficiary, withdraw; transaction PIN create, change, reset (2026-10-12).
+      expect(checked.length).toBe(29);
     });
 
     it('every admin payload example matches its documented payload schema', () => {

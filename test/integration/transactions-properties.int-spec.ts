@@ -4,7 +4,7 @@ import request from 'supertest';
 import { API_PREFIX } from '../../src/app.setup';
 import { TestClock } from '../support/auth-test-doubles';
 import { expectedHistory, transactionsOnForeignAccounts, userLegsByReference } from '../support/history-oracle';
-import { FxHarness, HARNESS_USER_PASSWORD, LedgerHarness, PaymentsHarness, SignedUpUser, startLedgerHarness } from '../support/ledger-harness';
+import { FxHarness, HARNESS_USER_PASSWORD, LedgerHarness, PaymentsHarness, SignedUpUser, startLedgerHarness, HARNESS_TRANSACTION_PIN } from '../support/ledger-harness';
 
 type Step =
   | { readonly kind: 'fund'; readonly amount: string }
@@ -89,7 +89,7 @@ describe('Transaction history properties (integration)', () => {
   const http = () => request(harness.auth!.app.getHttpServer());
   const bearer = (user: SignedUpUser) => `Bearer ${user.accessToken}`;
   const post = (user: SignedUpUser, path: string, body: Record<string, unknown>) =>
-    http().post(`/${API_PREFIX}${path}`).set('Authorization', bearer(user)).set('Idempotency-Key', randomUUID()).send(body);
+    http().post(`/${API_PREFIX}${path}`).set('Authorization', bearer(user)).set('Idempotency-Key', randomUUID()).send(/^\/wallet\/(convert|trade)$/.test(path) ? { transactionPin: HARNESS_TRANSACTION_PIN, ...body } : body);
 
   it('after every step: history is exactly the books, in order, each row once (and every path runs)', async () => {
     const seen = new Map<string, number>();

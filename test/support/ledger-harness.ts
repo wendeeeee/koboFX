@@ -1,3 +1,4 @@
+import { TransactionPinService } from '../../src/modules/transaction-pins/transaction-pin.service';
 import { randomUUID } from 'node:crypto';
 import { NestExpressApplication } from '@nestjs/platform-express';
 import request from 'supertest';
@@ -175,6 +176,8 @@ export interface FxHarness {
 }
 
 export const HARNESS_USER_PASSWORD = 'correct horse battery staple';
+/** Every `payments.signUp()` user's transaction PIN (withdrawals and conversions need one). */
+export const HARNESS_TRANSACTION_PIN = '402815';
 
 export interface SignedUpUser {
   readonly userId: string;
@@ -405,6 +408,7 @@ export async function startLedgerHarness(
         const session = await moduleRef
           .get(VerificationService)
           .verifyEmail(email, password, authHarness.emails.latestCodeFor(email));
+        await moduleRef.get(TransactionPinService).create(session.user.id, HARNESS_TRANSACTION_PIN, password);
         return { userId: session.user.id, email, accessToken: session.tokens.access.token };
       };
       const scheduler = moduleRef.get(ReconciliationScheduler);
@@ -535,7 +539,7 @@ export async function startLedgerHarness(
           beneficiary: (user, beneficiaryId) => authorized(http().get(`/${API_PREFIX}/wallet/withdrawal-beneficiaries/${beneficiaryId}`), user),
           beneficiaries: (user, query = {}) => authorized(http().get(`/${API_PREFIX}/wallet/withdrawal-beneficiaries`).query(query), user),
           withdraw: async (user, body, idempotencyKey = randomUUID()) => {
-            let sent = body;
+            let sent = 'transactionPin' in body ? body : { ...body, transactionPin: HARNESS_TRANSACTION_PIN };
             if (!('oneTimePassword' in body)) {
               let code = codesByKey.get(idempotencyKey);
               if (code === undefined) {
@@ -543,7 +547,7 @@ export async function startLedgerHarness(
                 if (fresh !== null) codesByKey.set(idempotencyKey, fresh);
                 code = fresh ?? '000000'; // the code request was refused (e.g. disabled): the withdraw shows why; not remembered
               }
-              sent = { ...body, oneTimePassword: code };
+              sent = { ...sent, oneTimePassword: code };
             }
             return authorized(http().post(`/${API_PREFIX}/wallet/withdraw/paystack`), user).set('Idempotency-Key', idempotencyKey).send(sent);
           },

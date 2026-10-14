@@ -53,6 +53,8 @@ export interface AuthenticationConfig {
   readonly refreshTokenTimeToLiveSeconds: number;
   /** Server-side secret mixed into every one-time password HMAC (design §7.1). */
   readonly oneTimePasswordPepper: Buffer;
+  /** Server-side secret mixed into every transaction PIN hash: a leaked table alone cannot be brute-forced. */
+  readonly transactionPinPepper: Buffer;
   /**
    * Non-production demo credit posted from `EXPENSE:PROMOTIONAL:NGN` at verification
    * (design §15 item 6). `0n` disables it; production refuses anything else.
@@ -60,7 +62,16 @@ export interface AuthenticationConfig {
   readonly demoCreditNgnMinor: bigint;
 }
 
-export interface MailConfig {
+/** Default: `smtp` in production (which refuses `mailhog`), `mailhog` elsewhere. */
+export type MailTransport = 'mailhog' | 'smtp' | 'brevo';
+
+export interface MailSender {
+  readonly name?: string;
+  readonly email: string;
+}
+
+export interface SmtpMailConfig {
+  readonly transport: 'mailhog' | 'smtp';
   readonly smtp: {
     readonly host: string;
     readonly port: number;
@@ -70,6 +81,18 @@ export interface MailConfig {
   };
   readonly from: string;
 }
+
+export interface BrevoMailConfig {
+  readonly transport: 'brevo';
+  readonly brevo: {
+    readonly apiKey: string;
+    readonly baseUrl: string;
+  };
+  readonly from: string;
+  readonly sender: MailSender;
+}
+
+export type MailConfig = SmtpMailConfig | BrevoMailConfig;
 
 export interface OutboxConfig {
   /** Attempts before an event is dead-lettered (`failed_at`). */
@@ -105,6 +128,11 @@ export interface PaystackConfig {
   /** `sk_test_…` / `sk_live_…`. Sent only as a bearer token; never stored, logged or put in an error. Empty when off. */
   readonly secretKey: string;
   readonly baseUrl: string;
+  /**
+   * Where the withdrawals (transfers) client sends its calls: `PAYSTACK_TRANSFERS_BASE_URL`, else `baseUrl`. Lets a test
+   * account whose tier has no transfers pay in through real Paystack and pay out through the mock.
+   */
+  readonly transfersBaseUrl: string;
   /** Where the customer's BROWSER returns after paying (a client page, not this API). Carries no authority. */
   readonly callbackUrl: string;
   readonly currencies: readonly string[];
@@ -362,17 +390,26 @@ const envSchema = Joi.object({
     .max(30 * 24 * 3600)
     .default(7 * 24 * 3600),
   ONE_TIME_PASSWORD_PEPPER: Joi.string().base64().required(),
+  TRANSACTION_PIN_PEPPER: Joi.string().base64().required(),
   // A string of minor units, never a number (no floats in the money path).
   DEMO_CREDIT_NGN_MINOR: Joi.string()
     .pattern(/^(0|[1-9]\d{0,17})$/)
     .default('0'),
 
-  SMTP_HOST: Joi.string().hostname().required(),
-  SMTP_PORT: Joi.number().port().required(),
+  MAIL_TRANSPORT: Joi.string().valid('mailhog', 'smtp', 'brevo'),
+  MAILHOG_HOST: Joi.string().hostname().default('localhost'),
+  MAILHOG_SMTP_PORT: Joi.number().port().default(1025),
+  // Checked by parseMail for the chosen transport; blank means not set.
+  SMTP_HOST: Joi.string().hostname().allow(''),
+  SMTP_PORT: Joi.number().port().empty(''),
   SMTP_SECURE: Joi.boolean().default(false),
-  SMTP_USER: Joi.string(),
-  SMTP_PASSWORD: Joi.string(),
-  MAIL_FROM: Joi.string().required(),
+  SMTP_USER: Joi.string().allow(''),
+  SMTP_PASSWORD: Joi.string().allow(''),
+  MAIL_FROM: Joi.string().allow(''),
+  BREVO_API_KEY: Joi.string().allow(''),
+  BREVO_API_BASE_URL: Joi.string()
+    .uri({ scheme: ['http', 'https'] })
+    .default('https://api.brevo.com'),
 
   OUTBOX_MAX_ATTEMPTS: Joi.number().integer().min(1).max(100).default(10),
   OUTBOX_POLL_INTERVAL_MS: Joi.number().integer().min(50).default(1000),
@@ -401,6 +438,7 @@ const envSchema = Joi.object({
   PAYSTACK_BASE_URL: Joi.string()
     .uri({ scheme: ['http', 'https'] })
     .default('https://api.paystack.co'),
+  PAYSTACK_TRANSFERS_BASE_URL: Joi.string().uri({ scheme: ['http', 'https'] }),
   PAYSTACK_CALLBACK_URL: Joi.string().uri({ scheme: ['http', 'https'] }),
   PAYSTACK_FUNDING_CURRENCIES: Joi.string()
     .pattern(/^[A-Z]{3}(,[A-Z]{3})*$/)
@@ -498,7 +536,6 @@ const envSchema = Joi.object({
   FX_POLL_INTERVAL_MILLISECONDS: Joi.number().integer().min(50).default(15_000),
   FX_LOCAL_CACHE_MILLISECONDS: Joi.number().integer().min(0).max(10_000).default(1000),
 })
-  .and('SMTP_USER', 'SMTP_PASSWORD')
   // The runtime and migration roles must differ, or the ledger's revoked grants are void.
   .custom((env: Record<string, unknown>, helpers) =>
     env.DB_APP_USER === env.DB_MIGRATION_USER
@@ -525,9 +562,12 @@ export function loadConfig(raw: NodeJS.ProcessEnv | Record<string, string | unde
   const keys = parseAccessTokenKeys(raw, problems);
   const pepper = typeof raw.ONE_TIME_PASSWORD_PEPPER === 'string' ? Buffer.from(raw.ONE_TIME_PASSWORD_PEPPER, 'base64') : undefined;
   if (pepper && pepper.length < 32) problems.push('ONE_TIME_PASSWORD_PEPPER must decode to at least 32 bytes');
+  const pinPepper = typeof raw.TRANSACTION_PIN_PEPPER === 'string' ? Buffer.from(raw.TRANSACTION_PIN_PEPPER, 'base64') : undefined;
+  if (pinPepper && pinPepper.length < 32) problems.push('TRANSACTION_PIN_PEPPER must decode to at least 32 bytes');
   if (env.NODE_ENV === 'production' && env.DEMO_CREDIT_NGN_MINOR !== undefined && env.DEMO_CREDIT_NGN_MINOR !== '0') {
     problems.push('DEMO_CREDIT_NGN_MINOR must be 0 in production (design §15 item 6: non-production only)');
   }
+  const mail = parseMail(env, problems);
   const webhookSecrets = parseWebhookSecrets(raw.PSP_WEBHOOK_SECRETS, problems);
   const paystack = error ? undefined : parsePaystack(raw, env, problems);
   const funding = parseFunding(env.PSP_FUNDING_CURRENCIES, env.FUNDING_LIMITS, paystack?.enabled ? paystack.currencies : [], problems);
@@ -537,7 +577,7 @@ export function loadConfig(raw: NodeJS.ProcessEnv | Record<string, string | unde
   const protection = parseProtection(raw, problems);
   const withdrawals = error || !protection ? undefined : parseWithdrawals(raw, env, protection, problems);
   const buildGitSha = resolveBuildGitSha(env.BUILD_GIT_SHA, env.NODE_ENV === 'production', problems);
-  if (problems.length > 0 || !keys || !pepper || !webhookSecrets || !funding || !conversion || !fx || !reconciliation || !paystack || !protection || !withdrawals) {
+  if (problems.length > 0 || !keys || !pepper || !pinPepper || !mail || !webhookSecrets || !funding || !conversion || !fx || !reconciliation || !paystack || !protection || !withdrawals) {
     throw new ConfigValidationError(problems);
   }
   return {
@@ -575,17 +615,10 @@ export function loadConfig(raw: NodeJS.ProcessEnv | Record<string, string | unde
       },
       refreshTokenTimeToLiveSeconds: env.REFRESH_TOKEN_TTL_SECONDS,
       oneTimePasswordPepper: pepper,
+      transactionPinPepper: pinPepper,
       demoCreditNgnMinor: BigInt(env.DEMO_CREDIT_NGN_MINOR),
     },
-    mail: {
-      smtp: {
-        host: env.SMTP_HOST,
-        port: env.SMTP_PORT,
-        secure: env.SMTP_SECURE,
-        ...(env.SMTP_USER ? { user: env.SMTP_USER, password: env.SMTP_PASSWORD } : {}),
-      },
-      from: env.MAIL_FROM,
-    },
+    mail,
     outbox: {
       maxAttempts: env.OUTBOX_MAX_ATTEMPTS,
       pollIntervalMilliseconds: env.OUTBOX_POLL_INTERVAL_MS,
@@ -636,6 +669,62 @@ export const BUILD_INFO_PATH = join(__dirname, '..', 'build-info.json');
  * The running version (design §9.4: "the build stamps a git SHA into /health"): `BUILD_GIT_SHA` (CI) wins, else
  * the file the build wrote. No runtime git. Production refuses to boot without one; elsewhere it is `unknown`.
  */
+const MAILHOG_FROM = 'KoboFX <no-reply@kobofx.local>';
+
+const MAIL_ADDRESS = /^[^\s<>@"]+@[^\s<>@"]+\.[^\s<>@"]+$/;
+
+/** `Name <address>` or a bare address. */
+export function parseMailSender(value: string): MailSender | undefined {
+  const named = /^(.*?)\s*<([^<>]*)>$/.exec(value.trim());
+  const email = (named ? named[2]! : value).trim();
+  if (!MAIL_ADDRESS.test(email)) return undefined;
+  const name = named?.[1]!.trim().replace(/^"(.*)"$/, '$1').trim();
+  return name ? { name, email } : { email };
+}
+
+/** A provider with a missing setting fails the boot; it never falls back to MailHog. */
+function parseMail(env: Record<string, never>, problems: string[]): MailConfig | undefined {
+  const production = env.NODE_ENV === 'production';
+  const transport = (env.MAIL_TRANSPORT as MailTransport | undefined) ?? (production ? 'smtp' : 'mailhog');
+  if (transport === 'mailhog') {
+    if (production) {
+      problems.push('MAIL_TRANSPORT=mailhog is refused in production: set MAIL_TRANSPORT=smtp or brevo and its settings');
+      return undefined;
+    }
+    return {
+      transport,
+      smtp: { host: env.MAILHOG_HOST ?? 'localhost', port: env.MAILHOG_SMTP_PORT ?? 1025, secure: false },
+      from: env.MAIL_FROM || MAILHOG_FROM,
+    };
+  }
+  if (transport === 'brevo') {
+    const missing = (['BREVO_API_KEY', 'MAIL_FROM'] as const).filter((name) => !env[name]);
+    if (missing.length > 0) {
+      problems.push(`MAIL_TRANSPORT=brevo requires ${missing.join(', ')}`);
+      return undefined;
+    }
+    const sender = parseMailSender(env.MAIL_FROM);
+    if (!sender) problems.push('MAIL_FROM must be an address, or `Name <address>` (a sender verified in Brevo)');
+    else if ((sender.name ?? '').length > 70) problems.push("MAIL_FROM's name is longer than Brevo's 70 characters");
+    const baseUrl = String(env.BREVO_API_BASE_URL ?? 'https://api.brevo.com').replace(/\/+$/, '');
+    if (production && !baseUrl.startsWith('https://')) problems.push('BREVO_API_BASE_URL must be https in production');
+    if (!sender) return undefined;
+    return { transport, brevo: { apiKey: env.BREVO_API_KEY, baseUrl }, from: env.MAIL_FROM, sender };
+  }
+  const missing = (['SMTP_HOST', 'SMTP_PORT', 'SMTP_USER', 'SMTP_PASSWORD', 'MAIL_FROM'] as const).filter(
+    (name) => env[name] === undefined || env[name] === '',
+  );
+  if (missing.length > 0) {
+    problems.push(`MAIL_TRANSPORT=smtp requires ${missing.join(', ')}`);
+    return undefined;
+  }
+  return {
+    transport,
+    smtp: { host: env.SMTP_HOST, port: env.SMTP_PORT, secure: env.SMTP_SECURE, user: env.SMTP_USER, password: env.SMTP_PASSWORD },
+    from: env.MAIL_FROM,
+  };
+}
+
 export function resolveBuildGitSha(fromEnvironment: string | undefined, production: boolean, problems: string[]): string {
   if (fromEnvironment) return fromEnvironment;
   if (existsSync(BUILD_INFO_PATH)) {
@@ -802,6 +891,8 @@ function parsePaystack(raw: Record<string, string | undefined>, env: Record<stri
     if (production && callbackUrl && !callbackUrl.startsWith('https://')) problems.push('PAYSTACK_CALLBACK_URL must be https in production');
     if (production && !String(env.PAYSTACK_BASE_URL).startsWith('https://')) problems.push('PAYSTACK_BASE_URL must be https in production');
   }
+  const transfersBaseUrl = (env.PAYSTACK_TRANSFERS_BASE_URL as string | undefined) ?? String(env.PAYSTACK_BASE_URL);
+  if (production && !transfersBaseUrl.startsWith('https://')) problems.push('PAYSTACK_TRANSFERS_BASE_URL must be https in production');
   if (problems.length > before) return undefined;
   const allowlist = env.PAYSTACK_WEBHOOK_IP_ALLOWLIST as string | undefined;
   return {
@@ -809,6 +900,7 @@ function parsePaystack(raw: Record<string, string | undefined>, env: Record<stri
     name: PAYSTACK_PROVIDER_NAME,
     secretKey,
     baseUrl: String(env.PAYSTACK_BASE_URL).replace(/\/+$/, ''),
+    transfersBaseUrl: transfersBaseUrl.replace(/\/+$/, ''),
     callbackUrl,
     currencies: [...new Set(String(env.PAYSTACK_FUNDING_CURRENCIES).split(','))],
     checkoutWindowMinutes: env.PAYSTACK_CHECKOUT_WINDOW_MINUTES,
