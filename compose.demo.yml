@@ -1,0 +1,141 @@
+# The public test-mode demo on one server (docs/DEPLOY.md). Run from the repository root:
+#   docker compose -f compose.demo.yml --env-file .env.demo up -d --build
+# Only Caddy publishes ports (80, 443). Postgres, Redis, the API and the simulated providers stay on the private network.
+
+x-app: &app
+  image: kobofx:demo
+  # Every app service shares this one build (Docker's cache makes the repeats instant).
+  build:
+    context: .
+    args:
+      BUILD_GIT_SHA: ${BUILD_GIT_SHA:-}
+  env_file: .env.demo
+  restart: unless-stopped
+  networks: [kobofx]
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${DB_NAME:-kobofx}
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_SUPERUSER_PASSWORD:?set POSTGRES_SUPERUSER_PASSWORD in .env.demo}
+      FX_OWNER_PASSWORD: ${DB_MIGRATION_PASSWORD:?set DB_MIGRATION_PASSWORD in .env.demo}
+      FX_APP_PASSWORD: ${DB_APP_PASSWORD:?set DB_APP_PASSWORD in .env.demo}
+      TZ: UTC
+      PGTZ: UTC
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./docker/postgres/roles.sql:/opt/kobofx/roles.sql:ro
+      - ./docker/postgres/init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U postgres -d ${DB_NAME:-kobofx}']
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    networks: [kobofx]
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: ['redis-server', '--appendonly', 'yes']
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    networks: [kobofx]
+
+  # Runs every pending migration as fx_owner, then exits. The API and the worker start only after it succeeds.
+  migrate:
+    <<: *app
+    restart: 'no'
+    command: ['node', 'node_modules/typeorm/cli.js', 'migration:run', '-d', 'dist/database/data-source.js']
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  api:
+    <<: *app
+    command: ['node', 'dist/main.js']
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ['CMD', 'node', '-e', "fetch('http://127.0.0.1:3000/api/v1/health/live').then(r=>process.exit(r.ok?0:1),()=>process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+
+  worker:
+    <<: *app
+    command: ['node', 'dist/worker.js']
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+
+  # Withdrawals only (PAYSTACK_TRANSFERS_BASE_URL). A fixed address, so PAYSTACK_WEBHOOK_IP_ALLOWLIST can name it.
+  mock-paystack:
+    <<: *app
+    command: ['node', 'dist/mock-paystack/main.js']
+    environment:
+      MOCK_PAYSTACK_PORT: '4030'
+      MOCK_PAYSTACK_WEBHOOK_URL: http://api:3000/api/v1/webhooks/paystack
+    networks:
+      kobofx:
+        ipv4_address: 10.231.47.30
+
+  # The simulated card PSP the worker reconciles against (without it the worker logs list-settlements failures).
+  mock-psp:
+    <<: *app
+    command: ['node', 'dist/mock-psp/main.js']
+    environment:
+      MOCK_PSP_PORT: '4010'
+      MOCK_PSP_WEBHOOK_URL: http://api:3000/api/v1/webhooks/psp
+
+  ui:
+    <<: *app
+    command: ['node', 'ui/server.mjs']
+    environment:
+      UI_HOST: 0.0.0.0
+      UI_PORT: '5173'
+      UI_API_ORIGIN: http://api:3000
+      UI_TRUST_FORWARDED_FOR: 'true'
+    depends_on:
+      api:
+        condition: service_healthy
+
+  caddy:
+    image: caddy:2.8-alpine
+    restart: unless-stopped
+    ports:
+      - '80:80'
+      - '443:443'
+      - '443:443/udp'
+    environment:
+      DEMO_DOMAIN: ${DEMO_DOMAIN:?set DEMO_DOMAIN in .env.demo}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddydata:/data
+      - caddyconfig:/config
+    depends_on: [ui, api]
+    networks: [kobofx]
+
+networks:
+  kobofx:
+    ipam:
+      config:
+        - subnet: 10.231.47.0/24
+
+volumes:
+  pgdata:
+  redisdata:
+  caddydata:
+  caddyconfig:

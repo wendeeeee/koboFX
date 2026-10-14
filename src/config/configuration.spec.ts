@@ -19,6 +19,10 @@ const VALID = {
   ...authenticationTestEnvironment(),
 };
 
+<<<<<<< HEAD
+// A real provider's settings: production boots only with MAIL_TRANSPORT=smtp (its default) and all of these.
+=======
+>>>>>>> origin/develop
 const PRODUCTION_MAIL = {
   SMTP_HOST: 'smtp-relay.example.com',
   SMTP_PORT: '2525',
@@ -157,12 +161,22 @@ describe('loadConfig', () => {
         smtp: { host: 'localhost', port: 1025, secure: false },
         from: 'KoboFX <no-reply@kobofx.local>',
       });
+<<<<<<< HEAD
+      // One file may hold both: the provider's settings are ignored until MAIL_TRANSPORT=smtp picks them.
+=======
+>>>>>>> origin/develop
       const both = { ...VALID, ...PRODUCTION_MAIL, MAILHOG_HOST: 'mailhog', MAILHOG_SMTP_PORT: '2025', MAIL_FROM: '' };
       expect(loadConfig(both).mail).toEqual({
         transport: 'mailhog',
         smtp: { host: 'mailhog', port: 2025, secure: false },
         from: 'KoboFX <no-reply@kobofx.local>',
       });
+<<<<<<< HEAD
+      // Blank provider lines (a template's `SMTP_USER=`) are "not set", never a boot failure for MailHog.
+      expect(() => loadConfig({ ...VALID, SMTP_HOST: '', SMTP_PORT: '', SMTP_USER: '', SMTP_PASSWORD: '' })).not.toThrow();
+    });
+
+=======
       expect(() => loadConfig({ ...VALID, SMTP_HOST: '', SMTP_PORT: '', SMTP_USER: '', SMTP_PASSWORD: '' })).not.toThrow();
     });
 
@@ -192,6 +206,7 @@ describe('loadConfig', () => {
       for (const bad of ['KoboFX', 'KoboFX <a@b>', 'a@@example.com', 'KoboFX <a@example.com']) expect(parseMailSender(bad)).toBeUndefined();
     });
 
+>>>>>>> origin/develop
     it('MAIL_TRANSPORT=smtp needs every provider setting, credentials included; it is the production default', () => {
       expect(loadConfig({ ...VALID, ...PRODUCTION_MAIL, MAIL_TRANSPORT: 'smtp', SMTP_SECURE: 'true' }).mail).toEqual({
         transport: 'smtp',

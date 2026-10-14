@@ -7,4 +7,5 @@ coverage/
 # Copies and backups of .env hold secrets too (only the example is tracked)
 .env.*
 !.env.example
+!.env.demo.example
 env-copy.md
