@@ -75,13 +75,14 @@ services:
       # ── Email: a real provider (development's default is MailHog, so smtp is set explicitly) ──
       - key: MAIL_TRANSPORT
         value: smtp
+      # Your provider's. Free instances cannot reach ports 25, 465 or 587: Brevo on 2525 (SMTP_SECURE=false) works on
+      # the free plan; Gmail (smtp.gmail.com, 465, SMTP_SECURE=true) needs a paid instance (plan: starter).
       - key: SMTP_HOST
-        value: smtp-relay.brevo.com
-      # Free instances cannot reach ports 25, 465 or 587; Brevo also listens on 2525.
+        sync: false
       - key: SMTP_PORT
-        value: '2525'
+        sync: false
       - key: SMTP_SECURE
-        value: 'false'
+        sync: false
       - key: SMTP_USER
         sync: false
       - key: SMTP_PASSWORD

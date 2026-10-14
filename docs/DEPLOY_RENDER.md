@@ -61,9 +61,12 @@ it from sleeping.
 
 | Key | What to paste |
 |---|---|
-| `SMTP_USER` | Brevo's SMTP login |
-| `SMTP_PASSWORD` | Brevo's SMTP key |
-| `MAIL_FROM` | `KoboFX Demo <the-sender-you-verified@…>` |
+| `SMTP_HOST` | Brevo: `smtp-relay.brevo.com` · Gmail: `smtp.gmail.com` |
+| `SMTP_PORT` | Brevo: `2525` · Gmail: `465` (needs a paid instance: free ones cannot reach 465 or 587) |
+| `SMTP_SECURE` | Brevo: `false` · Gmail: `true` |
+| `SMTP_USER` | Brevo's SMTP login · your Gmail address |
+| `SMTP_PASSWORD` | Brevo's SMTP key · a Gmail app password (16 letters, without the spaces) |
+| `MAIL_FROM` | Brevo: `KoboFX Demo <the-sender-you-verified@…>` · Gmail: `KoboFX Demo <your Gmail address>` (Gmail sends as the account anyway) |
 | `PAYSTACK_SECRET_KEY` | your `sk_test_…` key |
 | `PAYSTACK_CALLBACK_URL` | `https://kobofx.onrender.com/funding/return`. If Render gives the service another URL (step 3), fix it there. |
 | `JWT_SIGNING_KEY_ID` | from the `secrets:generate` output |
@@ -73,7 +76,8 @@ it from sleeping.
 | `WITHDRAWAL_FINGERPRINT_KEYS` | from the output, the whole JSON |
 | `IDEMPOTENCY_REQUEST_HASH_KEYS` | from the output, the whole JSON |
 
-   Paste only what follows the `=` on each line.
+   Paste only what follows the `=` on each line. Or skip the prompts and, once the service exists, use **Environment →
+   Edit → Add from .env** and paste all of them at once.
 
 4. **Apply.** The first build takes about 5–10 minutes. Then open the **kobofx** service's **Logs**. A healthy first
    start ends with:
@@ -130,7 +134,8 @@ about a minute (free hosting wakes up)" at the top.
 - **Postgres expires 30 days after creation.** Upgrade it before then, from **kobofx-db → Upgrade**; the data stays.
 - **Key Value keeps nothing across restarts.** That's fine: Redis holds only rate-limit counters, codes in flight and
   the FX cache, never money. A restart only invalidates codes sent in the last 10 minutes.
-- **SMTP:** free instances cannot reach ports 25, 465 or 587, which is why the Blueprint uses Brevo on port 2525.
+- **SMTP:** free instances cannot reach ports 25, 465 or 587. Brevo on port 2525 works on the free plan; Gmail needs a
+  paid instance (set `plan: starter` in `render.yaml`).
 
 ## Updating
 
