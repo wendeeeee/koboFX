@@ -1,4 +1,6 @@
-# Deploying the public demo
+# Deploying the public demo on your own server
+
+> Hosting on Render instead? See [DEPLOY_RENDER.md](DEPLOY_RENDER.md) (`render.yaml`, one service, free plans).
 
 KoboFX runs as a **test-mode sandbox** on one small server: funding goes through Paystack's real test checkout, withdrawals
 pay out through the simulated Paystack, every new account gets demo money, and no real money ever moves.

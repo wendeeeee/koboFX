@@ -1,0 +1,177 @@
+# The public test-mode demo on Render (docs/DEPLOY_RENDER.md). Dashboard → New → Blueprint → this repository.
+#
+# ONE web service runs every process (src/demo.ts): the customer UI on Render's port, and on 127.0.0.1 the API, the
+# worker and the simulated card PSP and Paystack. Render's free web services cannot receive private-network traffic,
+# so separate services could not reach each other. Funding goes through Paystack's real TEST checkout; withdrawals pay
+# out through the simulated Paystack; nothing here moves real money.
+#
+# Values marked `sync: false` are asked for once, when the Blueprint is created (the guide says where each comes from).
+
+services:
+  - type: web
+    name: kobofx
+    runtime: docker
+    # free: sleeps after 15 idle minutes and wakes on the next visit (about a minute); the worker sleeps with it.
+    # starter: always on (the worker keeps running).
+    plan: free
+    region: frankfurt
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    dockerCommand: node dist/demo.js
+    healthCheckPath: /api/v1/health/live
+    envVars:
+      # ── The sandbox ──
+      # production refuses test keys, simulated withdrawals and the demo credit, by design.
+      - key: NODE_ENV
+        value: development
+      # Render's public port (the UI). The API listens on 127.0.0.1:3000 inside the container.
+      - key: PORT
+        value: '10000'
+      # Five processes' worth of work in one 512 MB instance.
+      - key: NODE_OPTIONS
+        value: --max-old-space-size=320
+      - key: LOG_LEVEL
+        value: info
+      # The API trusts exactly one hop: the UI proxy, which passes on the client Render reports first.
+      - key: TRUST_PROXY_HOPS
+        value: '1'
+      - key: UI_TRUST_FORWARDED_FOR
+        value: first
+      - key: API_DOCS_ENABLED
+        value: 'true'
+      # ₦100,000 of demo money for every verified sign-up (kobo).
+      - key: DEMO_CREDIT_NGN_MINOR
+        value: '10000000'
+
+      # ── Database: Render's user owns the schema and runs migrations; src/demo.ts creates the runtime role ──
+      - key: DATABASE_URL
+        fromDatabase:
+          name: kobofx-db
+          property: connectionString
+      - key: DB_APP_USER
+        value: fx_app
+      - key: DB_APP_PASSWORD
+        generateValue: true
+      # Two pools (API and worker) share the database's connections.
+      - key: DB_POOL_MAX
+        value: '8'
+      - key: REDIS_URL
+        fromService:
+          type: keyvalue
+          name: kobofx-redis
+          property: connectionString
+
+      - key: ROUNDING_USER_CREDIT
+        value: ROUND_DOWN
+      - key: ROUNDING_USER_DEBIT
+        value: ROUND_UP
+      - key: ROUNDING_REVENUE
+        value: ROUND_HALF_EVEN
+      - key: ROUNDING_FEE
+        value: ROUND_HALF_EVEN
+      - key: LEDGER_INTERNAL_BUCKETS
+        value: '64'
+
+      # ── Email: a real provider (development's default is MailHog, so smtp is set explicitly) ──
+      - key: MAIL_TRANSPORT
+        value: smtp
+      - key: SMTP_HOST
+        value: smtp-relay.brevo.com
+      # Free instances cannot reach ports 25, 465 or 587; Brevo also listens on 2525.
+      - key: SMTP_PORT
+        value: '2525'
+      - key: SMTP_SECURE
+        value: 'false'
+      - key: SMTP_USER
+        sync: false
+      - key: SMTP_PASSWORD
+        sync: false
+      - key: MAIL_FROM
+        sync: false
+
+      # ── Generated here: random 256-bit values ──
+      - key: ONE_TIME_PASSWORD_PEPPER
+        generateValue: true
+      - key: TRANSACTION_PIN_PEPPER
+        generateValue: true
+      - key: PSP_SECRET_KEY
+        generateValue: true
+      - key: PSP_WEBHOOK_SECRETS
+        generateValue: true
+      # ── Pasted once from `npm run --silent secrets:generate` (an RSA key pair and JSON key rings) ──
+      - key: JWT_SIGNING_KEY_ID
+        sync: false
+      - key: JWT_PRIVATE_KEY
+        sync: false
+      - key: JWT_PUBLIC_KEYS
+        sync: false
+      - key: WITHDRAWAL_KEY_ENCRYPTION_KEYS
+        sync: false
+      - key: WITHDRAWAL_KEY_ENCRYPTION_ACTIVE_KEY_ID
+        value: dev-kek-1
+      - key: WITHDRAWAL_FINGERPRINT_KEYS
+        sync: false
+      - key: WITHDRAWAL_FINGERPRINT_ACTIVE_KEY_ID
+        value: dev-fingerprint-1
+      - key: IDEMPOTENCY_REQUEST_HASH_KEYS
+        sync: false
+      - key: IDEMPOTENCY_REQUEST_HASH_ACTIVE_KEY_ID
+        value: dev-request-hash-1
+
+      # ── Simulated card PSP (in the container) ──
+      - key: PSP_BASE_URL
+        value: http://127.0.0.1:4010
+      - key: PSP_FUNDING_CURRENCIES
+        value: NGN
+      - key: FUNDING_LIMITS
+        value: '{"NGN":{"minimum":"10000","maximum":"100000000"}}'
+
+      # ── Paystack: funding through the real TEST checkout, withdrawals through the simulated Paystack ──
+      - key: PAYSTACK_ENABLED
+        value: 'true'
+      # Your TEST secret key (sk_test_…). Never a live key.
+      - key: PAYSTACK_SECRET_KEY
+        sync: false
+      - key: PAYSTACK_BASE_URL
+        value: https://api.paystack.co
+      - key: PAYSTACK_TRANSFERS_BASE_URL
+        value: http://127.0.0.1:4030
+      # https://<your-service>.onrender.com/funding/return
+      - key: PAYSTACK_CALLBACK_URL
+        sync: false
+      - key: PAYSTACK_FUNDING_CURRENCIES
+        value: NGN
+      - key: PAYSTACK_WITHDRAWALS_ENABLED
+        value: 'true'
+      - key: PAYSTACK_ACCOUNT_IDENTITY
+        value: paystack-test-account
+      - key: PAYSTACK_WITHDRAWAL_LIMITS
+        value: '{"NGN":{"minimum":"10000","maximum":"100000000","dailyMaximum":"500000000"}}'
+
+      - key: CONVERSION_LIMITS
+        value: '{"NGN":{"maximum":"1000000000","dailyMaximum":"5000000000"},"USD":{"maximum":"1000000","dailyMaximum":"5000000"},"EUR":{"maximum":"1000000","dailyMaximum":"5000000"},"GBP":{"maximum":"1000000","dailyMaximum":"5000000"}}'
+
+      # ── FX: the free, key-less open endpoint (daily rates; fine for a sandbox) ──
+      - key: FX_RATE_BASE_URL
+        value: https://open.er-api.com/v6/latest
+      - key: FX_PROVIDER_PLAN
+        value: OPEN
+
+  # Ephemeral state only (rate limits, codes, the FX cache). noeviction: a full store fails closed, never silently
+  # forgets a code's attempt counter.
+  - type: keyvalue
+    name: kobofx-redis
+    plan: free
+    region: frankfurt
+    maxmemoryPolicy: noeviction
+    ipAllowList: []
+
+databases:
+  # free expires 30 days after creation: upgrade it (Basic, about $6/month) to keep the demo past that.
+  - name: kobofx-db
+    plan: free
+    region: frankfurt
+    postgresMajorVersion: '16'
+    databaseName: kobofx
+    user: kobofx_owner
+    ipAllowList: []

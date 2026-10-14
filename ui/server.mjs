@@ -8,9 +8,10 @@ const directory = dirname(fileURLToPath(import.meta.url));
 const upstream = new URL(process.env.UI_API_ORIGIN || 'http://127.0.0.1:3000');
 if (!['http:', 'https:'].includes(upstream.protocol) || upstream.username || upstream.password) throw new Error('UI_API_ORIGIN must be an HTTP(S) origin without credentials.');
 const port = Number(process.env.UI_PORT || '5173');
-// Set only behind a reverse proxy that overwrites X-Forwarded-For with the client's address (the demo's Caddy).
-// Otherwise the header is the client's own claim and is discarded.
-const trustForwardedFor = process.env.UI_TRUST_FORWARDED_FOR === 'true';
+// Which X-Forwarded-For entry is the client, set only behind a proxy that writes it: `true`/`last` for one that overwrites
+// the header (the Docker demo's Caddy), `first` for one that puts the client first (Render). Otherwise the header is the
+// client's own claim and is discarded.
+const forwardedForMode = { true: 'last', last: 'last', first: 'first' }[process.env.UI_TRUST_FORWARDED_FOR] || null;
 const mime = { '.html': 'text/html', '.css': 'text/css', '.js': 'text/javascript', '.mjs': 'text/javascript', '.svg': 'image/svg+xml', '.ttf': 'font/ttf', '.txt': 'text/plain' };
 const publicFiles = new Set(['index.html', 'styles.css', 'app.js', 'client.js', 'money.mjs', 'preview.mjs', 'assets/mark.svg', 'assets/fonts/manrope-variable.ttf', 'assets/fonts/figtree-variable.ttf', 'assets/fonts/Manrope-OFL.txt', 'assets/fonts/Figtree-OFL.txt']);
 
@@ -20,13 +21,15 @@ export const server = http.createServer(async (request, response) => {
   response.setHeader('Content-Security-Policy', "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; font-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'none'; form-action 'self'");
   const url = new URL(request.url, 'http://localhost');
   if (url.pathname.startsWith('/api/v1/')) {
-    // Customer API only. Never expose the admin routes through the UI proxy.
-    if (!/^\/api\/v1\/(auth(?:\/|$)|users\/me(?:\/transaction-pin(?:\/reset|\/reset-code)?)?$|wallet(?:\/|$)|stash(?:\/|$)|fx(?:\/|$)|transactions(?:\/|$)|health\/ready$)/.test(url.pathname)) {
+    // Customer API, health, the API docs and Paystack's (signed) webhook only. Never expose the admin routes through the
+    // UI proxy. The webhook's raw bytes are piped unchanged, so its signature still verifies.
+    if (!/^\/api\/v1\/(auth(?:\/|$)|users\/me(?:\/transaction-pin(?:\/reset|\/reset-code)?)?$|wallet(?:\/|$)|stash(?:\/|$)|fx(?:\/|$)|transactions(?:\/|$)|health\/(?:live|ready)$|webhooks\/paystack$|docs(?:-json$|\/|$))/.test(url.pathname)) {
       response.writeHead(404).end(); return;
     }
     const headers = { ...request.headers, host: upstream.host };
     // The API trusts exactly one hop (this proxy). Pass on one client address, never a client-supplied chain.
-    const forwardedFor = trustForwardedFor ? String(request.headers['x-forwarded-for'] || '').split(',').map((part) => part.trim()).filter(Boolean).at(-1) : undefined;
+    const chain = forwardedForMode ? String(request.headers['x-forwarded-for'] || '').split(',').map((part) => part.trim()).filter(Boolean) : [];
+    const forwardedFor = forwardedForMode === 'first' ? chain[0] : chain.at(-1);
     delete headers['x-forwarded-for']; delete headers['x-forwarded-host']; delete headers['x-forwarded-proto'];
     headers['x-forwarded-for'] = forwardedFor || request.socket.remoteAddress || '127.0.0.1';
     const transport = upstream.protocol === 'https:' ? https : http;
