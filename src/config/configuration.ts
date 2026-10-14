@@ -62,7 +62,16 @@ export interface AuthenticationConfig {
   readonly demoCreditNgnMinor: bigint;
 }
 
-export interface MailConfig {
+/** Default: `smtp` in production (which refuses `mailhog`), `mailhog` elsewhere. */
+export type MailTransport = 'mailhog' | 'smtp' | 'brevo';
+
+export interface MailSender {
+  readonly name?: string;
+  readonly email: string;
+}
+
+export interface SmtpMailConfig {
+  readonly transport: 'mailhog' | 'smtp';
   readonly smtp: {
     readonly host: string;
     readonly port: number;
@@ -72,6 +81,18 @@ export interface MailConfig {
   };
   readonly from: string;
 }
+
+export interface BrevoMailConfig {
+  readonly transport: 'brevo';
+  readonly brevo: {
+    readonly apiKey: string;
+    readonly baseUrl: string;
+  };
+  readonly from: string;
+  readonly sender: MailSender;
+}
+
+export type MailConfig = SmtpMailConfig | BrevoMailConfig;
 
 export interface OutboxConfig {
   /** Attempts before an event is dead-lettered (`failed_at`). */
@@ -375,12 +396,20 @@ const envSchema = Joi.object({
     .pattern(/^(0|[1-9]\d{0,17})$/)
     .default('0'),
 
-  SMTP_HOST: Joi.string().hostname().required(),
-  SMTP_PORT: Joi.number().port().required(),
+  MAIL_TRANSPORT: Joi.string().valid('mailhog', 'smtp', 'brevo'),
+  MAILHOG_HOST: Joi.string().hostname().default('localhost'),
+  MAILHOG_SMTP_PORT: Joi.number().port().default(1025),
+  // Checked by parseMail for the chosen transport; blank means not set.
+  SMTP_HOST: Joi.string().hostname().allow(''),
+  SMTP_PORT: Joi.number().port().empty(''),
   SMTP_SECURE: Joi.boolean().default(false),
-  SMTP_USER: Joi.string(),
-  SMTP_PASSWORD: Joi.string(),
-  MAIL_FROM: Joi.string().required(),
+  SMTP_USER: Joi.string().allow(''),
+  SMTP_PASSWORD: Joi.string().allow(''),
+  MAIL_FROM: Joi.string().allow(''),
+  BREVO_API_KEY: Joi.string().allow(''),
+  BREVO_API_BASE_URL: Joi.string()
+    .uri({ scheme: ['http', 'https'] })
+    .default('https://api.brevo.com'),
 
   OUTBOX_MAX_ATTEMPTS: Joi.number().integer().min(1).max(100).default(10),
   OUTBOX_POLL_INTERVAL_MS: Joi.number().integer().min(50).default(1000),
@@ -507,7 +536,6 @@ const envSchema = Joi.object({
   FX_POLL_INTERVAL_MILLISECONDS: Joi.number().integer().min(50).default(15_000),
   FX_LOCAL_CACHE_MILLISECONDS: Joi.number().integer().min(0).max(10_000).default(1000),
 })
-  .and('SMTP_USER', 'SMTP_PASSWORD')
   // The runtime and migration roles must differ, or the ledger's revoked grants are void.
   .custom((env: Record<string, unknown>, helpers) =>
     env.DB_APP_USER === env.DB_MIGRATION_USER
@@ -539,6 +567,7 @@ export function loadConfig(raw: NodeJS.ProcessEnv | Record<string, string | unde
   if (env.NODE_ENV === 'production' && env.DEMO_CREDIT_NGN_MINOR !== undefined && env.DEMO_CREDIT_NGN_MINOR !== '0') {
     problems.push('DEMO_CREDIT_NGN_MINOR must be 0 in production (design §15 item 6: non-production only)');
   }
+  const mail = parseMail(env, problems);
   const webhookSecrets = parseWebhookSecrets(raw.PSP_WEBHOOK_SECRETS, problems);
   const paystack = error ? undefined : parsePaystack(raw, env, problems);
   const funding = parseFunding(env.PSP_FUNDING_CURRENCIES, env.FUNDING_LIMITS, paystack?.enabled ? paystack.currencies : [], problems);
@@ -548,7 +577,7 @@ export function loadConfig(raw: NodeJS.ProcessEnv | Record<string, string | unde
   const protection = parseProtection(raw, problems);
   const withdrawals = error || !protection ? undefined : parseWithdrawals(raw, env, protection, problems);
   const buildGitSha = resolveBuildGitSha(env.BUILD_GIT_SHA, env.NODE_ENV === 'production', problems);
-  if (problems.length > 0 || !keys || !pepper || !pinPepper || !webhookSecrets || !funding || !conversion || !fx || !reconciliation || !paystack || !protection || !withdrawals) {
+  if (problems.length > 0 || !keys || !pepper || !pinPepper || !mail || !webhookSecrets || !funding || !conversion || !fx || !reconciliation || !paystack || !protection || !withdrawals) {
     throw new ConfigValidationError(problems);
   }
   return {
@@ -589,15 +618,7 @@ export function loadConfig(raw: NodeJS.ProcessEnv | Record<string, string | unde
       transactionPinPepper: pinPepper,
       demoCreditNgnMinor: BigInt(env.DEMO_CREDIT_NGN_MINOR),
     },
-    mail: {
-      smtp: {
-        host: env.SMTP_HOST,
-        port: env.SMTP_PORT,
-        secure: env.SMTP_SECURE,
-        ...(env.SMTP_USER ? { user: env.SMTP_USER, password: env.SMTP_PASSWORD } : {}),
-      },
-      from: env.MAIL_FROM,
-    },
+    mail,
     outbox: {
       maxAttempts: env.OUTBOX_MAX_ATTEMPTS,
       pollIntervalMilliseconds: env.OUTBOX_POLL_INTERVAL_MS,
@@ -648,6 +669,62 @@ export const BUILD_INFO_PATH = join(__dirname, '..', 'build-info.json');
  * The running version (design §9.4: "the build stamps a git SHA into /health"): `BUILD_GIT_SHA` (CI) wins, else
  * the file the build wrote. No runtime git. Production refuses to boot without one; elsewhere it is `unknown`.
  */
+const MAILHOG_FROM = 'KoboFX <no-reply@kobofx.local>';
+
+const MAIL_ADDRESS = /^[^\s<>@"]+@[^\s<>@"]+\.[^\s<>@"]+$/;
+
+/** `Name <address>` or a bare address. */
+export function parseMailSender(value: string): MailSender | undefined {
+  const named = /^(.*?)\s*<([^<>]*)>$/.exec(value.trim());
+  const email = (named ? named[2]! : value).trim();
+  if (!MAIL_ADDRESS.test(email)) return undefined;
+  const name = named?.[1]!.trim().replace(/^"(.*)"$/, '$1').trim();
+  return name ? { name, email } : { email };
+}
+
+/** A provider with a missing setting fails the boot; it never falls back to MailHog. */
+function parseMail(env: Record<string, never>, problems: string[]): MailConfig | undefined {
+  const production = env.NODE_ENV === 'production';
+  const transport = (env.MAIL_TRANSPORT as MailTransport | undefined) ?? (production ? 'smtp' : 'mailhog');
+  if (transport === 'mailhog') {
+    if (production) {
+      problems.push('MAIL_TRANSPORT=mailhog is refused in production: set MAIL_TRANSPORT=smtp or brevo and its settings');
+      return undefined;
+    }
+    return {
+      transport,
+      smtp: { host: env.MAILHOG_HOST ?? 'localhost', port: env.MAILHOG_SMTP_PORT ?? 1025, secure: false },
+      from: env.MAIL_FROM || MAILHOG_FROM,
+    };
+  }
+  if (transport === 'brevo') {
+    const missing = (['BREVO_API_KEY', 'MAIL_FROM'] as const).filter((name) => !env[name]);
+    if (missing.length > 0) {
+      problems.push(`MAIL_TRANSPORT=brevo requires ${missing.join(', ')}`);
+      return undefined;
+    }
+    const sender = parseMailSender(env.MAIL_FROM);
+    if (!sender) problems.push('MAIL_FROM must be an address, or `Name <address>` (a sender verified in Brevo)');
+    else if ((sender.name ?? '').length > 70) problems.push("MAIL_FROM's name is longer than Brevo's 70 characters");
+    const baseUrl = String(env.BREVO_API_BASE_URL ?? 'https://api.brevo.com').replace(/\/+$/, '');
+    if (production && !baseUrl.startsWith('https://')) problems.push('BREVO_API_BASE_URL must be https in production');
+    if (!sender) return undefined;
+    return { transport, brevo: { apiKey: env.BREVO_API_KEY, baseUrl }, from: env.MAIL_FROM, sender };
+  }
+  const missing = (['SMTP_HOST', 'SMTP_PORT', 'SMTP_USER', 'SMTP_PASSWORD', 'MAIL_FROM'] as const).filter(
+    (name) => env[name] === undefined || env[name] === '',
+  );
+  if (missing.length > 0) {
+    problems.push(`MAIL_TRANSPORT=smtp requires ${missing.join(', ')}`);
+    return undefined;
+  }
+  return {
+    transport,
+    smtp: { host: env.SMTP_HOST, port: env.SMTP_PORT, secure: env.SMTP_SECURE, user: env.SMTP_USER, password: env.SMTP_PASSWORD },
+    from: env.MAIL_FROM,
+  };
+}
+
 export function resolveBuildGitSha(fromEnvironment: string | undefined, production: boolean, problems: string[]): string {
   if (fromEnvironment) return fromEnvironment;
   if (existsSync(BUILD_INFO_PATH)) {

@@ -37,8 +37,8 @@ describe('authentication (e2e: real pipeline, Postgres, Redis, MailHog)', () => 
     ]);
     db = await startTestDatabase({
       REDIS_URL: redis.getConnectionUrl(),
-      SMTP_HOST: mailhog.getHost(),
-      SMTP_PORT: String(mailhog.getMappedPort(1025)),
+      MAILHOG_HOST: mailhog.getHost(),
+      MAILHOG_SMTP_PORT: String(mailhog.getMappedPort(1025)),
       LOG_LEVEL: 'debug',
       PAYSTACK_ENABLED: 'true',
       PAYSTACK_SECRET_KEY: `sk_test_${randomUUID().replace(/-/g, '')}`,
