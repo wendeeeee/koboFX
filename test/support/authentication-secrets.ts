@@ -64,8 +64,6 @@ export function authenticationTestEnvironment(): Record<string, string> {
     JWT_PUBLIC_KEYS: encodePublicKeys([pair]),
     ONE_TIME_PASSWORD_PEPPER: pepper,
     TRANSACTION_PIN_PEPPER: transactionPinPepper,
-    MAIL_TRANSPORT: 'mailhog',
-    MAIL_FROM: 'KoboFX <no-reply@kobofx.test>',
     PSP_BASE_URL: 'http://127.0.0.1:9',
     PSP_SECRET_KEY: pspSecretKey,
     PSP_WEBHOOK_SECRETS: pspWebhookSecret,
