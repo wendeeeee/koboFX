@@ -169,9 +169,10 @@ describe('reconciliation: internal run at scale (integration)', () => {
   it('a ledger larger than one statement can walk in the runtime timeout: the plain walk times out, the run completes CLEAN', async () => {
     const account = await harness.openUserAccount('NGN');
     await harness.fund(account, 1n); // the bank bucket and the user account exist, cache consistent
-    // Seed in batches as the owner (no timeout), exactly as post() would record them: balanced
-    // pairs, running balances, hash-chained by the insert trigger, the cache advanced at the end.
+    // Seed in batches as the owner (no timeout), exactly as post() would record them, until the plain
+    // walk outlasts the runtime timeout (a fast machine walks the first round in time).
     const owner = await harness.db.ownerClient();
+    let walkTimedOut = false;
     try {
       const [{ bank_id: bankId }] = (
         await owner.query(
@@ -179,32 +180,41 @@ describe('reconciliation: internal run at scale (integration)', () => {
           [account.accountId],
         )
       ).rows as { bank_id: string }[];
-      for (let batch = 0; batch < 12; batch += 1) {
-        await owner.query(
-          `DO $$
-           DECLARE
-             transaction_id UUID;
-             user_balance BIGINT := (SELECT balance_minor FROM accounts WHERE id = '${account.accountId}');
-             bank_balance BIGINT := (SELECT balance_minor FROM accounts WHERE id = '${bankId}');
-           BEGIN
-             FOR i IN 1..2500 LOOP
-               transaction_id := gen_random_uuid();
-               INSERT INTO transactions (id, reference, user_id, type, status, value_time, initiated_by)
-                 VALUES (transaction_id, 'seed:' || transaction_id, '${account.userId}', 'FUNDING', 'POSTED', now(), 'job:scale-seed');
-               bank_balance := bank_balance + 1;
-               INSERT INTO ledger_entries (transaction_id, account_id, currency_code, direction, amount_minor, balance_after_minor, value_time)
-                 VALUES (transaction_id, '${bankId}', 'NGN', 'DEBIT', 1, bank_balance, now());
-               user_balance := user_balance + 1;
-               INSERT INTO ledger_entries (transaction_id, account_id, currency_code, direction, amount_minor, balance_after_minor, value_time)
-                 VALUES (transaction_id, '${account.accountId}', 'NGN', 'CREDIT', 1, user_balance, now());
-             END LOOP;
-             UPDATE accounts SET balance_minor = user_balance,
-                    balance_entry_id = (SELECT max(id) FROM ledger_entries WHERE account_id = '${account.accountId}'), version = version + 1
-              WHERE id = '${account.accountId}';
-             UPDATE accounts SET balance_minor = bank_balance,
-                    balance_entry_id = (SELECT max(id) FROM ledger_entries WHERE account_id = '${bankId}'), version = version + 1
-              WHERE id = '${bankId}';
-           END $$`,
+      for (let round = 0; round < 8 && !walkTimedOut; round += 1) {
+        for (let batch = 0; batch < 12; batch += 1) {
+          await owner.query(
+            `DO $$
+             DECLARE
+               transaction_id UUID;
+               user_balance BIGINT := (SELECT balance_minor FROM accounts WHERE id = '${account.accountId}');
+               bank_balance BIGINT := (SELECT balance_minor FROM accounts WHERE id = '${bankId}');
+             BEGIN
+               FOR i IN 1..2500 LOOP
+                 transaction_id := gen_random_uuid();
+                 INSERT INTO transactions (id, reference, user_id, type, status, value_time, initiated_by)
+                   VALUES (transaction_id, 'seed:' || transaction_id, '${account.userId}', 'FUNDING', 'POSTED', now(), 'job:scale-seed');
+                 bank_balance := bank_balance + 1;
+                 INSERT INTO ledger_entries (transaction_id, account_id, currency_code, direction, amount_minor, balance_after_minor, value_time)
+                   VALUES (transaction_id, '${bankId}', 'NGN', 'DEBIT', 1, bank_balance, now());
+                 user_balance := user_balance + 1;
+                 INSERT INTO ledger_entries (transaction_id, account_id, currency_code, direction, amount_minor, balance_after_minor, value_time)
+                   VALUES (transaction_id, '${account.accountId}', 'NGN', 'CREDIT', 1, user_balance, now());
+               END LOOP;
+               UPDATE accounts SET balance_minor = user_balance,
+                      balance_entry_id = (SELECT max(id) FROM ledger_entries WHERE account_id = '${account.accountId}'), version = version + 1
+                WHERE id = '${account.accountId}';
+               UPDATE accounts SET balance_minor = bank_balance,
+                      balance_entry_id = (SELECT max(id) FROM ledger_entries WHERE account_id = '${bankId}'), version = version + 1
+                WHERE id = '${bankId}';
+             END $$`,
+          );
+        }
+        walkTimedOut = await harness.checks.verifyHashChains().then(
+          () => false,
+          (error: Error) => {
+            if (/canceling statement due to statement timeout/.test(error.message)) return true;
+            throw error;
+          },
         );
       }
     } finally {
@@ -212,7 +222,7 @@ describe('reconciliation: internal run at scale (integration)', () => {
     }
 
     // The runtime role's timeout kills the plain whole-ledger walk...
-    await expect(harness.checks.verifyHashChains()).rejects.toThrow(/canceling statement due to statement timeout/);
+    expect(walkTimedOut).toBe(true);
     // ...the internal run, in its own snapshot with its own timeout, completes — and says so.
     const started = Date.now();
     const result = (await harness.payments!.reconciliation.run(ReconciliationRunKind.INTERNAL)) as InternalRunResult;
