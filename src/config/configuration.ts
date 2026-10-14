@@ -62,6 +62,7 @@ export interface AuthenticationConfig {
   readonly demoCreditNgnMinor: bigint;
 }
 
+<<<<<<< HEAD
 /**
  * Where email goes. `mailhog`: the local catcher (http://localhost:8025), no credentials. `smtp`: a real provider
  * (Brevo, Mailgun, …), every setting required. Default: `smtp` in production, `mailhog` everywhere else; production
@@ -72,6 +73,18 @@ export type MailTransport = 'mailhog' | 'smtp';
 export interface MailConfig {
   readonly transport: MailTransport;
   /** The connection for the chosen transport (MailHog's or the provider's). */
+=======
+/** Default: `smtp` in production (which refuses `mailhog`), `mailhog` elsewhere. */
+export type MailTransport = 'mailhog' | 'smtp' | 'brevo';
+
+export interface MailSender {
+  readonly name?: string;
+  readonly email: string;
+}
+
+export interface SmtpMailConfig {
+  readonly transport: 'mailhog' | 'smtp';
+>>>>>>> origin/develop
   readonly smtp: {
     readonly host: string;
     readonly port: number;
@@ -81,6 +94,18 @@ export interface MailConfig {
   };
   readonly from: string;
 }
+
+export interface BrevoMailConfig {
+  readonly transport: 'brevo';
+  readonly brevo: {
+    readonly apiKey: string;
+    readonly baseUrl: string;
+  };
+  readonly from: string;
+  readonly sender: MailSender;
+}
+
+export type MailConfig = SmtpMailConfig | BrevoMailConfig;
 
 export interface OutboxConfig {
   /** Attempts before an event is dead-lettered (`failed_at`). */
@@ -384,16 +409,30 @@ const envSchema = Joi.object({
     .pattern(/^(0|[1-9]\d{0,17})$/)
     .default('0'),
 
+<<<<<<< HEAD
   MAIL_TRANSPORT: Joi.string().valid('mailhog', 'smtp'),
   MAILHOG_HOST: Joi.string().hostname().default('localhost'),
   MAILHOG_SMTP_PORT: Joi.number().port().default(1025),
   // Required when MAIL_TRANSPORT is smtp (parseMail); ignored for mailhog. Blank means not set.
+=======
+  MAIL_TRANSPORT: Joi.string().valid('mailhog', 'smtp', 'brevo'),
+  MAILHOG_HOST: Joi.string().hostname().default('localhost'),
+  MAILHOG_SMTP_PORT: Joi.number().port().default(1025),
+  // Checked by parseMail for the chosen transport; blank means not set.
+>>>>>>> origin/develop
   SMTP_HOST: Joi.string().hostname().allow(''),
   SMTP_PORT: Joi.number().port().empty(''),
   SMTP_SECURE: Joi.boolean().default(false),
   SMTP_USER: Joi.string().allow(''),
   SMTP_PASSWORD: Joi.string().allow(''),
   MAIL_FROM: Joi.string().allow(''),
+<<<<<<< HEAD
+=======
+  BREVO_API_KEY: Joi.string().allow(''),
+  BREVO_API_BASE_URL: Joi.string()
+    .uri({ scheme: ['http', 'https'] })
+    .default('https://api.brevo.com'),
+>>>>>>> origin/develop
 
   OUTBOX_MAX_ATTEMPTS: Joi.number().integer().min(1).max(100).default(10),
   OUTBOX_POLL_INTERVAL_MS: Joi.number().integer().min(50).default(1000),
@@ -655,17 +694,36 @@ export const BUILD_INFO_PATH = join(__dirname, '..', 'build-info.json');
  */
 const MAILHOG_FROM = 'KoboFX <no-reply@kobofx.local>';
 
+<<<<<<< HEAD
 /**
  * The mail transport (`MailTransport`). MailHog's settings (`MAILHOG_*`) and the provider's (`SMTP_*`) are separate, so
  * one environment file can hold both and `MAIL_TRANSPORT` picks. A provider needs host, port, credentials and a sender:
  * a missing one is a boot failure, never a silent fallback to MailHog.
  */
+=======
+const MAIL_ADDRESS = /^[^\s<>@"]+@[^\s<>@"]+\.[^\s<>@"]+$/;
+
+/** `Name <address>` or a bare address. */
+export function parseMailSender(value: string): MailSender | undefined {
+  const named = /^(.*?)\s*<([^<>]*)>$/.exec(value.trim());
+  const email = (named ? named[2]! : value).trim();
+  if (!MAIL_ADDRESS.test(email)) return undefined;
+  const name = named?.[1]!.trim().replace(/^"(.*)"$/, '$1').trim();
+  return name ? { name, email } : { email };
+}
+
+/** A provider with a missing setting fails the boot; it never falls back to MailHog. */
+>>>>>>> origin/develop
 function parseMail(env: Record<string, never>, problems: string[]): MailConfig | undefined {
   const production = env.NODE_ENV === 'production';
   const transport = (env.MAIL_TRANSPORT as MailTransport | undefined) ?? (production ? 'smtp' : 'mailhog');
   if (transport === 'mailhog') {
     if (production) {
+<<<<<<< HEAD
       problems.push('MAIL_TRANSPORT=mailhog is refused in production: set MAIL_TRANSPORT=smtp and the SMTP_* settings');
+=======
+      problems.push('MAIL_TRANSPORT=mailhog is refused in production: set MAIL_TRANSPORT=smtp or brevo and its settings');
+>>>>>>> origin/develop
       return undefined;
     }
     return {
@@ -674,6 +732,23 @@ function parseMail(env: Record<string, never>, problems: string[]): MailConfig |
       from: env.MAIL_FROM || MAILHOG_FROM,
     };
   }
+<<<<<<< HEAD
+=======
+  if (transport === 'brevo') {
+    const missing = (['BREVO_API_KEY', 'MAIL_FROM'] as const).filter((name) => !env[name]);
+    if (missing.length > 0) {
+      problems.push(`MAIL_TRANSPORT=brevo requires ${missing.join(', ')}`);
+      return undefined;
+    }
+    const sender = parseMailSender(env.MAIL_FROM);
+    if (!sender) problems.push('MAIL_FROM must be an address, or `Name <address>` (a sender verified in Brevo)');
+    else if ((sender.name ?? '').length > 70) problems.push("MAIL_FROM's name is longer than Brevo's 70 characters");
+    const baseUrl = String(env.BREVO_API_BASE_URL ?? 'https://api.brevo.com').replace(/\/+$/, '');
+    if (production && !baseUrl.startsWith('https://')) problems.push('BREVO_API_BASE_URL must be https in production');
+    if (!sender) return undefined;
+    return { transport, brevo: { apiKey: env.BREVO_API_KEY, baseUrl }, from: env.MAIL_FROM, sender };
+  }
+>>>>>>> origin/develop
   const missing = (['SMTP_HOST', 'SMTP_PORT', 'SMTP_USER', 'SMTP_PASSWORD', 'MAIL_FROM'] as const).filter(
     (name) => env[name] === undefined || env[name] === '',
   );

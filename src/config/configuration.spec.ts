@@ -1,7 +1,7 @@
 import { RoundingPurpose, RoundingStrategy } from '../common/money/rounding-policy';
 import { KeyObject, generateKeyPairSync } from 'node:crypto';
 import { authenticationTestEnvironment, testKeyPair } from '../../test/support/authentication-secrets';
-import { ConfigValidationError, loadConfig } from './configuration';
+import { ConfigValidationError, loadConfig, parseMailSender } from './configuration';
 
 const VALID = {
   NODE_ENV: 'test',
@@ -19,7 +19,10 @@ const VALID = {
   ...authenticationTestEnvironment(),
 };
 
+<<<<<<< HEAD
 // A real provider's settings: production boots only with MAIL_TRANSPORT=smtp (its default) and all of these.
+=======
+>>>>>>> origin/develop
 const PRODUCTION_MAIL = {
   SMTP_HOST: 'smtp-relay.example.com',
   SMTP_PORT: '2525',
@@ -158,17 +161,52 @@ describe('loadConfig', () => {
         smtp: { host: 'localhost', port: 1025, secure: false },
         from: 'KoboFX <no-reply@kobofx.local>',
       });
+<<<<<<< HEAD
       // One file may hold both: the provider's settings are ignored until MAIL_TRANSPORT=smtp picks them.
+=======
+>>>>>>> origin/develop
       const both = { ...VALID, ...PRODUCTION_MAIL, MAILHOG_HOST: 'mailhog', MAILHOG_SMTP_PORT: '2025', MAIL_FROM: '' };
       expect(loadConfig(both).mail).toEqual({
         transport: 'mailhog',
         smtp: { host: 'mailhog', port: 2025, secure: false },
         from: 'KoboFX <no-reply@kobofx.local>',
       });
+<<<<<<< HEAD
       // Blank provider lines (a template's `SMTP_USER=`) are "not set", never a boot failure for MailHog.
       expect(() => loadConfig({ ...VALID, SMTP_HOST: '', SMTP_PORT: '', SMTP_USER: '', SMTP_PASSWORD: '' })).not.toThrow();
     });
 
+=======
+      expect(() => loadConfig({ ...VALID, SMTP_HOST: '', SMTP_PORT: '', SMTP_USER: '', SMTP_PASSWORD: '' })).not.toThrow();
+    });
+
+    it('MAIL_TRANSPORT=brevo sends through the HTTP API: it needs the API key and a sender address', () => {
+      expect(loadConfig({ ...VALID, MAIL_TRANSPORT: 'brevo', BREVO_API_KEY: 'xkeysib-k', MAIL_FROM: 'KoboFX Demo <demo@example.com>' }).mail).toEqual({
+        transport: 'brevo',
+        brevo: { apiKey: 'xkeysib-k', baseUrl: 'https://api.brevo.com' },
+        from: 'KoboFX Demo <demo@example.com>',
+        sender: { name: 'KoboFX Demo', email: 'demo@example.com' },
+      });
+      expect(loadConfig({ ...VALID, MAIL_TRANSPORT: 'brevo', BREVO_API_KEY: 'k', MAIL_FROM: 'demo@example.com', BREVO_API_BASE_URL: 'http://127.0.0.1:4040/' }).mail).toMatchObject({
+        brevo: { baseUrl: 'http://127.0.0.1:4040' },
+        sender: { email: 'demo@example.com' },
+      });
+      expect(problemsOf({ ...VALID, MAIL_TRANSPORT: 'brevo' }).join()).toContain('MAIL_TRANSPORT=brevo requires BREVO_API_KEY, MAIL_FROM');
+      expect(problemsOf({ ...VALID, MAIL_TRANSPORT: 'brevo', BREVO_API_KEY: 'k', MAIL_FROM: 'KoboFX <not-an-address>' }).join()).toContain('MAIL_FROM must be an address');
+      const production = { ...VALID, NODE_ENV: 'production', BUILD_GIT_SHA: 'abc1234', MAIL_TRANSPORT: 'brevo', BREVO_API_KEY: 'k', MAIL_FROM: 'demo@example.com' };
+      expect(problemsOf(production).join()).not.toContain('MAIL');
+      expect(problemsOf({ ...production, BREVO_API_BASE_URL: 'http://api.brevo.com' }).join()).toContain('BREVO_API_BASE_URL must be https');
+    });
+
+    it('parses senders the way Brevo takes them', () => {
+      expect(parseMailSender('KoboFX <a@example.com>')).toEqual({ name: 'KoboFX', email: 'a@example.com' });
+      expect(parseMailSender('"KoboFX Demo" <a@example.com>')).toEqual({ name: 'KoboFX Demo', email: 'a@example.com' });
+      expect(parseMailSender(' a@example.com ')).toEqual({ email: 'a@example.com' });
+      expect(parseMailSender('<a@example.com>')).toEqual({ email: 'a@example.com' });
+      for (const bad of ['KoboFX', 'KoboFX <a@b>', 'a@@example.com', 'KoboFX <a@example.com']) expect(parseMailSender(bad)).toBeUndefined();
+    });
+
+>>>>>>> origin/develop
     it('MAIL_TRANSPORT=smtp needs every provider setting, credentials included; it is the production default', () => {
       expect(loadConfig({ ...VALID, ...PRODUCTION_MAIL, MAIL_TRANSPORT: 'smtp', SMTP_SECURE: 'true' }).mail).toEqual({
         transport: 'smtp',
