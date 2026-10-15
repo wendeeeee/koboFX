@@ -1,31 +1,21 @@
 # KoboFX — FX Trading Backend
 
 A NestJS backend for a multi-currency wallet: users register, fund in NGN, convert or trade between
-NGN, USD, EUR and GBP at live rates, withdraw, and read a full transaction history.
-
-It began as the brief in [`task.md`](task.md). The brief asks for wallets, balances and conversions.
-This project treats that request as a request for a small bank, and the design follows from that.
+NGN, USD, EUR and GBP at live rates, withdraw, and see full transaction history.
 
 ## The design thinking
 
-Three principles from [`Fintech_engineering_handbook.md`](Fintech_engineering_handbook.md) decide
-every trade-off:
+I approached this task using three principles to decide every trade-off:
 
 - **No invented data.** Money is never created by rounding, clamping or guessing. Every minor unit
   has a source.
 - **No lost data.** Every fact is kept: rejected rates, forged webhooks, failed payments. A
   correction is a new record. Nothing is edited in place.
-- **No trust.** Webhooks, providers, clients and our own processes may lie, repeat or crash. Each
-  is checked against an authoritative source.
-
-[`SYSTEM_DESIGN.md`](SYSTEM_DESIGN.md) turns these principles into a specification. It was built in
-the phases of its §17, with a review after each phase. The phase plans (`PHASE*_PLAN.md`,
-`WITHDRAWAL_PLAN.md`, `PAYSTACK_PLAN.md`) record each decision and the reason for it.
+- **No trust.** Webhooks, providers, clients and internal processes may assume, repeat or crash. Hence, each activity is checked against an authoritative source.
 
 ### A balance is a ledger, not a column
 
-The brief says "think critically about how to model multi-currency wallet balances". The answer
-here is double-entry bookkeeping:
+I thought critically about how to model multi-currency wallet balances. Thw best way to approach this is double-entry bookkeeping (just like in a typical financial accounting domain). To that effect, the flow in this system is as follows:
 
 - Each user holds one account per currency, and that account is a **liability**: money we owe
   the user.
@@ -43,7 +33,7 @@ here is double-entry bookkeeping:
 ### A non-negative balance is policy, not a constraint
 
 There is no `CHECK (balance >= 0)`. A chargeback that arrives after the money is spent still
-happened. Refusing to record it loses a fact, and clamping the balance at zero creates money.
+happened. Refusing to record it loses a fact, and clamping the balance at zero creates money which is aginst the established system's policy.
 Spends are authorized against `available = balance − reserved`, and overdrafts are recorded,
 detected and reported.
 
@@ -75,7 +65,7 @@ Every money-moving `POST` needs an `Idempotency-Key`. The key is claimed and the
 single transaction under an advisory lock. The exact response bytes are stored and replayed.
 Permanent failures are stored too, and transient failures leave no key behind. Keys never expire.
 
-### The outside world is unreliable
+### Trust the outside world? No, it's unreliable so we always verify
 
 - **No database transaction stays open across a network call.** The API writes intent and the
   worker calls providers after the commit.
@@ -89,7 +79,7 @@ Permanent failures are stored too, and transient failures leave no key behind. K
 
 ### FX rates
 
-- Rates come from ExchangeRate-API, behind a `RateProvider` port, so adding a provider requires no
+- Rates come from ExchangeRate-API (for this demo), behind a `RateProvider` port, so adding a provider requires no
   changes in callers.
 - Rates are cached in three tiers: the process, Redis, then Postgres. Provider traffic therefore
   never scales with user traffic, and a per-month request budget is enforced across all instances.
