@@ -3,6 +3,11 @@
 A NestJS backend for a multi-currency wallet: users register, fund in NGN, convert or trade between
 NGN, USD, EUR and GBP at live rates, withdraw, and see full transaction history.
 
+## Architecture
+
+![System architecture and data flow](docs/architecture.svg)
+
+
 ## The design thinking
 
 I approached this task using three principles to decide every trade-off:
