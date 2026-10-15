@@ -1,0 +1,109 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1480 1920" width="1480" height="1920" font-family="Helvetica, Arial, sans-serif"><defs><marker id="head" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#1e1e1e"/></marker><marker id="head-red" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#c92a2a"/></marker></defs><rect width="1480" height="1920" fill="#ffffff"/><text x="40.0" y="20.0" font-size="28" fill="#1e1e1e" text-anchor="start"><tspan x="40.0" dy="26.6" font-weight="bold">KoboFX: system architecture and data flow</tspan></text>
+<rect x="300" y="90" width="360" height="80" rx="10" fill="#d0ebff" stroke="#1971c2" stroke-width="2"/>
+<text x="480.0" y="111.2" font-size="15" fill="#1e1e1e" text-anchor="middle"><tspan x="480.0" dy="14.2" font-weight="bold">Customer</tspan><tspan x="480.0" dy="18.8">web UI (ui/) or any API client</tspan></text>
+<rect x="760" y="90" width="360" height="80" rx="10" fill="#d0ebff" stroke="#1971c2" stroke-width="2"/>
+<text x="940.0" y="111.2" font-size="15" fill="#1e1e1e" text-anchor="middle"><tspan x="940.0" dy="14.2" font-weight="bold">Operator</tspan><tspan x="940.0" dy="18.8">ADMIN / SECURITY roles</tspan></text>
+<rect x="40" y="250" width="1260" height="400" rx="14" fill="#f3f9ff" stroke="#1971c2" stroke-width="2" stroke-dasharray="10 6"/>
+<text x="56.0" y="260.0" font-size="18" fill="#1971c2" text-anchor="start"><tspan x="56.0" dy="17.1" font-weight="bold">API process (NestJS, src/main.ts): never calls a payment provider</tspan></text>
+<rect x="70" y="300" width="360" height="80" rx="10" fill="#ffffff" stroke="#1971c2" stroke-width="2"/>
+<text x="250.0" y="313.8" font-size="14" fill="#1e1e1e" text-anchor="middle"><tspan x="250.0" dy="13.3" font-weight="bold">Global guard chain</tspan><tspan x="250.0" dy="17.5">RateLimit → JwtAuth → Roles →</tspan><tspan x="250.0" dy="17.5">VerifiedUser → UserRateLimit</tspan></text>
+<rect x="490" y="300" width="330" height="80" rx="10" fill="#ffffff" stroke="#1971c2" stroke-width="2"/>
+<text x="655.0" y="313.8" font-size="14" fill="#1e1e1e" text-anchor="middle"><tspan x="655.0" dy="13.3" font-weight="bold">Route guards (before barrier)</tspan><tspan x="655.0" dy="17.5">RateSnapshotGuard: fresh rate</tspan><tspan x="655.0" dy="17.5">TransactionPinGuard</tspan></text>
+<rect x="880" y="300" width="390" height="80" rx="10" fill="#ffffff" stroke="#1971c2" stroke-width="2"/>
+<text x="1075.0" y="313.8" font-size="14" fill="#1e1e1e" text-anchor="middle"><tspan x="1075.0" dy="13.3" font-weight="bold">Idempotency barrier</tspan><tspan x="1075.0" dy="17.5">advisory lock → claim key →</tspan><tspan x="1075.0" dy="17.5">handler → store exact response</tspan></text>
+<polyline points="430,340 490,340" fill="none" stroke="#1e1e1e" stroke-width="2" marker-end="url(#head)"/>
+<polyline points="820,340 880,340" fill="none" stroke="#1e1e1e" stroke-width="2" marker-end="url(#head)"/>
+<rect x="70" y="430" width="285" height="64" rx="10" fill="#d0ebff" stroke="#1971c2" stroke-width="2"/>
+<text x="212.5" y="444.5" font-size="14" fill="#1e1e1e" text-anchor="middle"><tspan x="212.5" dy="13.3" font-weight="bold">auth · users</tspan><tspan x="212.5" dy="17.5">register, OTP, JWT</tspan></text>
+<rect x="375" y="430" width="285" height="64" rx="10" fill="#d0ebff" stroke="#1971c2" stroke-width="2"/>
+<text x="517.5" y="444.5" font-size="14" fill="#1e1e1e" text-anchor="middle"><tspan x="517.5" dy="13.3" font-weight="bold">wallets · funding</tspan><tspan x="517.5" dy="17.5">balances, fund intents</tspan></text>
+<rect x="680" y="430" width="285" height="64" rx="10" fill="#d0ebff" stroke="#1971c2" stroke-width="2"/>
+<text x="822.5" y="444.5" font-size="14" fill="#1e1e1e" text-anchor="middle"><tspan x="822.5" dy="13.3" font-weight="bold">fx</tspan><tspan x="822.5" dy="17.5">rates, 30 s quotes</tspan></text>
+<rect x="985" y="430" width="285" height="64" rx="10" fill="#d0ebff" stroke="#1971c2" stroke-width="2"/>
+<text x="1127.5" y="444.5" font-size="14" fill="#1e1e1e" text-anchor="middle"><tspan x="1127.5" dy="13.3" font-weight="bold">trading</tspan><tspan x="1127.5" dy="17.5">convert · trade</tspan></text>
+<rect x="70" y="510" width="285" height="64" rx="10" fill="#d0ebff" stroke="#1971c2" stroke-width="2"/>
+<text x="212.5" y="524.5" font-size="14" fill="#1e1e1e" text-anchor="middle"><tspan x="212.5" dy="13.3" font-weight="bold">withdrawals</tspan><tspan x="212.5" dy="17.5">PIN + emailed code</tspan></text>
+<rect x="375" y="510" width="285" height="64" rx="10" fill="#d0ebff" stroke="#1971c2" stroke-width="2"/>
+<text x="517.5" y="524.5" font-size="14" fill="#1e1e1e" text-anchor="middle"><tspan x="517.5" dy="13.3" font-weight="bold">transactions</tspan><tspan x="517.5" dy="17.5">history (read only)</tspan></text>
+<rect x="680" y="510" width="285" height="64" rx="10" fill="#d0ebff" stroke="#1971c2" stroke-width="2"/>
+<text x="822.5" y="524.5" font-size="14" fill="#1e1e1e" text-anchor="middle"><tspan x="822.5" dy="13.3" font-weight="bold">admin</tspan><tspan x="822.5" dy="17.5">four-eyes approvals</tspan></text>
+<rect x="985" y="510" width="285" height="64" rx="10" fill="#d0ebff" stroke="#1971c2" stroke-width="2"/>
+<text x="1127.5" y="524.5" font-size="14" fill="#1e1e1e" text-anchor="middle"><tspan x="1127.5" dy="13.3" font-weight="bold">webhook ingress</tspan><tspan x="1127.5" dy="17.5">verify, store raw, 202</tspan></text>
+<text x="70.0" y="594.0" font-size="13" fill="#1971c2" text-anchor="start"><tspan x="70.0" dy="12.3">FX reads: process memory → Redis → Postgres; a missing rate triggers ONE single-flighted catch-up fetch (≤ 1/min)</tspan></text>
+<polyline points="1127,380 1127,430" fill="none" stroke="#1e1e1e" stroke-width="2" marker-end="url(#head)"/>
+<polyline points="480,170 480,250" fill="none" stroke="#1e1e1e" stroke-width="2" marker-end="url(#head)"/>
+<rect x="400.4" y="190.5" width="159.2" height="39.0" fill="#ffffff"/>
+<text x="480.0" y="192.5" font-size="14" fill="#1e1e1e" text-anchor="middle"><tspan x="480.0" dy="13.3">HTTPS · JSON</tspan><tspan x="480.0" dy="17.5">amounts as strings</tspan></text>
+<polyline points="940,170 940,250" fill="none" stroke="#1e1e1e" stroke-width="2" marker-end="url(#head)"/>
+<rect x="864.6" y="190.5" width="150.8" height="39.0" fill="#ffffff"/>
+<text x="940.0" y="192.5" font-size="14" fill="#1e1e1e" text-anchor="middle"><tspan x="940.0" dy="13.3">admin actions</tspan><tspan x="940.0" dy="17.5">request / approve</tspan></text>
+<rect x="40" y="800" width="340" height="140" rx="10" fill="#fff3bf" stroke="#e8590c" stroke-width="2"/>
+<text x="210.0" y="826.2" font-size="14" fill="#1e1e1e" text-anchor="middle"><tspan x="210.0" dy="13.3" font-weight="bold">LedgerService.post()</tspan><tspan x="210.0" dy="17.5">the ONLY write path to balances</tspan><tspan x="210.0" dy="17.5">ReservationService</tspan><tspan x="210.0" dy="17.5">reserve → settle</tspan><tspan x="210.0" dy="17.5">FOR UPDATE ORDER BY id</tspan></text>
+<rect x="500" y="800" width="480" height="370" rx="10" fill="#d3f9d8" stroke="#2f9e44" stroke-width="2"/>
+<text x="512.0" y="900.6" font-size="15" fill="#1e1e1e" text-anchor="start"><tspan x="512.0" dy="14.2" font-weight="bold">PostgreSQL 16 (source of truth)</tspan><tspan x="512.0" dy="18.8">ledger_entries: append-only, hash chain</tspan><tspan x="512.0" dy="18.8">accounts · transactions · reservations</tspan><tspan x="512.0" dy="18.8">flow_instances: durable state machines</tspan><tspan x="512.0" dy="18.8">outbox_events · audit_logs</tspan><tspan x="512.0" dy="18.8">idempotency_keys: exact responses</tspan><tspan x="512.0" dy="18.8">webhook_events · provider_calls (evidence)</tspan><tspan x="512.0" dy="18.8">exchange_rate_snapshots · quotes</tspan><tspan x="512.0" dy="18.8">approvals · reconciliation_breaks</tspan></text>
+<rect x="1060" y="800" width="240" height="200" rx="10" fill="#ffe3e3" stroke="#c92a2a" stroke-width="2"/>
+<text x="1180.0" y="856.2" font-size="14" fill="#1e1e1e" text-anchor="middle"><tspan x="1180.0" dy="13.3" font-weight="bold">Redis 7 (ephemeral)</tspan><tspan x="1180.0" dy="17.5">rate cache fx:snapshot</tspan><tspan x="1180.0" dy="17.5">rate limits</tspan><tspan x="1180.0" dy="17.5">OTP challenges (HMAC)</tspan><tspan x="1180.0" dy="17.5">FX fetch lock + budget</tspan></text>
+<polyline points="380,870 500,870" fill="none" stroke="#1e1e1e" stroke-width="2" marker-end="url(#head)"/>
+<rect x="385.6" y="850.5" width="108.8" height="39.0" fill="#ffffff"/>
+<text x="440.0" y="852.5" font-size="14" fill="#1e1e1e" text-anchor="middle"><tspan x="440.0" dy="13.3">balanced</tspan><tspan x="440.0" dy="17.5">per currency</tspan></text>
+<polyline points="210,650 210,800" fill="none" stroke="#1e1e1e" stroke-width="2" marker-end="url(#head)"/>
+<rect x="130.4" y="705.5" width="159.2" height="39.0" fill="#ffffff"/>
+<text x="210.0" y="707.5" font-size="14" fill="#1e1e1e" text-anchor="middle"><tspan x="210.0" dy="13.3">money writes</tspan><tspan x="210.0" dy="17.5">one DB transaction</tspan></text>
+<polyline points="740,650 740,800" fill="none" stroke="#1e1e1e" stroke-width="2" marker-end="url(#head)"/>
+<rect x="622.6" y="705.5" width="234.8" height="39.0" fill="#ffffff"/>
+<text x="740.0" y="707.5" font-size="14" fill="#1e1e1e" text-anchor="middle"><tspan x="740.0" dy="13.3">intent rows: flows, outbox,</tspan><tspan x="740.0" dy="17.5">keys, quotes, raw webhooks</tspan></text>
+<polyline points="1180,650 1180,800" fill="none" stroke="#1e1e1e" stroke-width="2" marker-start="url(#head)" marker-end="url(#head)"/>
+<rect x="1125.6" y="705.5" width="108.8" height="39.0" fill="#ffffff"/>
+<text x="1180.0" y="707.5" font-size="14" fill="#1e1e1e" text-anchor="middle"><tspan x="1180.0" dy="13.3">limits, OTP,</tspan><tspan x="1180.0" dy="17.5">rate reads</tspan></text>
+<rect x="40" y="1300" width="1260" height="250" rx="14" fill="#f8f6ff" stroke="#6741d9" stroke-width="2" stroke-dasharray="10 6"/>
+<text x="56.0" y="1310.0" font-size="18" fill="#6741d9" text-anchor="start"><tspan x="56.0" dy="17.1" font-weight="bold">Worker process (src/worker.ts): claims due rows with FOR UPDATE SKIP LOCKED + leases</tspan></text>
+<rect x="70" y="1350" width="400" height="54" rx="10" fill="#ffffff" stroke="#6741d9" stroke-width="2"/>
+<text x="270.0" y="1368.2" font-size="14" fill="#1e1e1e" text-anchor="middle"><tspan x="270.0" dy="13.3">Reservation sweeper: expire due holds</tspan></text>
+<rect x="500" y="1350" width="640" height="54" rx="10" fill="#ffffff" stroke="#6741d9" stroke-width="2"/>
+<text x="820.0" y="1368.2" font-size="14" fill="#1e1e1e" text-anchor="middle"><tspan x="820.0" dy="13.3">Admin monitor: approval expiry, break-glass, protected holds</tspan></text>
+<rect x="70" y="1430" width="228" height="80" rx="10" fill="#e5dbff" stroke="#6741d9" stroke-width="2"/>
+<text x="184.0" y="1452.5" font-size="14" fill="#1e1e1e" text-anchor="middle"><tspan x="184.0" dy="13.3" font-weight="bold">Outbox poller</tspan><tspan x="184.0" dy="17.5">emails, events</tspan></text>
+<rect x="308" y="1430" width="228" height="80" rx="10" fill="#e5dbff" stroke="#6741d9" stroke-width="2"/>
+<text x="422.0" y="1452.5" font-size="14" fill="#1e1e1e" text-anchor="middle"><tspan x="422.0" dy="13.3" font-weight="bold">Flow resumer</tspan><tspan x="422.0" dy="17.5">funding, withdrawal</tspan></text>
+<rect x="546" y="1430" width="228" height="80" rx="10" fill="#e5dbff" stroke="#6741d9" stroke-width="2"/>
+<text x="660.0" y="1452.5" font-size="14" fill="#1e1e1e" text-anchor="middle"><tspan x="660.0" dy="13.3" font-weight="bold">Webhook processor</tspan><tspan x="660.0" dy="17.5">asks provider for truth</tspan></text>
+<rect x="784" y="1430" width="228" height="80" rx="10" fill="#e5dbff" stroke="#6741d9" stroke-width="2"/>
+<text x="898.0" y="1452.5" font-size="14" fill="#1e1e1e" text-anchor="middle"><tspan x="898.0" dy="13.3" font-weight="bold">Reconciliation</tspan><tspan x="898.0" dy="17.5">internal + external</tspan></text>
+<rect x="1022" y="1430" width="228" height="80" rx="10" fill="#e5dbff" stroke="#6741d9" stroke-width="2"/>
+<text x="1136.0" y="1452.5" font-size="14" fill="#1e1e1e" text-anchor="middle"><tspan x="1136.0" dy="13.3" font-weight="bold">FX poller</tspan><tspan x="1136.0" dy="17.5">sanity → snapshot</tspan></text>
+<polyline points="210,1300 210,940" fill="none" stroke="#1e1e1e" stroke-width="2" marker-end="url(#head)"/>
+<rect x="122.0" y="1100.5" width="176.0" height="39.0" fill="#ffffff"/>
+<text x="210.0" y="1102.5" font-size="14" fill="#1e1e1e" text-anchor="middle"><tspan x="210.0" dy="13.3">postings: capture,</tspan><tspan x="210.0" dy="17.5">settlement, reversal</tspan></text>
+<polyline points="740,1300 740,1170" fill="none" stroke="#1e1e1e" stroke-width="2" marker-start="url(#head)" marker-end="url(#head)"/>
+<rect x="631.0" y="1224.2" width="218.0" height="21.5" fill="#ffffff"/>
+<text x="740.0" y="1226.2" font-size="14" fill="#1e1e1e" text-anchor="middle"><tspan x="740.0" dy="13.3">claim work · commit state</tspan></text>
+<polyline points="1180,1300 1180,1000" fill="none" stroke="#1e1e1e" stroke-width="2" marker-end="url(#head)"/>
+<rect x="1108.8" y="1130.5" width="142.4" height="39.0" fill="#ffffff"/>
+<text x="1180.0" y="1132.5" font-size="14" fill="#1e1e1e" text-anchor="middle"><tspan x="1180.0" dy="13.3">seed rate cache,</tspan><tspan x="1180.0" dy="17.5">OTP hashes</tspan></text>
+<rect x="40" y="1610" width="1260" height="180" rx="14" fill="#f8f9fa" stroke="#495057" stroke-width="2" stroke-dasharray="10 6"/>
+<text x="56.0" y="1750.0" font-size="18" fill="#495057" text-anchor="start"><tspan x="56.0" dy="17.1" font-weight="bold">External providers (test / sandbox mode)</tspan></text>
+<rect x="70" y="1660" width="228" height="74" rx="10" fill="#e9ecef" stroke="#495057" stroke-width="2"/>
+<text x="184.0" y="1687.6" font-size="15" fill="#1e1e1e" text-anchor="middle"><tspan x="184.0" dy="14.2" font-weight="bold">SMTP / MailHog</tspan></text>
+<rect x="308" y="1660" width="704" height="74" rx="10" fill="#e9ecef" stroke="#495057" stroke-width="2"/>
+<text x="660.0" y="1678.2" font-size="15" fill="#1e1e1e" text-anchor="middle"><tspan x="660.0" dy="14.2" font-weight="bold">PSP / Paystack</tspan><tspan x="660.0" dy="18.8">cards, transfers, settlement reports</tspan></text>
+<rect x="1022" y="1660" width="228" height="74" rx="10" fill="#e9ecef" stroke="#495057" stroke-width="2"/>
+<text x="1136.0" y="1687.6" font-size="15" fill="#1e1e1e" text-anchor="middle"><tspan x="1136.0" dy="14.2" font-weight="bold">ExchangeRate-API</tspan></text>
+<polyline points="184.0,1510 184.0,1660" fill="none" stroke="#1e1e1e" stroke-width="2" marker-end="url(#head)"/>
+<rect x="154.8" y="1574.2" width="58.4" height="21.5" fill="#ffffff"/>
+<text x="184.0" y="1576.2" font-size="14" fill="#1e1e1e" text-anchor="middle"><tspan x="184.0" dy="13.3">emails</tspan></text>
+<polyline points="422.0,1510 422.0,1660" fill="none" stroke="#1e1e1e" stroke-width="2" marker-end="url(#head)"/>
+<rect x="350.8" y="1565.5" width="142.4" height="39.0" fill="#ffffff"/>
+<text x="422.0" y="1567.5" font-size="14" fill="#1e1e1e" text-anchor="middle"><tspan x="422.0" dy="13.3">auth · capture ·</tspan><tspan x="422.0" dy="17.5">transfer (keyed)</tspan></text>
+<polyline points="660.0,1510 660.0,1660" fill="none" stroke="#1e1e1e" stroke-width="2" marker-end="url(#head)"/>
+<rect x="609.8" y="1574.2" width="100.4" height="21.5" fill="#ffffff"/>
+<text x="660.0" y="1576.2" font-size="14" fill="#1e1e1e" text-anchor="middle"><tspan x="660.0" dy="13.3">query state</tspan></text>
+<polyline points="898.0,1510 898.0,1660" fill="none" stroke="#1e1e1e" stroke-width="2" marker-end="url(#head)"/>
+<rect x="847.8" y="1574.2" width="100.4" height="21.5" fill="#ffffff"/>
+<text x="898.0" y="1576.2" font-size="14" fill="#1e1e1e" text-anchor="middle"><tspan x="898.0" dy="13.3">settlements</tspan></text>
+<polyline points="1136.0,1510 1136.0,1660" fill="none" stroke="#1e1e1e" stroke-width="2" marker-end="url(#head)"/>
+<rect x="1069.0" y="1574.2" width="134.0" height="21.5" fill="#ffffff"/>
+<text x="1136.0" y="1576.2" font-size="14" fill="#1e1e1e" text-anchor="middle"><tspan x="1136.0" dy="13.3">poll (budgeted)</tspan></text>
+<polyline points="800,1734 800,1830 1370,1830 1370,542 1270,542" fill="none" stroke="#c92a2a" stroke-width="2" stroke-dasharray="8 6" marker-end="url(#head-red)"/>
+<rect x="1282.0" y="1130.5" width="176.0" height="39.0" fill="#ffffff"/>
+<text x="1370.0" y="1132.5" font-size="14" fill="#c92a2a" text-anchor="middle"><tspan x="1370.0" dy="13.3">signed webhook</tspan><tspan x="1370.0" dy="17.5">(a hint, not a fact)</tspan></text>
+<text x="40.0" y="1860.0" font-size="14" fill="#495057" text-anchor="start"></text></svg>
